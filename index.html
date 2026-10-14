@@ -98,6 +98,15 @@
   .kpi .label { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; }
   .kpi .value { font-family: var(--serif); font-size: 22px; font-weight: 600; line-height: 1.2; }
   .kpi .note { font-size: 11px; color: var(--ink-3); }
+  /* Top modules today: a wide tile with its own clickable rows */
+  .kpi-wide { grid-column: span 2; cursor: default; }
+  .mod-row { display: grid; grid-template-columns: minmax(0, 1fr) 48px 26px; gap: 6px; align-items: center; width: 100%; background: none; border: 0; padding: 2px 0; color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
+  .mod-row:hover .mod-name, .mod-row.active .mod-name { text-decoration: underline; color: var(--accent); }
+  .mod-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mod-bar { height: 6px; background: var(--surface-alt); border-radius: 3px; overflow: hidden; }
+  .mod-bar i { display: block; height: 100%; background: var(--accent); }
+  .mod-row b { text-align: right; }
+  .kpi-link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
   .kpi.crit .value { color: var(--critical); }
   .kpi.warn .value { color: var(--warning); }
   .kpi .caret { float: right; color: var(--ink-3); font-size: 10px; transition: transform .15s; }
@@ -387,7 +396,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.17</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.18</footer>
     </main>
   </section>
 </div>
@@ -1602,8 +1611,90 @@
         (t.filter ? " data-drill='" + t.filter + "' title='Show the list'" : "") +
         (t.flashBase != null ? " data-flash-base='" + Math.floor(t.flashBase) + "'" : "") + ">" +
         "<div class='label'>" + t.label + (t.filter ? "<span class='caret'>▼</span>" : "") + "</div><div class='value'>" + t.value + "</div><div class='note'>" + t.note + "</div></button>";
-    }).join("");
+    }).join("") + moduleTileHtml();
+    loadTickets(false);
     applyFlash(e);
+  }
+
+  // ---------------- today's tickets by Module/Area (Zendesk, via the "tickets" function) ----------------
+  // Top 5 modules tile in the KPI grid; each opens a ticket list with the call (recording, RingSense)
+  // for phone tickets. Module = the product's Module field (non-CORE products are prefixed);
+  // the list shows each ticket's Area. Tickets with no module set yet are counted separately.
+  var tix = { rows: null, at: 0, err: null, loading: false };
+  var drillModule = "";   // module shown when drill === "tickets" ("" = every ticket today)
+  var UNCLASSIFIED = "No module yet";
+  async function loadTickets(force) {
+    if (tix.loading || !session || !CONFIG.SUPABASE_URL) return;
+    if (!force && Date.now() - tix.at < 3 * 60000) return;
+    tix.loading = true;
+    try {
+      if (tokenNearExpiry()) await refreshToken();
+      var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/tickets", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      var f = j.fields || [];
+      tix.rows = (j.tickets || []).map(function (row) { var o = {}; f.forEach(function (k, i) { o[k] = row[i]; }); return o; });
+      tix.err = null;
+    } catch (x) { tix.err = x.message; }
+    finally { tix.at = Date.now(); tix.loading = false; if (data.fetchedAt) render(); }
+  }
+  function moduleOf(t) { return t.module ? (t.product && t.product !== "CORE" ? t.product + " · " + t.module : t.module) : UNCLASSIFIED; }
+  function moduleCounts() { var c = {}; (tix.rows || []).forEach(function (t) { var m = moduleOf(t); c[m] = (c[m] || 0) + 1; }); return c; }
+  function moduleTileHtml() {
+    var head = "<div class='label'>Top modules today</div>";
+    if (!tix.rows) return "<div class='kpi kpi-wide static'>" + head + "<div class='note'>" + (tix.err ? (/ZENDESK_TOKEN/.test(tix.err) ? "Zendesk connection not set up yet" : "Couldn't load tickets: " + esc(tix.err)) : "Loading today's tickets…") + "</div></div>";
+    var c = moduleCounts();
+    var top = Object.keys(c).filter(function (m) { return m !== UNCLASSIFIED; }).sort(function (a, b) { return c[b] - c[a] || a.localeCompare(b); }).slice(0, 5);
+    var max = top.length ? c[top[0]] : 1;
+    var list = top.map(function (m) {
+      var on = drill === "tickets" && drillModule === m;
+      return "<button class='mod-row" + (on ? " active" : "") + "' data-tickets='" + esc(m) + "' title='Show these tickets'><span class='mod-name'>" + esc(m) + "</span>" +
+        "<span class='mod-bar'><i style='width:" + Math.max(4, Math.round(c[m] / max * 100)) + "%'></i></span><b>" + c[m] + "</b></button>";
+    }).join("") || "<div class='note'>No tickets with a module yet today.</div>";
+    return "<div class='kpi kpi-wide static'>" + head + list +
+      "<div class='note' style='margin-top:3px'><button class='kpi-link' data-tickets=''>" + tix.rows.length + " tickets today</button>" +
+      (c[UNCLASSIFIED] ? " · <button class='kpi-link' data-tickets='" + UNCLASSIFIED + "'>" + c[UNCLASSIFIED] + " no module yet</button>" : "") + "</div></div>";
+  }
+  var tixRendered = "";
+  function renderTicketDrill(box, force) {
+    var sig = drillModule + "|" + tix.at + "|" + abandons.at + "|" + rsLegsVer;
+    if (!force && box.getAttribute("data-kind") === "tickets" && (tixRendered === sig || [].some.call(box.querySelectorAll("audio"), function (a) { return !a.paused; }))) return;
+    tixRendered = sig; box.setAttribute("data-kind", "tickets");
+    var rows = (tix.rows || []).filter(function (t) { return drillModule === "" || moduleOf(t) === drillModule; });
+    var calls = {};   // UII -> call report row
+    (abandons.all || []).forEach(function (r) { var u = String(r.UII || "").replace(/^'/, ""); if (u && !calls[u]) calls[u] = r; });
+    var areas = {};
+    rows.forEach(function (t) { var a = drillModule === "" ? moduleOf(t) : (t.area || "No area"); areas[a] = (areas[a] || 0) + 1; });
+    var areaLine = Object.keys(areas).sort(function (a, b) { return areas[b] - areas[a]; }).slice(0, 8).map(function (a) { return esc(a) + " " + areas[a]; }).join(" · ");
+    var CH = { phone: "Phone", email: "Email", web: "Web form", api: "API", side_conversation: "Side conv." };
+    var title = drillModule === "" ? "Tickets today" : "Tickets today: " + esc(drillModule);
+    var sids = [];
+    box.innerHTML = "<div class='section-title'>" + title + " <span class='sub'>" + rows.length + " ticket" + (rows.length === 1 ? "" : "s") + (areaLine ? " · " + areaLine : "") + "</span>" +
+      "<span class='sub'>" + (tix.err ? esc(tix.err) : (tix.at ? "as of " + fmtClock(tix.at) : "")) + "</span>" +
+      "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Ticket</th><th>" + (drillModule === "" ? "Module / Area" : "Area") + "</th><th>Channel</th><th>Assignee</th><th>Status</th><th>Recording</th><th>RingSense</th></tr></thead><tbody>" +
+      (rows.map(function (t) {
+        var call = t.uii ? calls[t.uii] : null, rec = "<span class='muted'>–</span>", rs = "<span class='muted'>–</span>";
+        if (call) {
+          var uii = t.uii;
+          rec = recordings[uii] ? "<audio controls src='" + recordings[uii] + "'></audio>"
+            : (call.recording_url ? "<button class='btn' data-play='" + esc(uii) + "' data-url='" + esc(call.recording_url) + "'>▶ Play</button>" : "<span class='muted'>No recording</span>");
+          var legs = transferLegs(call), leg = legs && t.agentId ? legs.filter(function (l) { return String(l.agentId) === String(t.agentId); })[0] : null;
+          if (leg) rs = rsCell("", leg.rs);
+          else { var sid = rsSession(call); sids.push(sid); rs = "<span data-rs='" + esc(sid) + "'>" + rsCell(sid) + "</span>"; }
+        } else if (t.uii) rec = "<span class='muted' title='This call is not in RingCX&#39;s call report yet (it trails by a few minutes)'>…</span>";
+        var area = drillModule === "" ? moduleOf(t) + (t.area ? " / " + t.area : "") : (t.area || "");
+        return "<tr><td>" + esc(fmtClock(Date.parse(t.created)).replace(" PT", "")) + "</td>" +
+          "<td class='wrap'><a href='https://bqe.zendesk.com/agent/tickets/" + t.id + "' target='_blank' rel='noopener'>#" + t.id + "</a> " + esc(t.subject) + "</td>" +
+          "<td>" + (area ? esc(area) : "<span class='muted'>–</span>") + "</td>" +
+          "<td>" + esc(CH[t.channel] || t.channel || "") + "</td>" +
+          "<td>" + (t.assignee ? esc(t.assignee) : "<span class='muted'>Unassigned</span>") + "</td>" +
+          "<td>" + esc(t.status || "") + "</td>" +
+          "<td data-rec='" + esc(t.uii || "") + "'>" + rec + "</td><td>" + rs + "</td></tr>";
+      }).join("") || "<tr><td colspan='8' class='muted'>" + (tix.rows ? "No tickets." : "Loading today's tickets…") + "</td></tr>") +
+      "</tbody></table></div>" +
+      "<div class='tiny muted' style='margin-top:6px'>Zendesk tickets created since midnight Pacific, newest first (refreshed every few minutes). Module comes from the product's Module field (non-CORE products are named first) and Area from its Area field; new tickets often have no module until an agent sets one. Phone tickets are matched to their call through the call ID the RingCX integration notes on the ticket, so the recording and RingSense page show here. Not narrowed by the queue filter.</div>";
+    if (sids.length) loadRsLinks(sids);
   }
 
   // ---------------- KPI drill-down lists ----------------
@@ -2130,6 +2221,7 @@
     if (!drill) { box.hidden = true; box.removeAttribute("data-kind"); return; }
     if (drill === "longcalls") { box.hidden = false; renderLongDrill(box, e, agents); return; }
     if (drill === "statuslog") { box.hidden = false; renderStatusLog(box); return; }
+    if (drill === "tickets") { box.hidden = false; loadAbandons(false); renderTicketDrill(box); return; }
     if (drill === "agentcalls") { box.hidden = false; loadAbandons(false); renderCallDrill(box, "agentcalls:" + drillAgent); return; }
     if (drill === "shortcalls" || drill === "answered") { box.hidden = false; loadAbandons(false); renderCallDrill(box, drill); return; }
     box.removeAttribute("data-kind");
@@ -2456,6 +2548,17 @@
     // Left Avail / Changes numbers in the watch: that agent's status changes today, with times.
     var sl = ev.target.closest("[data-status-log]");
     if (sl) { ev.preventDefault(); drillLog = { id: sl.getAttribute("data-status-log"), name: sl.getAttribute("data-status-name"), mode: sl.getAttribute("data-status-mode") || "changes" }; drill = "statuslog"; render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    // Top modules tile: that module's tickets today ("" = all tickets); click again to close.
+    var tk = ev.target.closest("[data-tickets]");
+    if (tk) {
+      ev.preventDefault();
+      var mod = tk.getAttribute("data-tickets");
+      if (drill === "tickets" && drillModule === mod) drill = null;
+      else { drill = "tickets"; drillModule = mod; tixRendered = ""; }
+      loadAbandons(false); render();
+      if (drill) $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     // Calls number in the Agents table: that agent's calls today, with recordings.
     var ac = ev.target.closest("[data-agent-calls]");
     if (ac) { ev.preventDefault(); drillAgent = ac.getAttribute("data-agent-calls"); drill = "agentcalls"; loadAbandons(true); render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
