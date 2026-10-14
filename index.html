@@ -317,7 +317,7 @@
           <div><div class="board-h low">Lowest 5</div><div id="boardLow"></div></div>
         </div>
         <div id="boardAll" hidden><div class="board-h">Everyone, ranked</div><div id="boardAllList"></div></div>
-        <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10, minus 5 if lunch ran 5+ min over the hour (minus 10 if 15+ min over; timed from when they actually went to lunch). Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
+        <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10, minus 5 if lunch ran 5+ min over the hour (minus 10 if 15+ min over; timed from when they actually went to lunch), minus 5 for a confirmed late first login of 5+ min (minus 10 if 15+; see Logins today, unconfirmed times don't count). Calls per hour uses RingCX's logged-in total for the whole day. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
         <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Working, Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
       </div>
 
@@ -329,7 +329,7 @@
             <tbody id="loginBody"></tbody>
           </table>
         </div>
-        <div class="tiny muted" style="margin-top:6px">First login and session times come from RingCX (Pacific). Scheduled start is the Support Roster "Shift Start". Late = first login more than <span data-cfg="LOGIN_GRACE_MIN"></span> min after the scheduled start (red after <span data-cfg="LOGIN_LATE_CRIT_MIN"></span>). Sessions that started and ended before this browser began watching today can't be seen, so "First login" is the earliest one this browser knows about.</div>
+        <div class="tiny muted" style="margin-top:6px">First login and session times come from RingCX (Pacific). Scheduled start is the Support Roster "Shift Start". Late = first login more than <span data-cfg="LOGIN_GRACE_MIN"></span> min after the scheduled start (red after <span data-cfg="LOGIN_LATE_CRIT_MIN"></span>). How sure each first login is: <b>confirmed</b> = RingCX's logged-in total for today matches the sessions this page saw. <b>on a call by</b> = RingCX shows an earlier login this page didn't see, so the time shown is their earliest queue call (they were logged in at least by then; lateness is "at most"). <b>earlier session not seen</b> = same, but with no earlier call to pin it down, so lateness can't be judged. Only confirmed times can be marked red. "2+" logins = RingCX counted more logged-in time than the sessions this page saw.</div>
       </div>
 
       <details class="panel">
@@ -365,7 +365,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 4.6</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 4.8</footer>
     </main>
   </section>
 </div>
@@ -407,14 +407,17 @@
     LUNCH_OVER_WARN_MIN: 5,                          // lunch longer than LUNCH_MAX_MIN by this = yellow (Fred)
     LUNCH_OVER_CRIT_MIN: 15,                         // ...by this = red
     LUNCH_PENALTY_WARN: 5,                           // Performance score points lost for a yellow lunch overrun
-    LUNCH_PENALTY_CRIT: 10,                          // ...for a red one
+    LUNCH_PENALTY_CRIT: 10,
+    LATE_PENALTY_WARN: 5,                            // Performance points lost for a confirmed late first login (5+ min)
+    LATE_PENALTY_CRIT: 10,                           // ...15+ min                         // ...for a red one
     REVIEW_SNOOZE_MIN: 60,                          // a supervisor review hides a watch entry this long (Fred)
     // People whose hours don't follow daylight saving: roster times + 1h while Pacific is on PDT (Fred).
     NO_DST: ["Andrea Lopez"],
     SHIFT_HOURS: 9,                                 // roster has no shift end: assume 8h work + 1h lunch
     OFFLINE_MIN: 5,                                  // logged out this long during the shift = on the watch
     OFFLINE_CRIT_MIN: 30,                            // ...red after this
-    LOGIN_GRACE_MIN: 5,                             // first login this many min after scheduled start = late (yellow)
+    HIDDEN_SESSION_SEC: 90,                          // RingCX day total exceeds seen sessions by this = an unseen earlier login
+    LOGIN_GRACE_MIN: 5,                            // first login this many min after scheduled start = late (yellow)
     LOGIN_LATE_CRIT_MIN: 15,                         // ...red after this; also "not logged in yet" after this
     LUNCH_MAX_MIN: 60,                              // lunch longer than this shows red (RingCX's own max lunch is 60)
     LUNCH_LEEWAY_MIN: 30,                            // "Due now" for this long after the scheduled time, then "Overdue"
@@ -820,8 +823,10 @@
     var k = normName(name);
     return !!isSup || !!(supNames && supNames[k]) || CONFIG.TREAT_AS_SUPERVISOR.some(function (x) { return normName(x) === k; });
   }
+  var loginByName = {};   // normName -> { late (min), conf } for Performance
   function renderLogins(e) {
     var body = $("loginBody"); if (!body) return;
+    loginByName = {};
     loadSupervisors();
     var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5);
     var sched = {}, out = {};
@@ -840,10 +845,23 @@
       lastSeen = Math.max(lastSeen, h.lastSeen || 0);   // last refresh that still had them logged in
       var live = liveById[id], s = sched[normName(h.name)];
       var start = s && s.shift !== null && s.days.indexOf(n.day) >= 0 ? s.shift : null;
+      // How sure are we about the first login? (plan steps 1, 2, 5)
+      //  confirmed : RingCX's day total matches the sessions this page saw, so the earliest one is the first.
+      //  call      : there were earlier sessions we never saw, but they were on a queue call at X, so logged in by X.
+      //  unknown   : earlier sessions we never saw and no earlier call: first login is before the earliest session we know.
+      var hidden = (h.dayLogin || 0) - total > CONFIG.HIDDEN_SESSION_SEC;
+      var c = callIndex()[lastFirst(h.name)], callFirst = c ? c.first : null;
+      var conf = "confirmed";
+      if (hidden) {
+        if (callFirst !== null && (first === null || callFirst < first)) { first = callFirst; conf = "call"; }
+        else conf = "unknown";
+      }
       var late = start !== null && first !== null ? first - start : null;
       seenNames[normName(h.name)] = 1;
-      rows.push({ name: h.name, sup: h.sup, start: start, noDst: !!(s && s.noDst), first: first, late: late, logins: keys.length,
-        total: live ? Math.max(total, live.loggedInDuration || 0) : total, live: live, lastSeen: lastSeen });
+      loginByName[normName(h.name)] = { late: late, conf: conf };
+      rows.push({ name: h.name, sup: h.sup, start: start, noDst: !!(s && s.noDst), first: first, late: late, conf: conf,
+        logins: keys.length, moreLogins: hidden,
+        total: Math.max(total, h.dayLogin || 0, live ? live.loggedInDuration || 0 : 0), live: live, lastSeen: lastSeen });
     });
     // Scheduled today, not on PTO, past start + grace, never seen logged in.
     (pto.schedule || []).forEach(function (s) {
@@ -855,13 +873,24 @@
       rows.push({ name: s.name, start: s.shift, first: null, late: nowMin - s.shift, logins: 0, total: 0, missing: true });
     });
     rows.sort(function (x, y) { return (y.missing ? 1 : 0) - (x.missing ? 1 : 0) || (y.late || -999) - (x.late || -999) || x.name.localeCompare(y.name); });
+    // Only a CONFIRMED first login can be red. "On a call by" is an upper bound (at most that late),
+    // and an unseen earlier session means we can't say they were late at all.
     function lateCell(r) {
       if (r.late === null) return "<span class='muted'>–</span>";
       if (r.late <= CONFIG.LOGIN_GRACE_MIN) return "<span class='muted'>on time</span>";
+      if (r.conf === "unknown") return "<span class='muted' title='They had an earlier session this page never saw, so their real first login was earlier than this.'>can't tell</span>";
+      if (r.conf === "call") return "<span class='warmn' title='At most this late: they were already on a call by then.'>≤ " + fmtShort(r.late * 60) + "</span>";
       return "<span class='" + (r.late >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "'>" + fmtShort(r.late * 60) + "</span>";
     }
+    function firstCell(r) {
+      if (r.first === null) return "<span class='muted'>–</span>";
+      if (r.conf === "call") return "≤ " + clockOf(r.first) + " <span class='chip info' title='RingCX shows an earlier session this page did not see. Their earliest queue call today was at this time, so they were logged in by then.'>on a call by</span>";
+      if (r.conf === "unknown") return "before " + clockOf(r.first) + " <span class='chip info' title='RingCX shows an earlier session this page did not see, and there was no earlier call to pin it down.'>earlier session not seen</span>";
+      return clockOf(r.first) + " <span class='muted tiny' title='RingCX day total matches the sessions this page saw.'>confirmed</span>";
+    }
+    function isLate(r) { return r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN && r.conf !== "unknown"; }
     body.innerHTML = rows.map(function (r) {
-      var flag = r.missing || (r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN ? "flag-warn" : "");
+      var flag = r.missing || (r.conf === "confirmed" && r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (isLate(r) ? "flag-warn" : "");
       var pastEnd = r.live && r.start !== null && nowMin > r.start + CONFIG.SHIFT_HOURS * 60;
       var status = r.missing ? "<span class='chip crit'>Not logged in yet</span>"
         : (r.live ? "<span class='st st-green' style='font-weight:400'>Logged in</span>" +
@@ -869,13 +898,14 @@
           : "<span class='muted'>Logged out" + (r.lastSeen ? " · last seen " + fmtClock(r.lastSeen) : "") + "</span>");
       return "<tr class='" + flag + "'><td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td class='num'>" + (r.start !== null ? clockOf(r.start) + (r.noDst ? " <span class='chip info' title='Hours do not follow daylight saving; roster time +1h while Pacific is on daylight time'>no DST</span>" : "") : "<span class='muted'>–</span>") + "</td>" +
-        "<td class='num'>" + (r.first !== null ? clockOf(r.first) : "<span class='muted'>–</span>") + "</td>" +
+        "<td class='num'>" + firstCell(r) + "</td>" +
         "<td class='num'>" + lateCell(r) + "</td>" +
-        "<td class='num'>" + (r.logins > 1 ? "<span class='warmn'>" + r.logins + "</span>" : r.logins) + "</td>" +
+        "<td class='num'>" + (r.moreLogins ? "<span class='warmn' title='RingCX shows more logged-in time today than the sessions this page saw'>" + (r.logins + 1) + "+</span>"
+          : (r.logins > 1 ? "<span class='warmn'>" + r.logins + "</span>" : r.logins)) + "</td>" +
         "<td class='num'>" + (r.live ? count(r.total) : fmtDur(r.total)) + "</td>" +
         "<td>" + status + "</td></tr>";
     }).join("") || "<tr><td colspan='7' class='muted'>No logins seen yet today.</td></tr>";
-    var lateN = rows.filter(function (r) { return !r.missing && r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN; }).length;
+    var lateN = rows.filter(function (r) { return !r.missing && isLate(r); }).length;
     var missN = rows.filter(function (r) { return r.missing; }).length;
     $("loginSub").textContent = rows.length + " people" + (lateN ? " · " + lateN + " late" : "") + (missN ? " · " + missN + " not logged in" : "") + " · tracked by this browser since " + fmtClock(hist.since);
   }
@@ -1051,6 +1081,10 @@
       h.sessions = h.sessions || {};
       h.sessions[sk] = { login: a.loggedInDuration || a.loginTime || 0, rna: a.rna || 0, seen: fetchedAt };
       h.agentId = String(a.agentId);
+      // RingCX's loginTime is the agent's logged-in total for the WHOLE day (all sessions);
+      // loggedInDuration is only the current session. A gap between them = sessions this page never saw.
+      h.dayLogin = Math.max(h.dayLogin || 0, a.loginTime || 0);
+      h.curSession = a.loggedInDuration || 0;
       h.name = fullName(a); h.sup = isSupervisor(a) || treatedAsSupervisor(a);
       if (b === "LUNCH") h.lunchDay = hist.day;   // seen at lunch today (Lunch panel: "done")
       h.label = label; h.base = b; h.start = start; h.calls = a.callsHandled || 0; h.rna = a.rna || 0;
@@ -1216,9 +1250,9 @@
     renderWatch(e, watch, snoozed);
     renderAgents(e, agents);
     renderSups(e, sups);
-    renderBoard();
     renderLunch(e);
-    renderLogins(e);
+    renderLogins(e);   // before renderBoard: Performance uses each agent's login lateness
+    renderBoard();
     showViewer();
     // Today's call report feeds the leaderboard (and the Abandoned list): refresh every 5 minutes.
     if (!abandons.loading && Date.now() - abandons.at > 5 * 60 * 1000) loadAbandons(true);
@@ -1407,8 +1441,11 @@
       var map = {};
       (abandons.all || []).forEach(function (r) {
         if (r.source_type !== "ACD-INBOUND" || !r.connected_name) return;
-        var c = map[r.connected_name] || (map[r.connected_name] = { uiis: {}, talk: 0 });
+        var c = map[r.connected_name] || (map[r.connected_name] = { uiis: {}, talk: 0, first: null });
         if (!c.uiis[r.UII]) { c.uiis[r.UII] = 1; c.talk += +r.connected_duration || 0; }
+        // Earliest moment they were on a queue call today (Pacific minutes): proof they were logged in by then.
+        var m = /(\d+):(\d+):\d+$/.exec(String(r.connected_dts || r.call_start_dts || ""));
+        if (m) { var pt = (+m[1] - 3) * 60 + +m[2]; if (pt >= 0 && (c.first === null || pt < c.first)) c.first = pt; }
       });
       callIdx = { at: abandons.at, map: map };
     }
@@ -1453,6 +1490,8 @@
       // Same totals the Agents table shows for anyone logged in right now.
       var live = data.agents.filter(function (x) { return fullName(x) === n; })[0];
       if (live) { var ds = dayStats(live); answered = ds.calls; c = { uiis: c.uiis, talk: ds.talk }; p.rna = ds.rna; p.login = ds.login; }
+      // Logged-in time: RingCX's own total for the whole day (every session), when it's higher than what this page saw.
+      p.login = Math.max(p.login, (hist.agents[p.id] || {}).dayLogin || 0);
       var eligible = answered > 0 || (p.onDuty !== false && !p.sup && p.login >= CONFIG.BOARD_MIN_LOGIN_SEC);
       if (!eligible || p.login < 60) return;
       var perHr = answered / (p.login / 3600);
@@ -1460,9 +1499,13 @@
       // Lunch overrun today (timed from when they actually went): -5 at 5+ min over, -10 at 15+.
       var L = lunchFor(hist.agents[p.id], schedFor(n), !!live), ll = lunchLevel(L);
       var lunchPenalty = ll === "crit" ? CONFIG.LUNCH_PENALTY_CRIT : (ll === "warn" ? CONFIG.LUNCH_PENALTY_WARN : 0);
-      var score = perHr * 10 - p.rna * 5 + readyShare * 10 - lunchPenalty;
+      // Late first login (Logins today): -5 at 5+ min, -10 at 15+. Only CONFIRMED times count;
+      // "on a call by" / "earlier session not seen" can't be proven late, so they cost nothing.
+      var lg = loginByName[normName(n)] || {}, lateMin = lg.conf === "confirmed" && lg.late !== null && lg.late > CONFIG.LOGIN_GRACE_MIN ? lg.late : 0;
+      var latePenalty = lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? CONFIG.LATE_PENALTY_CRIT : (lateMin > 0 ? CONFIG.LATE_PENALTY_WARN : 0);
+      var score = perHr * 10 - p.rna * 5 + readyShare * 10 - lunchPenalty - latePenalty;
       out.push({ name: n, sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: p.seen >= 1800 ? readyShare : null, login: p.login, score: score,
-        lunchOver: L && L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(L.over) : 0, lunchLvl: ll });
+        lunchOver: L && L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(L.over) : 0, lunchLvl: ll, lateMin: lateMin, lateConf: lg.conf || null });
     });
     return out.sort(function (a, b) { return b.score - a.score; });
   }
@@ -1472,7 +1515,7 @@
     var rows = boardRows();
     var top = rows.slice(0, 5), low = rows.length > 5 ? rows.slice(-Math.min(5, rows.length - 5)).reverse() : [];
     function table(list, startRank, dir) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Lunch</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Lunch</th><th class='num'>Start</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr><td class='num'>" + (dir > 0 ? startRank + i : rows.length - i) + "</td>" +
             "<td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
@@ -1483,8 +1526,10 @@
             "<td class='num'>" + (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0") + "</td>" +
             "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
             "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
+            "<td class='num'>" + (r.lateMin ? "<span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "' title='First login " + Math.round(r.lateMin) + " min after scheduled start (confirmed)'>" + fmtShort(r.lateMin * 60) + " late</span>"
+              : "<span class='muted' title='" + (r.lateConf && r.lateConf !== "confirmed" ? "First login not confirmed (see Logins today), so not counted" : "On time, or no schedule") + "'>" + (r.lateConf && r.lateConf !== "confirmed" ? "?" : "ok") + "</span>") + "</td>" +
             "<td class='num'>" + fmtDur(r.login) + "</td></tr>";
-        }).join("") || "<tr><td colspan='10' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
+        }).join("") || "<tr><td colspan='11' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
         "</tbody></table></div>";
     }
     // "Show all" swaps Top 5 / Lowest 5 for one full ranked list (choice remembered in this browser).
