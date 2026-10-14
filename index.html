@@ -321,7 +321,7 @@
               <li>Plus up to 10 for the share of time spent Available or Engaged. Until 30 minutes of someone's time has been observed, this part counts as half.</li>
             </ul>
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
-          <li><b>Plain "WORKING"</b> (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets a "Blocks calls" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they also appear in Where to Focus, which turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
+          <li><b>Plain "WORKING"</b> (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets a "Blocks calls" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
           <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
           <li>RNA, calls and talk time are RingCX's own counters for the agent's current login session. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.3</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.4</footer>
     </main>
   </section>
 </div>
@@ -696,7 +696,14 @@
       else if (st > CONFIG.NOTREADY_WARN_SEC) add("warn", "Not taking calls " + fmtShort(st), 100 + st / 60);
     }
     if (a.pendingDisposition && (a.pendingDispositionTime || 0) + e > CONFIG.WRAP_WARN_SEC) add("warn", "Wrap-up " + fmtDur((a.pendingDispositionTime || 0) + e), 80);
-    return reasons.length >= CONFIG.MIN_SIGNALS ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
+    // Plain WORKING (system state, blocks calls) puts someone on the watch on its own, no second signal needed.
+    var stuck = false;
+    if (isStuck(a) && (a.stateTime || 0) + e >= CONFIG.STUCK_WARN_SEC) {
+      var stt = (a.stateTime || 0) + e;
+      stuck = true;
+      add(stt >= CONFIG.STUCK_CRIT_SEC ? "crit" : "warn", "In plain WORKING " + fmtShort(stt) + ": blocks calls, ask them to update status", 400 + stt / 60);
+    }
+    return (stuck || reasons.length >= CONFIG.MIN_SIGNALS) ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
   }
 
   // ---------------- queue hours ----------------
@@ -837,11 +844,6 @@
         items.push({ lvl: crit ? "crit" : "warn", score: crit ? 900 : 500, html: "<b>" + esc(q.gateName) + "</b>: open, nobody available (" + q.staffed + " staffed)" });
       }
       if (open && !q.staffed) items.push({ lvl: "crit", score: 950, html: "<b>" + esc(q.gateName) + "</b>: open with no agents staffed" });
-    });
-    data.agents.filter(function (a) { return inAgentSection(a) && isStuck(a) && (a.stateTime || 0) + e >= CONFIG.STUCK_WARN_SEC; }).forEach(function (a) {
-      var t = (a.stateTime || 0) + e, crit = t >= CONFIG.STUCK_CRIT_SEC;
-      items.push({ lvl: crit ? "crit" : "warn", score: (crit ? 850 : 600) + t / 60,
-        html: "<b>" + esc(fullName(a)) + "</b>: in plain WORKING for " + count(a.stateTime || 0) + " (blocks calls, likely after a disconnect). Ask them to update their status." });
     });
     if (watch.length) {
       var crit = watch.filter(function (x) { return x.w.lvl === "crit"; }).length;
