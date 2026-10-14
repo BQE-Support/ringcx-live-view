@@ -1,0 +1,13 @@
+{
+  "name": "RingCX Live View",
+  "short_name": "RingCX Live",
+  "description": "Live RingCX queue and agent status for BQE Support supervisors",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F5F6F9",
+  "theme_color": "#3454D1",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RingCX Live View</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#3454D1">
+<style>
+  :root {
+    --bg: #F5F6F9; --surface: #FFFFFF; --surface-alt: #ECEFF5; --border: #DDE1EA;
+    --ink: #16213E; --ink-2: #47517A; --ink-3: #8890AC;
+    --accent: #3454D1; --accent-soft: #E7EBFB;
+    --good: #1E8A5F; --good-soft: #E4F5EC;
+    --warning: #B8801E; --warning-soft: #FBF1DE;
+    --critical: #C23B3B; --critical-soft: #FBE7E4;
+    --seg-main: #3454D1; --seg-premium: #1E8A8A; --seg-low: #7A4FA0;
+    --shadow: 0 1px 2px rgba(22,33,62,0.06), 0 6px 16px rgba(22,33,62,0.06);
+    --serif: Georgia, "Iowan Old Style", "Source Serif 4", "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    /* RingCX agent-state colors (match the RingCX agent app's state menu) */
+    --rc-green: #2EA043; --rc-grey: #9AA0A6; --rc-yellow: #E5A50A; --rc-red: #D93F3F;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0C1220; --surface: #131A2B; --surface-alt: #1B2438; --border: #29334A;
+      --ink: #E9ECF6; --ink-2: #B0B7D1; --ink-3: #7C86A3;
+      --accent: #7C93F5; --accent-soft: #1E2748;
+      --good: #4FC090; --good-soft: #123024;
+      --warning: #E3AC49; --warning-soft: #34240A;
+      --critical: #E2685A; --critical-soft: #38201B;
+      --seg-main: #7C93F5; --seg-premium: #4FBEBE; --seg-low: #B98CDB;
+      --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 6px 20px rgba(0,0,0,0.3);
+      --rc-green: #4CC764; --rc-grey: #8B93A1; --rc-yellow: #F2C14E; --rc-red: #EF6B6B;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0C1220; --surface: #131A2B; --surface-alt: #1B2438; --border: #29334A;
+    --ink: #E9ECF6; --ink-2: #B0B7D1; --ink-3: #7C86A3;
+    --accent: #7C93F5; --accent-soft: #1E2748;
+    --good: #4FC090; --good-soft: #123024;
+    --warning: #E3AC49; --warning-soft: #34240A;
+    --critical: #E2685A; --critical-soft: #38201B;
+    --seg-main: #7C93F5; --seg-premium: #4FBEBE; --seg-low: #B98CDB;
+    --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 6px 20px rgba(0,0,0,0.3);
+    --rc-green: #4CC764; --rc-grey: #8B93A1; --rc-yellow: #F2C14E; --rc-red: #EF6B6B;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; }
+  .wrap { max-width: 1700px; margin: 0 auto; padding: 12px 16px 24px; }
+  a { color: var(--accent); }
+  button { font-family: var(--sans); }
+
+  /* Layout: queues anchored top-left (sticky), everything else to the right */
+  .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 12px; align-items: start; }
+  .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+  .content { min-width: 0; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .side { position: static; max-height: none; }
+  }
+
+  .masthead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: 22px; margin: 2px 0 0; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .snapshot-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--ink-2); font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+  .dot.live { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent); }
+  .dot.err { background: var(--critical); }
+  .dot.paused { background: var(--warning); }
+  .btn { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-size: 14px; padding: 9px 18px; }
+  select.btn { padding: 4px 6px; }
+
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px; margin-bottom: 12px; }
+  .section-title { font-family: var(--serif); font-size: 16px; font-weight: 600; margin: 0 0 8px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .section-title .sub { font-family: var(--sans); font-size: 12px; font-weight: 400; color: var(--ink-3); }
+
+  /* Where to Focus */
+  .alert-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .alert { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 8px; font-size: 13px; border: 1px solid transparent; }
+  .alert.crit { background: var(--critical-soft); color: var(--critical); border-color: color-mix(in srgb, var(--critical) 35%, transparent); font-weight: 600; }
+  .alert.warn { background: var(--warning-soft); color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, transparent); }
+  .alert.ok { background: var(--good-soft); color: var(--good); }
+  a.alert { text-decoration: none; cursor: pointer; }
+
+  /* KPI strip */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; text-align: left; cursor: pointer; appearance: none; color: var(--ink); }
+  .kpi.static { cursor: default; }
+  .kpi.active { border-color: var(--accent); background: var(--accent-soft); }
+  .kpi .label { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; }
+  .kpi .value { font-family: var(--serif); font-size: 22px; font-weight: 600; line-height: 1.2; }
+  .kpi .note { font-size: 11px; color: var(--ink-3); }
+  .kpi.crit .value { color: var(--critical); }
+  .kpi.warn .value { color: var(--warning); }
+
+  /* Queue cards (left column) */
+  .queue { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; background: var(--surface); }
+  .queue.crit { border-color: var(--critical); background: var(--critical-soft); }
+  .queue.warn { border-color: color-mix(in srgb, var(--warning) 60%, transparent); background: var(--warning-soft); }
+  .queue.closed { opacity: .6; }
+  .q-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .q-name { font-weight: 600; }
+  .q-state { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; }
+  .q-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; }
+  .q-stat .n { font-family: var(--serif); font-size: 17px; font-weight: 600; }
+  .q-stat .l { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
+  .q-foot { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+
+  /* Tables */
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .pill { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .pill[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .search { border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 5px 10px; font-size: 12px; min-width: 160px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { position: sticky; top: 0; background: var(--surface-alt); color: var(--ink-2); text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px; white-space: nowrap; user-select: none; }
+  th[data-key] { cursor: pointer; }
+  th .arrow { opacity: .3; margin-left: 2px; }
+  th.sorted .arrow { opacity: 1; color: var(--accent); }
+  td { padding: 6px 8px; border-top: 1px solid var(--border); white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.wrap { white-space: normal; }
+  tr.me td { background: var(--accent-soft); }
+  tr.flag-crit td:first-child { box-shadow: inset 3px 0 0 var(--critical); }
+  tr.flag-warn td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
+
+  /* Agent state, shown like the RingCX state menu: colored dot + label */
+  .st { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; }
+  .st::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; }
+  .st-green { --c: var(--rc-green); }
+  .st-grey { --c: var(--rc-grey); }
+  .st-yellow { --c: var(--rc-yellow); }
+  .st-red { --c: var(--rc-red); }
+
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; margin: 1px 2px 1px 0; }
+  .chip.crit { background: var(--critical-soft); color: var(--critical); }
+  .chip.warn { background: var(--warning-soft); color: var(--warning); }
+  .chip.info { background: var(--surface-alt); color: var(--ink-2); }
+  .hot { color: var(--critical); font-weight: 700; }
+  .warmn { color: var(--warning); font-weight: 700; }
+  .muted { color: var(--ink-3); }
+  .tiny { font-size: 11px; }
+
+  .signin { max-width: 520px; margin: 12vh auto; text-align: center; }
+  .signin h1 { font-size: 28px; margin-bottom: 8px; }
+  .signin p { color: var(--ink-2); line-height: 1.5; }
+  .error-box { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: var(--critical-soft); color: var(--critical); text-align: left; font-size: 13px; }
+  details.panel summary { cursor: pointer; font-family: var(--serif); font-weight: 600; font-size: 15px; }
+  details.panel ul { color: var(--ink-2); line-height: 1.55; padding-left: 18px; }
+  footer { text-align: center; color: var(--ink-3); font-size: 11px; margin-top: 4px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Signed-out screen -->
+  <section id="signinView" class="signin" hidden>
+    <div class="eyebrow">RingCX · Supervisor</div>
+    <h1>RingCX Live View</h1>
+    <p>Live queue and agent status for BQE Support. Sign in with your RingCentral account.
+       This view never logs you in as an agent, so it won't interrupt calls in your agent window.</p>
+    <div id="signinError" class="error-box" hidden></div>
+    <p><button id="signinBtn" class="btn primary">Sign in with RingCentral</button></p>
+    <p id="configWarning" class="tiny muted" hidden></p>
+  </section>
+
+  <!-- Live view -->
+  <section id="liveView" class="layout" hidden>
+
+    <!-- Left: queues, anchored top-left -->
+    <aside class="side">
+      <div class="panel">
+        <div class="section-title">Queues <span class="sub">today</span></div>
+        <div id="queueList"></div>
+        <label class="tiny muted"><input type="checkbox" id="showClosed"> show closed/idle queues</label>
+      </div>
+    </aside>
+
+    <!-- Right: everything else -->
+    <main class="content">
+      <header class="masthead">
+        <div>
+          <div class="eyebrow">RingCX · Live · SUB-BQE Software</div>
+          <h1>Supervisor Live View</h1>
+        </div>
+        <div class="controls">
+          <span class="snapshot-tag"><span id="statusDot" class="dot"></span><span id="statusText">Connecting…</span></span>
+          <label class="tiny muted">Refresh
+            <select id="intervalSel" class="btn">
+              <option value="15">15s</option>
+              <option value="30" selected>30s</option>
+              <option value="60">60s</option>
+            </select>
+          </label>
+          <button id="refreshBtn" class="btn" title="Refresh now">Refresh</button>
+          <button id="themeBtn" class="btn" title="Toggle light/dark">Theme</button>
+          <button id="signoutBtn" class="btn">Sign out</button>
+        </div>
+      </header>
+
+      <div id="errorBanner" class="error-box" hidden></div>
+
+      <div class="panel">
+        <div class="section-title">Where to Focus <span class="sub">updates with every refresh</span></div>
+        <div id="alertList" class="alert-list"></div>
+      </div>
+
+      <div id="kpiGrid" class="kpi-grid"></div>
+
+      <div class="panel" id="watchPanel">
+        <div class="section-title">Call avoidance watch <span class="sub" id="watchSub"></span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Agent</th><th>Status now</th><th>Why flagged</th>
+              <th class="num">RNA</th><th class="num">Left Available (60m)</th><th class="num">Status changes (60m)</th><th class="num">Not taking calls</th>
+            </tr></thead>
+            <tbody id="watchBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="agentsPanel">
+        <div class="section-title">Agents <span class="sub" id="agentSub"></span></div>
+        <div class="filters">
+          <button class="pill" data-filter="all" aria-pressed="true">All</button>
+          <button class="pill" data-filter="available" aria-pressed="false">Available</button>
+          <button class="pill" data-filter="oncall" aria-pressed="false">On a call</button>
+          <button class="pill" data-filter="notready" aria-pressed="false">Not taking calls</button>
+          <button class="pill" data-filter="flagged" aria-pressed="false">Flagged</button>
+          <input id="agentSearch" class="search" type="search" placeholder="Search agent…">
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr id="agentHead"></tr></thead>
+            <tbody id="agentBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="section-title">Supervisors <span class="sub" id="supSub"></span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Supervisor</th><th>Status</th><th class="num">In status</th><th class="num">Calls</th><th class="num">Logged in</th></tr></thead>
+            <tbody id="supBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <details class="panel">
+        <summary>Methodology &amp; notes</summary>
+        <ul>
+          <li>Data comes from RingCX's real-time supervisor API (<code>realTimeData/agent</code> and <code>realTimeData/inbound</code>), the same source as the RingCX wallboards. It is read with your own RingCentral sign-in, so you only see what your RingCX permissions allow.</li>
+          <li>Status colors follow the RingCX agent app. Green means the status takes calls (Available, Payroll Support). Grey is On-Break, Away and Lunch. Yellow is every Working-type status (Training, Testing, Meeting, ticket and escalation work, ePayment, Yodlee and similar). Red means on a call or in wrap-up.</li>
+          <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up.</li>
+          <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, only while they are taking queue calls (Available, or on a call from a queue). Some agents also count as supervisors while in a specific status: Connor Lenhart while in Escalation Support. Those rules are set in the page's settings (SUPERVISOR_DUTY).</li>
+          <li>The avoidance watch flags an agent for any of the following:
+            <ul>
+              <li>Any RNA (ring, no answer) this login session. Two or more is critical.</li>
+              <li>Leaving Available for a status that doesn't take calls <span data-cfg="EXIT_WARN"></span>+ times in the last 60 minutes, or <span data-cfg="CHANGE_WARN"></span>+ status changes in 60 minutes.</li>
+              <li>Being in a status that doesn't take calls for longer than <span data-cfgdur="NOTREADY_WARN_SEC"></span>. Longer than <span data-cfgdur="NOTREADY_CRIT_SEC"></span> is critical.</li>
+            </ul>
+          </li>
+          <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
+          <li>RNA, calls and talk time are RingCX's own counters for the agent's current login session. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
+          <li>The page makes two requests per refresh and pauses while the window is hidden. RingCX allows about 120 real-time requests per minute in total.</li>
+          <li>This view is read-only. It cannot change agent states or take calls. Keep the normal RingCX agent window open for that.</li>
+          <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
+        </ul>
+      </details>
+      <footer>BQE Software · Internal · RingCX Live View · Version 1.2</footer>
+    </main>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------------
+  // Configuration. CLIENT_ID comes from the RingCentral app registration
+  // (a browser-based app with no client secret, Read Accounts scope).
+  // It is a public identifier, safe to publish.
+  // ---------------------------------------------------------------------
+  var CONFIG = {
+    CLIENT_ID: "ZOg1i27x7SSdnbmeHGkLpT",             // "BQE RingCX Live View" app, registered 2026-10-14
+    RC_SERVER: "https://platform.ringcentral.com",
+    RCX_SERVER: "https://ringcx.ringcentral.com",
+    ACCOUNT_ID: "38000001",                          // SUB-BQE Software, Inc.
+    REDIRECT_URI: location.origin + location.pathname,
+    WAIT_CRIT_SEC: 120,                              // caller waiting longer than this = critical
+    WRAP_WARN_SEC: 180,                              // wrap-up longer than this
+    LONG_CALL_SEC: 30 * 60,                          // single call longer than this
+    NOTREADY_WARN_SEC: 20 * 60,                      // in a no-calls status longer than this
+    NOTREADY_CRIT_SEC: 40 * 60,
+    EXIT_WARN: 3,                                    // left Available for a no-calls status N+ times in 60 min
+    EXIT_CRIT: 5,
+    CHANGE_WARN: 6,                                  // any status changes N+ times in 60 min
+    CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
+    // Agents who act as supervisors while in certain statuses: listed in the
+    // Supervisors section (and kept off the avoidance watch) while in one of them.
+    SUPERVISOR_DUTY: [
+      { agent: "Connor Lenhart", states: ["ESCALATION SUPPORT"] }
+    ]
+  };
+  var IS_LOCAL_DEV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.port === "8765";
+  var STORE_KEY = "rcxLiveView.session.v1";
+  var PKCE_KEY = "rcxLiveView.pkce.v1";
+  var UI_KEY = "rcxLiveView.ui.v1";
+  var HIST_KEY = "rcxLiveView.history.v1";
+
+  // ---------------- small helpers ----------------
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function fmtDur(sec) {
+    sec = Math.max(0, Math.floor(sec || 0));
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return h ? h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0") : m + ":" + String(s).padStart(2, "0");
+  }
+  function fmtShort(sec) { return sec >= 3600 ? Math.round(sec / 360) / 10 + "h" : Math.round(sec / 60) + " min"; }
+  function fmtClock(ms) { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+  function pct(a, b) { return b ? Math.round(100 * a / b) + "%" : "–"; }
+  function load(key) { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } }
+  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
+  function b64url(bytes) { var s = ""; bytes.forEach(function (b) { s += String.fromCharCode(b); }); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+  function jwtClaims(t) { try { var p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); while (p.length % 4) p += "="; return JSON.parse(atob(p)); } catch (e) { return {}; } }
+  function form(obj) { return Object.keys(obj).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(obj[k]); }).join("&"); }
+  function todayKey() { var d = new Date(); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); }
+
+  document.querySelectorAll("[data-cfg]").forEach(function (el) { el.textContent = CONFIG[el.getAttribute("data-cfg")]; });
+  document.querySelectorAll("[data-cfgdur]").forEach(function (el) { el.textContent = fmtShort(CONFIG[el.getAttribute("data-cfgdur")]); });
+
+  // ---------------- theme ----------------
+  var ui = load(UI_KEY) || {};
+  if (ui.theme) document.documentElement.setAttribute("data-theme", ui.theme);
+  $("themeBtn").addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme") ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    ui.theme = cur === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", ui.theme);
+    save(UI_KEY, ui);
+  });
+
+  // ---------------- auth ----------------
+  // session = { rcxAccess, rcxRefresh, obtained }
+  var session = load(STORE_KEY);
+
+  async function startSignIn() {
+    if (IS_LOCAL_DEV && !CONFIG.CLIENT_ID) { return devSignIn(); }
+    if (!CONFIG.CLIENT_ID) { showSignin("This copy of the viewer has not been connected to a RingCentral app yet (CLIENT_ID is empty)."); return; }
+    var verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+    var challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+    var state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+    try { sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier: verifier, state: state })); } catch (e) {}
+    location.href = CONFIG.RC_SERVER + "/restapi/oauth/authorize?" + form({
+      response_type: "code", client_id: CONFIG.CLIENT_ID, redirect_uri: CONFIG.REDIRECT_URI,
+      state: state, code_challenge: challenge, code_challenge_method: "S256"
+    });
+  }
+
+  // Local testing only: the dev server on localhost:8765 hands out a token
+  // from Fred's own JWT credential. Only used while CLIENT_ID is empty.
+  async function devSignIn() {
+    var r = await fetch("/dev-token");
+    if (!r.ok) throw new Error("Dev token endpoint failed: HTTP " + r.status);
+    var t = await r.json();
+    setSession(t.accessToken, t.refreshToken);
+    boot();
+  }
+
+  async function finishSignIn(code, state) {
+    var pk = null; try { pk = JSON.parse(sessionStorage.getItem(PKCE_KEY)); } catch (e) {}
+    history.replaceState(null, "", CONFIG.REDIRECT_URI);
+    if (!pk || pk.state !== state) throw new Error("Sign-in state mismatch. Please try again.");
+    var r = await fetch(CONFIG.RC_SERVER + "/restapi/oauth/token", {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form({ grant_type: "authorization_code", code: code, redirect_uri: CONFIG.REDIRECT_URI, client_id: CONFIG.CLIENT_ID, code_verifier: pk.verifier })
+    });
+    if (!r.ok) throw new Error("RingCentral sign-in failed (HTTP " + r.status + ").");
+    var rc = await r.json();
+    var x = await fetch(CONFIG.RCX_SERVER + "/api/auth/login/rc/accesstoken?includeRefresh=true", {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form({ rcAccessToken: rc.access_token, rcTokenType: "Bearer" })
+    });
+    if (!x.ok) throw new Error("RingCentral sign-in worked, but RingCX refused it (HTTP " + x.status + "). Your RingCentral user may not have a RingCX account.");
+    var rcx = await x.json();
+    setSession(rcx.accessToken, rcx.refreshToken);
+  }
+
+  function setSession(access, refresh) {
+    session = { rcxAccess: access, rcxRefresh: refresh, obtained: Date.now() };
+    save(STORE_KEY, session);
+  }
+
+  var refreshing = null;
+  function refreshToken() {
+    if (refreshing) return refreshing;
+    refreshing = (async function () {
+      try {
+        if (!session || !session.rcxRefresh) throw new Error("no refresh token");
+        var r = await fetch(CONFIG.RCX_SERVER + "/api/auth/token/refresh", {
+          method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form({ refresh_token: session.rcxRefresh, rcTokenType: "Bearer" })
+        });
+        if (!r.ok) throw new Error("refresh HTTP " + r.status);
+        var t = await r.json();
+        setSession(t.accessToken, t.refreshToken || session.rcxRefresh);
+      } finally { refreshing = null; }
+    })();
+    return refreshing;
+  }
+
+  function tokenNearExpiry() {
+    var c = jwtClaims(session.rcxAccess);
+    return c.exp ? (c.exp * 1000 - Date.now() < 60 * 1000) : (Date.now() - session.obtained > 4 * 60 * 1000);
+  }
+
+  async function api(path) {
+    if (tokenNearExpiry()) await refreshToken();
+    var url = CONFIG.RCX_SERVER + "/voice/api/v1/admin/accounts/" + CONFIG.ACCOUNT_ID + "/" + path;
+    var r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } });
+    if (r.status === 401) { await refreshToken(); r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } }); }
+    if (!r.ok) { var e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
+    var txt = await r.text();
+    return txt ? JSON.parse(txt) : [];
+  }
+
+  function signOut() {
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    session = null; stopPolling(); showSignin();
+  }
+
+  // ---------------- state model ----------------
+  // Colors and "takes calls" follow each status's RingCX base state:
+  //   AVAILABLE (Available, Payroll Support)            -> green, takes calls
+  //   ON-BREAK / AWAY / LUNCH                           -> grey
+  //   WORKING / TRAINING and their custom sub-states    -> yellow
+  //   ENGAGED / TRANSITION / wrap-up                    -> red (on a call)
+  function base(a) { return String(a.agentBaseState || "").toUpperCase(); }
+  function isOnCall(a) { var b = base(a); return !!a.callUii || b === "ENGAGED" || b === "TRANSITION" || !!a.pendingDisposition; }
+  function isAvailable(a) { return !isOnCall(a) && base(a) === "AVAILABLE"; }
+  function isNotReady(a) { return !isOnCall(a) && base(a) !== "AVAILABLE"; }
+  function stateColor(a) {
+    if (isOnCall(a)) return "st-red";
+    var b = base(a);
+    if (b === "AVAILABLE") return "st-green";
+    if (b === "ON-BREAK" || b === "BREAK" || b === "AWAY" || b === "LUNCH") return "st-grey";
+    return "st-yellow";
+  }
+  function stateLabel(a) { return a.pendingDisposition ? "Wrap-up" : (a.agentState || ""); }
+  function stateHtml(a) { return "<span class='st " + stateColor(a) + "'>" + esc(stateLabel(a)) + "</span>" + (a.onHoldDts ? " <span class='chip info'>On hold</span>" : ""); }
+  function isSupervisor(a) { return String(a.agentType || "").toUpperCase() === "SUPERVISOR"; }
+  // Supervisors only count as call-takers while Available or on a call that came from a queue.
+  function fullName(a) { return (a.firstName || "") + " " + (a.lastName || ""); }
+  function onSupervisorDuty(a) {
+    var name = fullName(a).trim().toLowerCase(), st = String(a.agentState || "").toUpperCase();
+    return CONFIG.SUPERVISOR_DUTY.some(function (r) {
+      return r.agent.toLowerCase() === name && r.states.some(function (s) { return s.toUpperCase() === st; });
+    });
+  }
+  function inAgentSection(a) {
+    if (onSupervisorDuty(a)) return false;
+    return !isSupervisor(a) || isAvailable(a) || (isOnCall(a) && +a.gateId > 0);
+  }
+
+  // ---------------- status-change history (observed by this browser) ----------------
+  var hist = load(HIST_KEY);
+  if (!hist || hist.day !== todayKey()) hist = { day: todayKey(), since: Date.now(), agents: {} };
+
+  function observe(agents, fetchedAt) {
+    if (hist.day !== todayKey()) hist = { day: todayKey(), since: fetchedAt, agents: {} };
+    var keepAfter = fetchedAt - 10 * 3600 * 1000;
+    agents.forEach(function (a) {
+      var id = String(a.agentId);
+      var asOf = Date.parse(a.lastUpdate) || fetchedAt;
+      var start = asOf - (a.stateTime || 0) * 1000;
+      var b = isOnCall(a) ? "ONCALL" : base(a);
+      var label = stateLabel(a);
+      var h = hist.agents[id] || (hist.agents[id] = { ev: [] });
+      if (h.label != null) {
+        if (label !== h.label) {
+          h.ev.push({ t: start, fb: h.base, tb: b });
+        } else if (start - h.start > 20000) {
+          // Same status, but its timer restarted: the agent left and came back between refreshes.
+          // A handled call or new RNA explains that innocently; otherwise count it as a brief flip.
+          var explained = (a.callsHandled || 0) > (h.calls || 0) || (a.rna || 0) > (h.rna || 0);
+          if (!explained) h.ev.push({ t: start, fb: h.base, tb: "BRIEF", hidden: true });
+        }
+      }
+      h.label = label; h.base = b; h.start = start; h.calls = a.callsHandled || 0; h.rna = a.rna || 0;
+      h.ev = h.ev.filter(function (e) { return e.t > keepAfter; });
+    });
+    save(HIST_KEY, hist);
+  }
+
+  function changeStats(a) {
+    var h = hist.agents[String(a.agentId)];
+    var cutoff = Date.now() - 3600 * 1000;
+    var ev = h ? h.ev.filter(function (e) { return e.t >= cutoff; }) : [];
+    var changes = 0, exits = 0;
+    ev.forEach(function (e) {
+      changes += e.hidden ? 2 : 1;
+      // Leaving Available for something that doesn't take calls (a call is fine).
+      if (e.fb === "AVAILABLE" && e.tb !== "ONCALL" && e.tb !== "AVAILABLE") exits++;
+    });
+    return { changes: changes, exits: exits };
+  }
+
+  // Avoidance watch: returns { lvl, score, reasons[] } or null
+  function watchFor(a, e) {
+    var reasons = [], score = 0, lvl = null;
+    function add(l, text, s) { reasons.push({ lvl: l, text: text }); score += s; if (l === "crit" || !lvl) lvl = l === "crit" ? "crit" : (lvl || l); }
+    var rna = a.rna || 0;
+    if (rna >= 2) add("crit", rna + " RNA", 300 + rna * 50);
+    else if (rna === 1) add("warn", "1 RNA", 200);
+    var cs = changeStats(a);
+    if (cs.exits >= CONFIG.EXIT_CRIT) add("crit", "Left Available " + cs.exits + "x in 60m", 250 + cs.exits * 20);
+    else if (cs.exits >= CONFIG.EXIT_WARN) add("warn", "Left Available " + cs.exits + "x in 60m", 150 + cs.exits * 20);
+    else if (cs.changes >= CONFIG.CHANGE_WARN) add("warn", cs.changes + " status changes in 60m", 100 + cs.changes * 10);
+    if (isNotReady(a)) {
+      var st = (a.stateTime || 0) + e;
+      if (st > CONFIG.NOTREADY_CRIT_SEC) add("crit", "Not taking calls " + fmtShort(st), 200 + st / 60);
+      else if (st > CONFIG.NOTREADY_WARN_SEC) add("warn", "Not taking calls " + fmtShort(st), 100 + st / 60);
+    }
+    if (a.pendingDisposition && (a.pendingDispositionTime || 0) + e > CONFIG.WRAP_WARN_SEC) add("warn", "Wrap-up " + fmtDur((a.pendingDispositionTime || 0) + e), 80);
+    if (isOnCall(a) && !a.pendingDisposition && (a.stateTime || 0) + e > CONFIG.LONG_CALL_SEC) add("warn", "Call " + fmtShort((a.stateTime || 0) + e), 40);
+    return reasons.length ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
+  }
+
+  // ---------------- polling ----------------
+  var data = { agents: [], queues: [], fetchedAt: 0 };
+  var pollTimer = null, tickTimer = null, lastError = null, backoff = 1;
+  var intervalSec = ui.interval || 30;
+  $("intervalSel").value = String(intervalSec);
+
+  async function poll() {
+    clearTimeout(pollTimer);
+    if (document.hidden) { setStatus("paused", "Paused while hidden"); return; }
+    try {
+      var res = await Promise.all([api("realTimeData/agent"), api("realTimeData/inbound")]);
+      data = { agents: res[0] || [], queues: res[1] || [], fetchedAt: Date.now() };
+      observe(data.agents, data.fetchedAt);
+      lastError = null; backoff = 1;
+      $("errorBanner").hidden = true;
+      render();
+    } catch (e) {
+      lastError = e;
+      if (e.status === 401 || /refresh/.test(e.message)) { signOut(); showSignin("Your session expired. Please sign in again."); return; }
+      if (e.status === 403) { showError("RingCX says your user can't read real-time data (HTTP 403). Ask a RingCX admin to enable reporting permission for you under Admin > Users > Administrators."); }
+      else if (e.status === 429) { backoff = Math.min(backoff * 2, 8); showError("RingCX rate limit reached. Slowing down refresh for a bit."); }
+      else { showError("Couldn't reach RingCX (" + esc(e.message) + "). Retrying."); }
+    }
+    pollTimer = setTimeout(poll, intervalSec * 1000 * backoff);
+  }
+  function stopPolling() { clearTimeout(pollTimer); clearInterval(tickTimer); pollTimer = tickTimer = null; }
+  function startPolling() { stopPolling(); poll(); tickTimer = setInterval(tick, 1000); }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && session) poll(); });
+  $("refreshBtn").addEventListener("click", function () { poll(); });
+  $("intervalSel").addEventListener("change", function () { intervalSec = +this.value; ui.interval = intervalSec; save(UI_KEY, ui); poll(); });
+  $("signoutBtn").addEventListener("click", signOut);
+  $("signinBtn").addEventListener("click", function () { startSignIn().catch(function (e) { showSignin(e.message); }); });
+
+  function showError(msg) { $("errorBanner").innerHTML = msg; $("errorBanner").hidden = false; }
+  function setStatus(kind, text) { $("statusDot").className = "dot " + kind; $("statusText").textContent = text; }
+
+  function elapsed() { return data.fetchedAt ? (Date.now() - data.fetchedAt) / 1000 : 0; }
+  function myAgentId() { var c = session ? jwtClaims(session.rcxAccess) : {}; return c.agnt ? String(c.agnt) : null; }
+  function gateName(id) {
+    for (var i = 0; i < data.queues.length; i++) if (String(data.queues[i].gateId) === String(id)) return data.queues[i].gateName;
+    return "";
+  }
+  function agentFirst(id) {
+    for (var i = 0; i < data.agents.length; i++) if (String(data.agents[i].agentId) === String(id)) return data.agents[i].firstName;
+    return null;
+  }
+  function count(sec) { return "<span data-count='" + Math.floor(sec) + "'>" + fmtDur(sec + elapsed()) + "</span>"; }
+
+  // ---------------- rendering ----------------
+  var agentFilter = "all", agentSearch = "", sortKey = ui.sortKey || "state", sortDir = ui.sortDir || 1;
+  var COLS = [
+    { key: "name", label: "Agent" },
+    { key: "state", label: "Status" },
+    { key: "stateTime", label: "In status", num: true },
+    { key: "queue", label: "Call queue" },
+    { key: "calls", label: "Calls", num: true },
+    { key: "talk", label: "Talk", num: true },
+    { key: "aht", label: "Avg talk", num: true },
+    { key: "rna", label: "RNA", num: true },
+    { key: "exits", label: "Left Avail 60m", num: true },
+    { key: "login", label: "Logged in", num: true }
+  ];
+
+  function render() {
+    var e = elapsed();
+    var agents = data.agents.filter(inAgentSection);
+    var sups = data.agents.filter(function (a) { return !inAgentSection(a); });
+    var watch = agents.map(function (a) { return { a: a, w: watchFor(a, e) }; }).filter(function (x) { return x.w; })
+      .sort(function (x, y) { return y.w.score - x.w.score; });
+    renderQueues(e);
+    renderAlerts(e, watch);
+    renderKpis(e, agents, sups, watch);
+    renderWatch(e, watch);
+    renderAgents(e, agents);
+    renderSups(e, sups);
+  }
+  function tick() {
+    if (!data.fetchedAt) return;
+    var e = elapsed();
+    var next = Math.max(0, Math.round(intervalSec * backoff - e));
+    if (lastError) setStatus("err", "Problem refreshing · retry in " + next + "s");
+    else setStatus("live", "Live · updated " + Math.round(e) + "s ago · next in " + next + "s");
+    document.querySelectorAll("[data-count]").forEach(function (el) { el.textContent = fmtDur(+el.getAttribute("data-count") + e); });
+  }
+
+  function renderAlerts(e, watch) {
+    var items = [];
+    data.queues.forEach(function (q) {
+      var open = String(q.state).toLowerCase() === "open";
+      if (q.inQueue > 0) {
+        var w = (q.longestInQueue || 0) + e;
+        items.push({ lvl: w > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn", score: 1000 + w,
+          html: "<b>" + esc(q.gateName) + "</b>: " + q.inQueue + " waiting, longest " + count(q.longestInQueue || 0) });
+      }
+      if (open && q.staffed > 0 && !q.available) {
+        var crit = CONFIG.CRITICAL_QUEUES.indexOf(q.gateName) >= 0;
+        items.push({ lvl: crit ? "crit" : "warn", score: crit ? 900 : 500, html: "<b>" + esc(q.gateName) + "</b>: open, nobody available (" + q.staffed + " staffed)" });
+      }
+      if (open && !q.staffed) items.push({ lvl: "crit", score: 950, html: "<b>" + esc(q.gateName) + "</b>: open with no agents staffed" });
+    });
+    if (watch.length) {
+      var crit = watch.filter(function (x) { return x.w.lvl === "crit"; }).length;
+      items.push({ lvl: crit ? "crit" : "warn", score: 400, link: "#watchPanel",
+        html: "<b>" + watch.length + " agent" + (watch.length > 1 ? "s" : "") + "</b> on the call avoidance watch" + (crit ? " (" + crit + " critical)" : "") });
+    }
+    items.sort(function (x, y) { return y.score - x.score; });
+    $("alertList").innerHTML = items.length
+      ? items.map(function (i) { return i.link ? "<a class='alert " + i.lvl + "' href='" + i.link + "'>" + i.html + "</a>" : "<span class='alert " + i.lvl + "'>" + i.html + "</span>"; }).join("")
+      : "<span class='alert ok'>All clear: no callers waiting, every open queue has someone available, nobody flagged.</span>";
+  }
+
+  function sum(arr, k) { return arr.reduce(function (s, x) { return s + (+x[k] || 0); }, 0); }
+
+  function renderKpis(e, agents, sups, watch) {
+    var Q = data.queues;
+    var waiting = sum(Q, "inQueue");
+    var longest = Q.reduce(function (m, q) { return q.inQueue > 0 ? Math.max(m, q.longestInQueue || 0) : m; }, 0);
+    var presented = sum(Q, "presented"), accepted = sum(Q, "accepted"), abandoned = sum(Q, "abandoned");
+    var slaP = sum(Q, "slaPass"), slaF = sum(Q, "slaFail");
+    var tiles = [
+      { label: "Waiting now", value: waiting, cls: waiting ? (longest + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn") : "", note: waiting ? "longest " + count(longest) : "no callers in queue" },
+      { label: "Agents on", value: agents.length, filter: "all", note: "taking or able to take calls" },
+      { label: "Available", value: agents.filter(isAvailable).length, filter: "available", note: "ready for a call" },
+      { label: "On a call", value: agents.filter(isOnCall).length, filter: "oncall", note: "incl. wrap-up" },
+      { label: "Not taking calls", value: agents.filter(isNotReady).length, filter: "notready", note: "grey or yellow status" },
+      { label: "Flagged", value: watch.length, filter: "flagged", cls: watch.length ? "warn" : "", note: "avoidance watch" },
+      { label: "Presented", value: presented, note: "calls today" },
+      { label: "Answered", value: accepted, note: pct(accepted, presented) + " of presented" },
+      { label: "Abandoned", value: abandoned, cls: abandoned ? "warn" : "", note: pct(abandoned, presented) + " incl. short legs" },
+      { label: "SLA", value: pct(slaP, slaP + slaF), note: slaP + slaF ? slaP + " of " + (slaP + slaF) + " in target" : "no SLA calls yet" }
+    ];
+    $("kpiGrid").innerHTML = tiles.map(function (t) {
+      var active = t.filter && t.filter === agentFilter && t.filter !== "all";
+      return "<button class='kpi " + (t.cls || "") + (t.filter ? "" : " static") + (active ? " active" : "") + "'" + (t.filter ? " data-filter='" + t.filter + "'" : "") + ">" +
+        "<div class='label'>" + t.label + "</div><div class='value'>" + t.value + "</div><div class='note'>" + t.note + "</div></button>";
+    }).join("");
+  }
+
+  function renderQueues(e) {
+    var showClosed = $("showClosed").checked;
+    var qs = data.queues.slice().sort(function (a, b) { return (b.inQueue - a.inQueue) || (b.presented - a.presented) || String(a.gateName).localeCompare(b.gateName); });
+    var hidden = 0;
+    var html = qs.map(function (q) {
+      var open = String(q.state).toLowerCase() === "open";
+      var idle = !open && !q.presented && !q.inQueue;
+      if (idle && !showClosed) { hidden++; return ""; }
+      var cls = q.inQueue > 0 ? ((q.longestInQueue || 0) + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn")
+        : (open && q.staffed > 0 && !q.available ? (CONFIG.CRITICAL_QUEUES.indexOf(q.gateName) >= 0 ? "crit" : "warn") : "");
+      if (!open) cls += " closed";
+      var availNames = String(q.availableAgentsList || "").split(",").filter(Boolean).map(agentFirst).filter(Boolean);
+      return "<div class='queue " + cls + "'>" +
+        "<div class='q-head'><span class='q-name'>" + esc(q.gateName) + "</span><span class='q-state'>" + esc(q.state) + "</span></div>" +
+        "<div class='q-stats'>" +
+          "<div class='q-stat'><div class='n'>" + q.inQueue + "</div><div class='l'>Waiting</div></div>" +
+          "<div class='q-stat'><div class='n'>" + (q.inQueue ? count(q.longestInQueue || 0) : "–") + "</div><div class='l'>Longest</div></div>" +
+          "<div class='q-stat'><div class='n'>" + (q.available || 0) + "/" + (q.staffed || 0) + "</div><div class='l'>Avail/staff</div></div>" +
+          "<div class='q-stat'><div class='n'>" + pct(q.slaPass, (q.slaPass || 0) + (q.slaFail || 0)) + "</div><div class='l'>SLA</div></div>" +
+        "</div>" +
+        "<div class='q-foot'>" + (q.presented || 0) + " presented · " + (q.accepted || 0) + " answered · " + (q.abandoned || 0) + " abandoned" +
+          (availNames.length ? "<br><span class='muted'>Available: " + esc(availNames.join(", ")) + "</span>" : "") + "</div>" +
+        "</div>";
+    }).join("");
+    $("queueList").innerHTML = html + (hidden ? "<div class='tiny muted' style='margin-bottom:6px'>" + hidden + " closed queue" + (hidden > 1 ? "s" : "") + " hidden</div>" : "");
+  }
+
+  function renderWatch(e, watch) {
+    $("watchSub").textContent = "status changes counted by this browser since " + fmtClock(hist.since);
+    $("watchBody").innerHTML = watch.map(function (x) {
+      var a = x.a, w = x.w, nr = isNotReady(a) ? (a.stateTime || 0) : null;
+      return "<tr class='flag-" + w.lvl + "'>" +
+        "<td>" + esc(fullName(a)) + "</td>" +
+        "<td>" + stateHtml(a) + "</td>" +
+        "<td class='wrap'>" + w.reasons.map(function (r) { return "<span class='chip " + r.lvl + "'>" + esc(r.text) + "</span>"; }).join("") + "</td>" +
+        "<td class='num'>" + (a.rna ? "<span class='" + (a.rna >= 2 ? "hot" : "warmn") + "'>" + a.rna + "</span>" : "0") + "</td>" +
+        "<td class='num'>" + w.cs.exits + "</td>" +
+        "<td class='num'>" + w.cs.changes + "</td>" +
+        "<td class='num'>" + (nr != null ? count(nr) : "–") + "</td>" +
+        "</tr>";
+    }).join("") || "<tr><td colspan='7' class='muted'>Nobody flagged right now.</td></tr>";
+  }
+
+  var STATE_ORDER = { "st-red": 0, "st-green": 1, "st-yellow": 2, "st-grey": 3 };
+
+  function renderAgents(e, agents) {
+    var me = myAgentId();
+    var rows = agents.map(function (a) {
+      var calls = a.callsHandled || 0, w = watchFor(a, e);
+      return {
+        a: a, w: w, name: fullName(a), stateTime: (a.stateTime || 0) + e,
+        queue: isOnCall(a) && +a.gateId > 0 ? gateName(a.gateId) : (isOnCall(a) ? "Outbound/direct" : ""),
+        calls: calls, talk: a.totalTalkTime || 0, aht: calls ? (a.totalTalkTime || 0) / calls : 0,
+        rna: a.rna || 0, exits: changeStats(a).exits, login: (a.loggedInDuration || a.loginTime || 0) + e
+      };
+    }).filter(function (r) {
+      if (agentSearch && r.name.toLowerCase().indexOf(agentSearch) < 0) return false;
+      if (agentFilter === "available") return isAvailable(r.a);
+      if (agentFilter === "oncall") return isOnCall(r.a);
+      if (agentFilter === "notready") return isNotReady(r.a);
+      if (agentFilter === "flagged") return !!r.w;
+      return true;
+    });
+    rows.sort(function (x, y) {
+      var v;
+      if (sortKey === "state") v = (STATE_ORDER[stateColor(x.a)] - STATE_ORDER[stateColor(y.a)]) || (y.stateTime - x.stateTime);
+      else if (sortKey === "name" || sortKey === "queue") v = String(x[sortKey]).localeCompare(String(y[sortKey]));
+      else v = x[sortKey] - y[sortKey];
+      return v * sortDir;
+    });
+    $("agentHead").innerHTML = COLS.map(function (c) {
+      return "<th data-key='" + c.key + "' class='" + (c.num ? "num " : "") + (sortKey === c.key ? "sorted" : "") + "'>" + c.label +
+        "<span class='arrow'>" + (sortKey === c.key ? (sortDir > 0 ? "▲" : "▼") : "▲") + "</span></th>";
+    }).join("");
+    $("agentBody").innerHTML = rows.map(function (r) {
+      var a = r.a, cls = (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "");
+      return "<tr class='" + cls + "'>" +
+        "<td>" + esc(r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + (isSupervisor(a) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+        "<td>" + stateHtml(a) + "</td>" +
+        "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
+        "<td>" + esc(r.queue) + "</td>" +
+        "<td class='num'>" + r.calls + "</td>" +
+        "<td class='num'>" + fmtDur(r.talk) + "</td>" +
+        "<td class='num'>" + (r.calls ? fmtDur(r.aht) : "–") + "</td>" +
+        "<td class='num'>" + (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0") + "</td>" +
+        "<td class='num'>" + (r.exits >= CONFIG.EXIT_WARN ? "<span class='warmn'>" + r.exits + "</span>" : r.exits) + "</td>" +
+        "<td class='num'>" + count(a.loggedInDuration || a.loginTime || 0) + "</td>" +
+        "</tr>";
+    }).join("") || "<tr><td colspan='" + COLS.length + "' class='muted'>No agents match.</td></tr>";
+    $("agentSub").textContent = rows.length + " of " + agents.length + " logged in";
+  }
+
+  function renderSups(e, sups) {
+    var me = myAgentId();
+    sups.sort(function (x, y) { return fullName(x).localeCompare(fullName(y)); });
+    $("supBody").innerHTML = sups.map(function (a) {
+      return "<tr class='" + (String(a.agentId) === me ? "me" : "") + "'>" +
+        "<td>" + esc(fullName(a)) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + (isSupervisor(a) ? "" : " <span class='chip info'>Agent, supervisor duty</span>") + "</td>" +
+        "<td>" + stateHtml(a) + "</td>" +
+        "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
+        "<td class='num'>" + (a.callsHandled || 0) + "</td>" +
+        "<td class='num'>" + count(a.loggedInDuration || a.loginTime || 0) + "</td>" +
+        "</tr>";
+    }).join("") || "<tr><td colspan='5' class='muted'>No supervisors logged in outside the call queues.</td></tr>";
+    $("supSub").textContent = sups.length + " logged in, not taking queue calls";
+  }
+
+  // KPI tiles and pills share one filter state
+  function setFilter(f) {
+    agentFilter = (agentFilter === f && f !== "all") ? "all" : f;
+    document.querySelectorAll(".pill[data-filter]").forEach(function (p) { p.setAttribute("aria-pressed", String(p.getAttribute("data-filter") === agentFilter)); });
+    render();
+  }
+  document.addEventListener("click", function (ev) {
+    var f = ev.target.closest("[data-filter]");
+    if (f) { setFilter(f.getAttribute("data-filter")); if (f.classList.contains("kpi")) $("agentsPanel").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    var th = ev.target.closest("th[data-key]");
+    if (th) {
+      var k = th.getAttribute("data-key");
+      if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = (k === "name" || k === "queue" || k === "state") ? 1 : -1; }
+      ui.sortKey = sortKey; ui.sortDir = sortDir; save(UI_KEY, ui);
+      render();
+    }
+  });
+  $("agentSearch").addEventListener("input", function () { agentSearch = this.value.trim().toLowerCase(); render(); });
+  $("showClosed").addEventListener("change", function () { render(); });
+
+  // ---------------- views ----------------
+  function showSignin(msg) {
+    stopPolling();
+    $("liveView").hidden = true; $("signinView").hidden = false;
+    $("signinError").hidden = !msg; $("signinError").textContent = msg || "";
+    if (!CONFIG.CLIENT_ID) {
+      $("configWarning").hidden = false;
+      $("configWarning").textContent = IS_LOCAL_DEV ? "Local test mode: signs in with the dev server's credential." : "Not yet connected to a RingCentral app (CLIENT_ID is empty).";
+    }
+  }
+  function showLive() { $("signinView").hidden = true; $("liveView").hidden = false; startPolling(); }
+
+  // ---------------- auto-update ----------------
+  // Every few minutes, re-fetch this page from the server (bypassing caches) and
+  // compare its fingerprint with the one loaded at startup. If it changed, a new
+  // version was published: reload, unless the viewer is typing in the search box.
+  // Sign-in, history and settings live in localStorage, so a reload loses nothing.
+  var UPDATE_CHECK_MS = 5 * 60 * 1000, loadedFingerprint = null, updatePending = false;
+  async function pageFingerprint() {
+    var r = await fetch(location.pathname + "?v=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return null;
+    var buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(await r.text()));
+    return b64url(new Uint8Array(buf));
+  }
+  async function checkForUpdate() {
+    try {
+      var fp = await pageFingerprint();
+      if (!fp) return;
+      if (!loadedFingerprint) { loadedFingerprint = fp; return; }
+      if (fp !== loadedFingerprint) updatePending = true;
+    } catch (e) { /* offline or blocked: try again next time */ }
+    if (updatePending) applyUpdate();
+  }
+  function applyUpdate() {
+    var typing = document.activeElement && document.activeElement.tagName === "INPUT" && document.activeElement.type === "search" && document.activeElement.value;
+    if (typing) { setTimeout(applyUpdate, 30000); return; }
+    location.reload();
+  }
+  checkForUpdate();
+  setInterval(checkForUpdate, UPDATE_CHECK_MS);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) checkForUpdate(); });
+
+  async function boot() {
+    var params = new URLSearchParams(location.search);
+    if (params.get("code")) {
+      try { await finishSignIn(params.get("code"), params.get("state")); }
+      catch (e) { showSignin(e.message); return; }
+    } else if (params.get("error")) {
+      history.replaceState(null, "", CONFIG.REDIRECT_URI);
+      showSignin("RingCentral sign-in was cancelled or refused (" + params.get("error") + ").");
+      return;
+    }
+    if (session && session.rcxAccess) showLive(); else showSignin();
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
