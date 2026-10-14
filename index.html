@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.9</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.0</footer>
     </main>
   </section>
 </div>
@@ -879,7 +879,7 @@
       { label: "<span class='st st-grey'>Break / lunch</span>", value: agents.filter(DRILLS.away.test).length, filter: "away", note: "grey statuses, no calls" },
       { label: "Flagged", value: watch.length, filter: "flagged", cls: watch.length ? "warn" : "", note: "avoidance watch" },
       { label: "Presented", value: presented, note: "calls today" },
-      { label: "Answered", value: accepted, note: pct(accepted, presented) + " of presented" },
+      { label: "Answered", value: accepted, filter: "answered", note: pct(accepted, presented) + " of presented · click to listen" },
       { label: "Abandoned", value: abandoned, cls: abandoned ? "warn" : "", filter: "abandoned", note: pct(abandoned, presented) + " · click for calls" },
       { label: "Short calls", value: abandons.all ? shortCalls().length : "–", cls: abandons.all && shortCalls().length ? "warn" : "", filter: "shortcalls", note: "answered, under " + CONFIG.SHORT_CALL_SEC + "s · click to listen" },
       { label: "SLA", value: pct(slaP, slaP + slaF), note: slaP + slaF ? slaP + " of " + (slaP + slaF) + " answered ≤30s" : "no SLA calls yet" }
@@ -905,7 +905,8 @@
     away: { title: "Break / lunch (grey statuses)", test: function (a) { return stateColor(a) === "st-grey"; } },
     flagged: { title: "Flagged on the avoidance watch", test: null },
     abandoned: { title: "Abandoned calls today" },      // call list, not an agent list (no test)
-    shortcalls: { title: "Short calls today" }          // call list, not an agent list (no test)
+    shortcalls: { title: "Short calls today" },         // call list, not an agent list (no test)
+    answered: { title: "Answered calls today" }         // call list, not an agent list (no test)
   };
 
   // ---------------- abandoned calls (RingCX call detail report) ----------------
@@ -1067,26 +1068,31 @@
     var afterQueue = (+r.call_duration || 0) - (+r.queue_time || 0);
     return Math.max(+r.connected_duration || 0, afterQueue, 0);
   }
-  function shortCalls() {
+  // All answered queue calls today, one row per call (UII), newest first.
+  function answeredCalls() {
     var seen = {};
     return (abandons.all || []).filter(function (r) {
-      if (r.source_type !== "ACD-INBOUND" || !r.connected_name || callTalkSec(r) >= CONFIG.SHORT_CALL_SEC) return false;
-      if (seen[r.UII]) return false;
+      if (r.source_type !== "ACD-INBOUND" || !r.connected_name || seen[r.UII]) return false;
       seen[r.UII] = 1; return true;
     }).sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
   }
+  function shortCalls() { return answeredCalls().filter(function (r) { return callTalkSec(r) < CONFIG.SHORT_CALL_SEC; }); }
   function firstLast(n) { var p = String(n || "").split(","); return p.length > 1 ? (p[1].trim() + " " + p[0].trim()) : n; }
-  var shortRendered = { at: -1 }, recordings = {};   // uii -> blob URL
-  function renderShortDrill(box, force) {
+  var callDrillRendered = { at: -1 }, recordings = {};   // uii -> blob URL
+  // Shared call list for the Answered and Short calls tiles (kind = "answered" | "shortcalls").
+  function renderCallDrill(box, kind, force) {
     // Don't rebuild (and cut off a recording mid-play) unless the call list changed.
-    if (!force && box.getAttribute("data-kind") === "shortcalls" &&
-        (shortRendered.at === abandons.at || [].some.call(box.querySelectorAll("audio"), function (a) { return !a.paused; }))) return;
-    shortRendered.at = abandons.at; box.setAttribute("data-kind", "shortcalls");
-    var rows = shortCalls(), byAgent = {};
+    if (!force && box.getAttribute("data-kind") === kind &&
+        (callDrillRendered.at === abandons.at || [].some.call(box.querySelectorAll("audio"), function (a) { return !a.paused; }))) return;
+    callDrillRendered.at = abandons.at; box.setAttribute("data-kind", kind);
+    var isShort = kind === "shortcalls";
+    var rows = isShort ? shortCalls() : answeredCalls(), byAgent = {};
     rows.forEach(function (r) { var n = firstLast(r.connected_name); byAgent[n] = (byAgent[n] || 0) + 1; });
     var agentsLine = Object.keys(byAgent).sort(function (a, b) { return byAgent[b] - byAgent[a]; }).map(function (n) { return esc(n) + " " + byAgent[n]; }).join(" · ");
     var status = abandons.loading ? "Loading call detail…" : (abandons.err ? esc(abandons.err) : (abandons.at ? "as of " + fmtClock(abandons.at) + " · calls appear a few minutes after they end" : ""));
-    box.innerHTML = "<div class='section-title'>Short calls today <span class='sub'>answered calls under " + CONFIG.SHORT_CALL_SEC + "s · " + rows.length + " call" + (rows.length === 1 ? "" : "s") + (agentsLine ? " · " + agentsLine : "") + "</span>" +
+    var title = isShort ? "Short calls today" : "Answered calls today";
+    var what = isShort ? "answered calls under " + CONFIG.SHORT_CALL_SEC + "s · " : "";
+    box.innerHTML = "<div class='section-title'>" + title + " <span class='sub'>" + what + rows.length + " call" + (rows.length === 1 ? "" : "s") + (agentsLine ? " · " + agentsLine : "") + "</span>" +
       "<span class='sub'>" + status + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
       "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th>Agent</th><th class='num'>Talked</th><th>Caller</th><th>Recording</th></tr></thead><tbody>" +
@@ -1094,16 +1100,20 @@
         var uii = String(r.UII || "").replace(/^'/, ""), d = callTalkSec(r);
         var rec = recordings[uii] ? "<audio controls src='" + recordings[uii] + "'></audio>"
           : (r.recording_url ? "<button class='btn' data-play='" + esc(uii) + "' data-url='" + esc(r.recording_url) + "'>▶ Play</button>" : "<span class='muted'>No recording</span>");
-        return "<tr class='" + (d < 30 ? "flag-warn" : "") + "'>" +
+        // Short list: highlight under 30s. Answered list: highlight anything that would be a short call.
+        var hl = isShort ? d < 30 : d < CONFIG.SHORT_CALL_SEC;
+        return "<tr class='" + (hl ? "flag-warn" : "") + "'>" +
           "<td>" + esc(etToPtClock(r.call_start_dts)) + "</td>" +
           "<td>" + esc(r.source_name) + "</td>" +
           "<td>" + esc(firstLast(r.connected_name)) + "</td>" +
-          "<td class='num'><span class='" + (d < 30 ? "warmn" : "") + "'>" + fmtDur(d) + "</span></td>" +
+          "<td class='num'><span class='" + (hl ? "warmn" : "") + "'>" + fmtDur(d) + "</span></td>" +
           "<td>" + esc(r.ANI) + "</td>" +
           "<td data-rec='" + esc(uii) + "'>" + rec + "</td></tr>";
-      }).join("") || "<tr><td colspan='6' class='muted'>" + (abandons.all ? "No answered calls under " + CONFIG.SHORT_CALL_SEC + "s yet today." : "") + "</td></tr>") +
+      }).join("") || "<tr><td colspan='6' class='muted'>" + (abandons.all ? (isShort ? "No answered calls under " + CONFIG.SHORT_CALL_SEC + "s yet today." : "No answered calls in the call report yet today.") : "") + "</td></tr>") +
       "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>Answered queue calls under " + CONFIG.SHORT_CALL_SEC + " seconds from answer to hang-up, counting the whole call and not just the first agent, so calls handed to someone else are not listed (rows under 30s are highlighted). Logging a real question takes about a minute, so these are worth a listen. 0:00 usually means the call dropped or was transferred right away.</div>";
+      "<div class='tiny muted' style='margin-top:6px'>" + (isShort
+        ? "Answered queue calls under " + CONFIG.SHORT_CALL_SEC + " seconds from answer to hang-up, counting the whole call and not just the first agent, so calls handed to someone else are not listed (rows under 30s are highlighted). Logging a real question takes about a minute, so these are worth a listen. 0:00 usually means the call dropped or was transferred right away."
+        : "Every answered queue call today from RingCX's call report, newest first. Talk time runs from answer to hang-up for the whole call. Calls under " + CONFIG.SHORT_CALL_SEC + "s are highlighted. The report can trail the live Answered counter by a few minutes, and a call handed to another agent is listed under the agent who answered it first.") + "</div>";
   }
   async function playRecording(btn) {
     var uii = btn.getAttribute("data-play"), url = btn.getAttribute("data-url");
@@ -1125,7 +1135,7 @@
   function renderDrill(e, agents, watch) {
     var box = $("kpiDrill");
     if (!drill) { box.hidden = true; box.removeAttribute("data-kind"); return; }
-    if (drill === "shortcalls") { box.hidden = false; loadAbandons(false); renderShortDrill(box); return; }
+    if (drill === "shortcalls" || drill === "answered") { box.hidden = false; loadAbandons(false); renderCallDrill(box, drill); return; }
     box.removeAttribute("data-kind");
     if (drill === "abandoned") { box.hidden = false; loadAbandons(false); renderAbandonDrill(box); return; }
     var rows;
@@ -1280,7 +1290,7 @@
     if (d) {
       var key = d.getAttribute("data-drill");
       drill = drill === key ? null : key;
-      if (drill === "abandoned" || drill === "shortcalls") loadAbandons(true);
+      if (drill === "abandoned" || drill === "shortcalls" || drill === "answered") loadAbandons(true);
       // Agent lists also filter the Agents table; the call list leaves it alone.
       setFilter(drill && DRILLS[drill].test !== undefined ? drill : "all", true);
       return;
