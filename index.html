@@ -396,7 +396,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.18</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.19</footer>
     </main>
   </section>
 </div>
@@ -1693,7 +1693,7 @@
           "<td data-rec='" + esc(t.uii || "") + "'>" + rec + "</td><td>" + rs + "</td></tr>";
       }).join("") || "<tr><td colspan='8' class='muted'>" + (tix.rows ? "No tickets." : "Loading today's tickets…") + "</td></tr>") +
       "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>Zendesk tickets created since midnight Pacific, newest first (refreshed every few minutes). Module comes from the product's Module field (non-CORE products are named first) and Area from its Area field; new tickets often have no module until an agent sets one. Phone tickets are matched to their call through the call ID the RingCX integration notes on the ticket, so the recording and RingSense page show here. Not narrowed by the queue filter.</div>";
+      "<div class='tiny muted' style='margin-top:6px'>Zendesk tickets created since midnight Pacific, newest first (refreshed every few minutes). Procurement and Custom Reports group tickets are left out, as in the executive report. Module comes from the product's Module field (non-CORE products are named first), or from the Area field's name when only an Area is set, and Area from its Area field; new tickets often have no module until an agent sets one. Phone tickets are matched to their call through the call ID the RingCX integration notes on the ticket, so the recording and RingSense page show here. Not narrowed by the queue filter.</div>";
     if (sids.length) loadRsLinks(sids);
   }
 
