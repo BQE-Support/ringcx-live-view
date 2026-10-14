@@ -185,6 +185,9 @@
   .st-green { --c: var(--rc-green); }
   .st-grey { --c: var(--rc-grey); }
   .st-yellow { --c: var(--rc-yellow); }
+  .st-off { --c: transparent; color: var(--ink-3); font-weight: 500; }
+  .st-off::before { border: 1.5px solid currentColor; box-sizing: border-box; }
+  tr.off td { color: var(--ink-3); }
   .st-red { --c: var(--rc-red); }
 
   .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; margin: 1px 2px 1px 0; }
@@ -380,7 +383,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.7</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.8</footer>
     </main>
   </section>
 </div>
@@ -2115,10 +2118,33 @@
     }).join("") || "<tr><td colspan='6' class='muted'>No reviews yet today.</td></tr>";
   }
 
-  var STATE_ORDER = { "st-red": 0, "st-green": 1, "st-yellow": 2, "st-grey": 3 };
+  var STATE_ORDER = { "st-red": 0, "st-green": 1, "st-yellow": 2, "st-grey": 3, "st-off": 4 };
+
+  // Agents who were logged in earlier today but are logged out now (Fred: the Agents section lists
+  // everyone who logged in at any point today). Sources: sessions this page or the server tracker saw,
+  // plus anyone on today's call report. Supervisors are left out, same as Logins today.
+  function loggedOutAgents() {
+    var live = {}; data.agents.forEach(function (a) { live[normName(fullName(a))] = 1; });
+    var out = {}, calls = callIndex();
+    Object.keys(hist.agents).forEach(function (id) {
+      var h = hist.agents[id]; if (!h.name || !h.sessions || !Object.keys(h.sessions).length) return;
+      var k = normName(h.name); if (live[k] || isSupervisorName(h.name, h.sup)) return;
+      var login = 0, rna = 0;
+      Object.keys(h.sessions).forEach(function (s) { login += h.sessions[s].login; rna += h.sessions[s].rna; });
+      out[k] = { name: h.name, lastSeen: h.lastSeen || null, login: Math.max(login, h.dayLogin || 0), rna: rna, calls: 0, talk: 0 };
+    });
+    Object.keys(calls).forEach(function (ln) {
+      var p = ln.split(", "), name = ((p[1] || "") + " " + p[0]).trim(), k = normName(name);
+      if (live[k] || isSupervisorName(name)) return;
+      var o = out[k] || (out[k] = { name: name, lastSeen: null, login: 0, rna: 0 });
+      o.calls = Object.keys(calls[ln].uiis).length; o.talk = calls[ln].talk;
+    });
+    return Object.keys(out).map(function (k) { return out[k]; }).filter(function (o) { return inQueue(o.name); });
+  }
 
   function renderAgents(e, agents) {
     var me = myAgentId();
+    var off = loggedOutAgents();
     var rows = agents.map(function (a) {
       var d = dayStats(a), w = watchFor(a, e);
       return {
@@ -2127,8 +2153,12 @@
         calls: d.calls, talk: d.talk, aht: d.calls ? d.talk / d.calls : 0,
         rna: d.rna, exits: changeStats(a).exits, loginBase: d.login, login: d.login + e
       };
-    }).filter(function (r) {
+    }).concat(off.map(function (o) {
+      return { off: o, name: o.name, stateTime: o.lastSeen ? (Date.now() - o.lastSeen) / 1000 : -1, queue: "",
+        calls: o.calls, talk: o.talk, aht: o.calls ? o.talk / o.calls : 0, rna: o.rna, exits: 0, loginBase: o.login, login: o.login };
+    })).filter(function (r) {
       if (agentSearch && r.name.toLowerCase().indexOf(agentSearch) < 0) return false;
+      if (r.off) return agentFilter === "all";   // logged out: only in the unfiltered list
       if (agentFilter === "available") return isAvailable(r.a);
       if (agentFilter === "oncall") return isOnCall(r.a);
       if (agentFilter === "working") return stateColor(r.a) === "st-yellow";
@@ -2138,7 +2168,7 @@
     });
     rows.sort(function (x, y) {
       var v;
-      if (sortKey === "state") v = (STATE_ORDER[stateColor(x.a)] - STATE_ORDER[stateColor(y.a)]) || (y.stateTime - x.stateTime);
+      if (sortKey === "state") v = (STATE_ORDER[x.off ? "st-off" : stateColor(x.a)] - STATE_ORDER[y.off ? "st-off" : stateColor(y.a)]) || (x.off ? x.name.localeCompare(y.name) : y.stateTime - x.stateTime);
       else if (sortKey === "name" || sortKey === "queue") v = String(x[sortKey]).localeCompare(String(y[sortKey]));
       else v = x[sortKey] - y[sortKey];
       return v * sortDir;
@@ -2148,6 +2178,21 @@
         "<span class='arrow'>" + (sortKey === c.key ? (sortDir > 0 ? "▲" : "▼") : "▲") + "</span></th>";
     }).join("");
     $("agentBody").innerHTML = rows.map(function (r) {
+      if (r.off) {
+        var o = r.off;
+        return "<tr class='off'>" +
+          "<td>" + esc(r.name) + "</td>" +
+          "<td><span class='st st-off'>Logged out</span></td>" +
+          "<td class='num'>" + (o.lastSeen ? "since " + fmtClock(o.lastSeen).replace(" PT", "") : "–") + "</td>" +
+          "<td></td>" +
+          "<td class='num'>" + (r.calls ? "<a href='#' data-agent-calls='" + esc(r.name) + "' title='Show this agent&#39;s calls today, with recordings'>" + r.calls + "</a>" : "0") + "</td>" +
+          "<td class='num'>" + fmtDur(r.talk) + "</td>" +
+          "<td class='num'>" + (r.calls ? fmtDur(r.aht) : "–") + "</td>" +
+          "<td class='num'>" + (r.rna ? rnaCell(r.rna) : "0") + "</td>" +
+          "<td class='num'>–</td>" +
+          "<td class='num'>" + (r.login ? fmtDur(r.login) : "–") + "</td>" +
+          "</tr>";
+      }
       var a = r.a, cls = (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "");
       return "<tr class='" + cls + "'>" +
         "<td>" + esc(r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + ((isSupervisor(a) || treatedAsSupervisor(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
@@ -2162,7 +2207,7 @@
         "<td class='num'>" + count(r.loginBase) + "</td>" +
         "</tr>";
     }).join("") || "<tr><td colspan='" + COLS.length + "' class='muted'>No agents match.</td></tr>";
-    $("agentSub").textContent = rows.length + " of " + agents.length + " logged in";
+    $("agentSub").textContent = rows.length + " shown · " + agents.length + " logged in" + (off.length ? " · " + off.length + " logged out (were on today)" : "");
   }
 
   function renderSups(e, sups) {
