@@ -266,11 +266,18 @@
           <table>
             <thead><tr>
               <th>Agent</th><th>Status now</th><th>Why flagged</th>
-              <th class="num">RNA</th><th class="num">Left Available (60m)</th><th class="num">Status changes (60m)</th><th class="num">Not taking calls</th>
+              <th class="num">RNA</th><th class="num">Left Available (60m)</th><th class="num">Status changes (60m)</th><th class="num">Not taking calls</th><th>Review</th>
             </tr></thead>
             <tbody id="watchBody"></tbody>
           </table>
         </div>
+        <details id="reviewedBox" style="margin-top:8px">
+          <summary class="tiny muted" id="reviewedSum">Reviewed today</summary>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Time</th><th>Agent</th><th>Reason</th><th>Reviewed by</th><th>Status</th><th></th></tr></thead>
+            <tbody id="reviewedBody"></tbody>
+          </table></div>
+        </details>
       </div>
 
       <div class="panel" id="agentsPanel">
@@ -356,7 +363,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 4.1</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 4.2</footer>
     </main>
   </section>
 </div>
@@ -393,7 +400,10 @@
     STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
     STUCK_CRIT_SEC: 10 * 60,
     MIN_SIGNALS: 2,                                // flag an agent only when this many different signals are true
-    SHIFT_HOURS: 9,                                  // roster has no shift end: assume 8h work + 1h lunch
+    REVIEW_SNOOZE_MIN: 60,                           // a supervisor review hides a watch entry this long (Fred)
+    // People whose hours don't follow daylight saving: roster times + 1h while Pacific is on PDT (Fred).
+    NO_DST: ["Andrea Lopez"],
+    SHIFT_HOURS: 9,                                 // roster has no shift end: assume 8h work + 1h lunch
     OFFLINE_MIN: 5,                                  // logged out this long during the shift = on the watch
     OFFLINE_CRIT_MIN: 30,                            // ...red after this
     LOGIN_GRACE_MIN: 5,                             // first login this many min after scheduled start = late (yellow)
@@ -544,7 +554,7 @@
       var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/pto", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
-      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = j.schedule || [];
+      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = (j.schedule || []).map(dstAdjust);
       renderPto(j); renderLunch(elapsed()); renderLogins(elapsed());
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
@@ -566,6 +576,21 @@
       "<div class='pto-h'>Coming up (7 days)</div>" + (soon.map(function (r) { return row(r, false); }).join("") || "<div class='muted tiny'>Nothing scheduled.</div>");
     $("ptoSub").textContent = "from the PTO calendar · " + fmtClock(pto.at) +
       (j.hidden ? " · " + j.hidden + " hidden (not an active RingCX user)" : "");
+  }
+
+  // ---------------- people whose hours don't follow daylight saving ----------------
+  // Their roster times are their standard-time Pacific hours (e.g. a fixed schedule in a zone with no
+  // DST). While Pacific is on daylight time (PDT), those same hours land one hour later on Pacific clocks.
+  function pacificIsDST() {
+    var p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", timeZoneName: "shortOffset" }).formatToParts(new Date());
+    var tz = (p.filter(function (x) { return x.type === "timeZoneName"; })[0] || {}).value || "";
+    return /GMT-7\b/.test(tz);
+  }
+  function dstAdjust(s) {
+    var k = normName(s.name);
+    if (!pacificIsDST() || !CONFIG.NO_DST.some(function (x) { return normName(x) === k; })) return s;
+    return { name: s.name, days: s.days, noDst: true,
+      shift: s.shift === null ? null : s.shift + 60, lunch: s.lunch === null ? null : s.lunch + 60 };
   }
 
   // ---------------- lunch (Support Roster "Lunch Start", via the same Supabase function) ----------------
@@ -656,7 +681,8 @@
       if (live[k] || out[k] || s.shift === null || s.days.indexOf(n.day) < 0) return;
       if (isSupervisorName(s.name, false) || CONFIG.LUNCH_EXCLUDE.some(function (x) { return normName(x) === k; })) return;
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN || nowMin >= s.shift + CONFIG.SHIFT_HOURS * 60) return;
-      if (s.lunch !== null && nowMin >= s.lunch && nowMin < s.lunch + CONFIG.LUNCH_MAX_MIN + CONFIG.LUNCH_LEEWAY_MIN) return;
+      // Logged out during their normal lunch hour = assumed at lunch (Fred). Only work hours count.
+      if (s.lunch !== null && nowMin >= s.lunch && nowMin < s.lunch + CONFIG.LUNCH_MAX_MIN) return;
       var seen = byName[k], offSec, reason;
       if (seen && seen.h.sup) return;
       if (seen && seen.h.lastSeen) {
@@ -671,9 +697,23 @@
       var parts = s.name.split(" ");
       var a = { agentId: seen ? seen.id : "offline-" + k, firstName: parts[0], lastName: parts.slice(1).join(" "),
         agentState: "LOGGED OUT", agentBaseState: "OFFLINE", stateTime: Math.max(0, offSec - elapsed()), offline: true };
-      list.push({ a: a, w: { lvl: lvl, score: (lvl === "crit" ? 450 : 300) + offSec / 60, reasons: [{ lvl: lvl, text: reason }], cs: changeStats(a) } });
+      var kind = "off@" + (seen && seen.h.lastSeen ? Math.round(seen.h.lastSeen / 60000) : "never");
+      list.push({ a: a, w: { lvl: lvl, score: (lvl === "crit" ? 450 : 300) + offSec / 60, reasons: [{ lvl: lvl, text: reason, kind: kind }], cs: changeStats(a) } });
     });
     return list;
+  }
+
+  // Agents still logged in after their shift ends (start + SHIFT_HOURS). Noted, not flagged as avoidance.
+  function pastShiftAgents() {
+    if (!pto.schedule) return [];
+    var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5), sched = {};
+    pto.schedule.forEach(function (s) { sched[normName(s.name)] = s; });
+    return data.agents.filter(function (a) { return !isSupervisorName(fullName(a), isSupervisor(a)); }).map(function (a) {
+      var s = sched[normName(fullName(a))];
+      if (!s || s.shift === null || s.days.indexOf(n.day) < 0) return null;
+      var end = s.shift + CONFIG.SHIFT_HOURS * 60;
+      return nowMin > end ? { a: a, end: end, over: nowMin - end } : null;
+    }).filter(Boolean).sort(function (x, y) { return y.over - x.over; });
   }
 
   // ---------------- logins today ----------------
@@ -724,7 +764,7 @@
       var start = s && s.shift !== null && s.days.indexOf(n.day) >= 0 ? s.shift : null;
       var late = start !== null && first !== null ? first - start : null;
       seenNames[normName(h.name)] = 1;
-      rows.push({ name: h.name, sup: h.sup, start: start, first: first, late: late, logins: keys.length,
+      rows.push({ name: h.name, sup: h.sup, start: start, noDst: !!(s && s.noDst), first: first, late: late, logins: keys.length,
         total: live ? Math.max(total, live.loggedInDuration || 0) : total, live: live, lastSeen: lastSeen });
     });
     // Scheduled today, not on PTO, past start + grace, never seen logged in.
@@ -744,11 +784,13 @@
     }
     body.innerHTML = rows.map(function (r) {
       var flag = r.missing || (r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN ? "flag-warn" : "");
+      var pastEnd = r.live && r.start !== null && nowMin > r.start + CONFIG.SHIFT_HOURS * 60;
       var status = r.missing ? "<span class='chip crit'>Not logged in yet</span>"
-        : (r.live ? "<span class='st st-green' style='font-weight:400'>Logged in</span>"
+        : (r.live ? "<span class='st st-green' style='font-weight:400'>Logged in</span>" +
+            (pastEnd ? " <span class='chip warn'>Past shift end (" + clockOf(r.start + CONFIG.SHIFT_HOURS * 60) + ") by " + fmtShort((nowMin - r.start - CONFIG.SHIFT_HOURS * 60) * 60) + "</span>" : "")
           : "<span class='muted'>Logged out" + (r.lastSeen ? " · last seen " + fmtClock(r.lastSeen) : "") + "</span>");
       return "<tr class='" + flag + "'><td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
-        "<td class='num'>" + (r.start !== null ? clockOf(r.start) : "<span class='muted'>–</span>") + "</td>" +
+        "<td class='num'>" + (r.start !== null ? clockOf(r.start) + (r.noDst ? " <span class='chip info' title='Hours do not follow daylight saving; roster time +1h while Pacific is on daylight time'>no DST</span>" : "") : "<span class='muted'>–</span>") + "</td>" +
         "<td class='num'>" + (r.first !== null ? clockOf(r.first) : "<span class='muted'>–</span>") + "</td>" +
         "<td class='num'>" + lateCell(r) + "</td>" +
         "<td class='num'>" + (r.logins > 1 ? "<span class='warmn'>" + r.logins + "</span>" : r.logins) + "</td>" +
@@ -770,7 +812,8 @@
       presence.client = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, { auth: { persistSession: false } });
       var key = String(jwtClaims(session.rcxAccess).agnt || Math.random());
       presence.channel = presence.client.channel("ringcx-live-view", { config: { presence: { key: key } } });
-      presence.channel.on("presence", { event: "sync" }, renderPresence)
+      presence.channel.on("broadcast", { event: "reviews" }, function () { loadReviews(); })   // someone added/undid a review
+        .on("presence", { event: "sync" }, renderPresence)
         .subscribe(function (status) { if (status === "SUBSCRIBED") trackPresence(); });
     } catch (e) { presence.channel = null; }
   }
@@ -948,26 +991,29 @@
   // An agent is only flagged once MIN_SIGNALS different signals are true at the same time.
   function watchFor(a, e) {
     var reasons = [], score = 0, lvl = null;
-    function add(l, text, s) { reasons.push({ lvl: l, text: text }); score += s; if (l === "crit" || !lvl) lvl = l === "crit" ? "crit" : (lvl || l); }
+    // kind + stamp identify the signal for reviews: the same signal getting older keeps the same stamp,
+    // a new signal (another RNA, a new status, a new logout) gets a new one.
+    var stateStartMin = Math.round(((Date.parse(a.lastUpdate) || data.fetchedAt) - (a.stateTime || 0) * 1000) / 60000);
+    function add(l, text, s, kind) { reasons.push({ lvl: l, text: text, kind: kind || "x" }); score += s; if (l === "crit" || !lvl) lvl = l === "crit" ? "crit" : (lvl || l); }
     var rna = dayStats(a).rna;   // today's total, same number the tables show
-    if (rna >= 2) add("crit", rna + " RNA", 300 + rna * 50);
-    else if (rna === 1) add("warn", "1 RNA", 200);
+    if (rna >= 2) add("crit", rna + " RNA", 300 + rna * 50, "rna" + rna);
+    else if (rna === 1) add("warn", "1 RNA", 200, "rna1");
     var cs = changeStats(a);
-    if (cs.exits >= CONFIG.EXIT_CRIT) add("crit", "Left Available " + cs.exits + "x in 60m", 250 + cs.exits * 20);
-    else if (cs.exits >= CONFIG.EXIT_WARN) add("warn", "Left Available " + cs.exits + "x in 60m", 150 + cs.exits * 20);
-    else if (cs.changes >= CONFIG.CHANGE_WARN) add("warn", cs.changes + " status changes in 60m", 100 + cs.changes * 10);
+    if (cs.exits >= CONFIG.EXIT_CRIT) add("crit", "Left Available " + cs.exits + "x in 60m", 250 + cs.exits * 20, "exits" + cs.exits);
+    else if (cs.exits >= CONFIG.EXIT_WARN) add("warn", "Left Available " + cs.exits + "x in 60m", 150 + cs.exits * 20, "exits" + cs.exits);
+    else if (cs.changes >= CONFIG.CHANGE_WARN) add("warn", cs.changes + " status changes in 60m", 100 + cs.changes * 10, "chg" + cs.changes);
     if (isNotReady(a)) {
       var st = (a.stateTime || 0) + e;
-      if (st > CONFIG.NOTREADY_CRIT_SEC) add("crit", "Not taking calls " + fmtShort(st), 200 + st / 60);
-      else if (st > CONFIG.NOTREADY_WARN_SEC) add("warn", "Not taking calls " + fmtShort(st), 100 + st / 60);
+      if (st > CONFIG.NOTREADY_CRIT_SEC) add("crit", "Not taking calls " + fmtShort(st), 200 + st / 60, "nr@" + stateStartMin);
+      else if (st > CONFIG.NOTREADY_WARN_SEC) add("warn", "Not taking calls " + fmtShort(st), 100 + st / 60, "nr@" + stateStartMin);
     }
-    if (a.pendingDisposition && (a.pendingDispositionTime || 0) + e > CONFIG.WRAP_WARN_SEC) add("warn", "Wrap-up " + fmtDur((a.pendingDispositionTime || 0) + e), 80);
+    if (a.pendingDisposition && (a.pendingDispositionTime || 0) + e > CONFIG.WRAP_WARN_SEC) add("warn", "Wrap-up " + fmtDur((a.pendingDispositionTime || 0) + e), 80, "wrap@" + stateStartMin);
     // Plain WORKING (system state, blocks calls) puts someone on the watch on its own, no second signal needed.
     var stuck = false;
     if (isStuck(a) && (a.stateTime || 0) + e >= CONFIG.STUCK_WARN_SEC) {
       var stt = (a.stateTime || 0) + e;
       stuck = true;
-      add(stt >= CONFIG.STUCK_CRIT_SEC ? "crit" : "warn", "In plain WORKING " + fmtShort(stt) + ": blocks calls, ask them to update status", 400 + stt / 60);
+      add(stt >= CONFIG.STUCK_CRIT_SEC ? "crit" : "warn", "In plain WORKING " + fmtShort(stt) + ": blocks calls, ask them to update status", 400 + stt / 60, "stuck@" + stateStartMin);
     }
     return (stuck || reasons.length >= CONFIG.MIN_SIGNALS) ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
   }
@@ -1064,14 +1110,17 @@
     var e = elapsed();
     var agents = data.agents.filter(inAgentSection);
     var sups = data.agents.filter(function (a) { return !inAgentSection(a); });
-    var watch = agents.map(function (a) { return { a: a, w: watchFor(a, e) }; }).filter(function (x) { return x.w; })
+    var all = agents.map(function (a) { return { a: a, w: watchFor(a, e) }; }).filter(function (x) { return x.w; })
       .concat(offlineAgents())
       .sort(function (x, y) { return y.w.score - x.w.score; });
+    // Reviewed entries are snoozed for an hour (or until a new signal); everything else counts as flagged.
+    var watch = [], snoozed = [];
+    all.forEach(function (x) { var st = reviewStateOf(x); x.review = st.latest; (st.snoozed ? snoozed : watch).push(x); });
     renderQueues(e);
     renderAlerts(e, watch);
     renderKpis(e, agents, sups, watch);
     renderDrill(e, agents, watch);
-    renderWatch(e, watch);
+    renderWatch(e, watch, snoozed);
     renderAgents(e, agents);
     renderSups(e, sups);
     renderBoard();
@@ -1115,6 +1164,10 @@
         items.push({ lvl: "warn", score: 1000 + (q.longestInQueue || 0), html: "<b>" + esc(q.gateName) + "</b>: " + waitTxt });
       }
     });
+    var past = pastShiftAgents();
+    if (past.length) items.push({ lvl: "warn", score: 300,
+      html: "<b>" + past.length + " agent" + (past.length > 1 ? "s" : "") + "</b> still logged in past shift end: " +
+        past.map(function (p) { return esc(fullName(p.a)) + " (+" + fmtShort(p.over * 60) + ")"; }).join(", ") });
     if (watch.length) {
       var crit = watch.filter(function (x) { return x.w.lvl === "crit"; }).length;
       items.push({ lvl: crit ? "crit" : "warn", score: 400, link: "#watchPanel",
@@ -1573,21 +1626,90 @@
     applyFlash(e);
   }
 
-  function renderWatch(e, watch) {
-    $("watchPanel").hidden = !watch.length;   // only shown when someone is flagged
-    $("watchSub").textContent = "status changes counted by this browser since " + fmtClock(hist.since);
-    $("watchBody").innerHTML = watch.map(function (x) {
-      var a = x.a, w = x.w, nr = isNotReady(a) ? (a.stateTime || 0) : null;
-      return "<tr class='flag-" + w.lvl + "'>" +
-        "<td>" + esc(fullName(a)) + "</td>" +
-        "<td>" + stateHtml(a) + "</td>" +
-        "<td class='wrap'>" + w.reasons.map(function (r) { return "<span class='chip " + r.lvl + "'>" + esc(r.text) + "</span>"; }).join("") + "</td>" +
-        "<td class='num'>" + rnaCell(dayStats(a).rna) + "</td>" +
-        "<td class='num'>" + w.cs.exits + "</td>" +
-        "<td class='num'>" + w.cs.changes + "</td>" +
-        "<td class='num'>" + (nr != null ? count(nr) : "–") + "</td>" +
-        "</tr>";
-    }).join("") || "<tr><td colspan='7' class='muted'>Nobody flagged right now.</td></tr>";
+  // ---------------- supervisor reviews of watch entries (Supabase "reviews" function) ----------------
+  // A review snoozes an entry for REVIEW_SNOOZE_MIN. If the agent is still flagged after that, they
+  // come back (with the earlier review shown). A NEW signal (different signature) brings them back at once.
+  var reviews = { list: [], at: 0, loading: false, err: null };
+  var drafts = {};   // agentKey -> reason being typed
+  function agentKeyOf(a) { return normName(fullName(a)); }
+  function sigOf(x) { return x.w.reasons.map(function (r) { return r.kind || "x"; }).sort().join("|"); }
+  function reviewStateOf(x) {
+    var key = agentKeyOf(x.a), sig = sigOf(x), now = Date.now();
+    var mine = reviews.list.filter(function (r) { return r.agent_key === key; });
+    var snooze = mine.filter(function (r) { return r.signature === sig && now - Date.parse(r.created_at) < CONFIG.REVIEW_SNOOZE_MIN * 60000; })[0];
+    return { snoozed: !!snooze, until: snooze ? Date.parse(snooze.created_at) + CONFIG.REVIEW_SNOOZE_MIN * 60000 : 0, latest: mine[0] || null };
+  }
+  async function reviewsApi(method, body) {
+    if (tokenNearExpiry()) await refreshToken();
+    var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/reviews", {
+      method: method, headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    var j = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+    return j;
+  }
+  async function loadReviews() {
+    if (reviews.loading || !session || !CONFIG.SUPABASE_URL) return;
+    reviews.loading = true;
+    try { var j = await reviewsApi("GET"); reviews.list = j.reviews || []; reviews.at = Date.now(); reviews.err = null; }
+    catch (x) { reviews.err = x.message; }
+    finally { reviews.loading = false; if (data.fetchedAt) render(); }
+  }
+  function tellOthersReviewsChanged() {
+    try { if (presence.channel) presence.channel.send({ type: "broadcast", event: "reviews", payload: {} }); } catch (x) {}
+  }
+  async function saveReview(key) {
+    var x = (window.__watchByKey || {})[key], text = String(drafts[key] || "").trim();
+    if (!x) return;
+    if (text.length < 3) { alert("Please write a short reason (at least 3 characters)."); return; }
+    try {
+      await reviewsApi("POST", { action: "add", agentKey: key, agentName: fullName(x.a), signature: sigOf(x), reason: text });
+      delete drafts[key]; await loadReviews(); tellOthersReviewsChanged();
+    } catch (err) { alert("Couldn't save the review: " + err.message); }
+  }
+  async function undoReview(id) {
+    try { await reviewsApi("POST", { action: "undo", id: id }); await loadReviews(); tellOthersReviewsChanged(); }
+    catch (err) { alert("Couldn't undo: " + err.message); }
+  }
+
+  function renderWatch(e, watch, snoozed) {
+    snoozed = snoozed || [];
+    // Keep a half-typed review intact: skip redrawing while someone is typing in the watch.
+    var typing = document.activeElement && document.activeElement.hasAttribute && document.activeElement.hasAttribute("data-review-input");
+    $("watchPanel").hidden = !watch.length && !snoozed.length;   // only shown when someone is flagged
+    $("watchSub").textContent = "status changes counted by this browser since " + fmtClock(hist.since) +
+      (snoozed.length ? " · " + snoozed.length + " reviewed (snoozed)" : "");
+    window.__watchByKey = {};
+    watch.concat(snoozed).forEach(function (x) { window.__watchByKey[agentKeyOf(x.a)] = x; });
+    if (!typing) {
+      $("watchBody").innerHTML = watch.map(function (x) {
+        var a = x.a, w = x.w, nr = isNotReady(a) ? (a.stateTime || 0) : null, key = agentKeyOf(a), rv = x.review;
+        var prior = rv ? "<div class='tiny muted' style='margin-top:3px'>Reviewed " + fmtClock(Date.parse(rv.created_at)) + " by " + esc(rv.reviewer_name) + ": “" + esc(rv.reason) + "”</div>" : "";
+        var reviewCell = drafts[key] !== undefined
+          ? "<input class='search' data-review-input='" + esc(key) + "' maxlength='500' placeholder='Reason…' value='" + esc(drafts[key]) + "' style='min-width:180px'> " +
+            "<button class='btn' data-review-save='" + esc(key) + "'>Save</button> <button class='btn' data-review-cancel='" + esc(key) + "'>Cancel</button>"
+          : "<button class='btn' data-review-open='" + esc(key) + "'>Review</button>";
+        return "<tr class='flag-" + w.lvl + "'>" +
+          "<td>" + esc(fullName(a)) + "</td>" +
+          "<td>" + stateHtml(a) + "</td>" +
+          "<td class='wrap'>" + w.reasons.map(function (r) { return "<span class='chip " + r.lvl + "'>" + esc(r.text) + "</span>"; }).join("") + prior + "</td>" +
+          "<td class='num'>" + rnaCell(dayStats(a).rna) + "</td>" +
+          "<td class='num'>" + w.cs.exits + "</td>" +
+          "<td class='num'>" + w.cs.changes + "</td>" +
+          "<td class='num'>" + (nr != null ? count(nr) : "–") + "</td>" +
+          "<td class='wrap'>" + reviewCell + "</td>" +
+          "</tr>";
+      }).join("") || "<tr><td colspan='8' class='muted'>Nobody needs attention right now. " + snoozed.length + " reviewed.</td></tr>";
+    }
+    // Reviewed today
+    $("reviewedSum").textContent = "Reviewed today (" + reviews.list.length + ")" + (reviews.err ? " · couldn't load reviews: " + reviews.err : "");
+    $("reviewedBody").innerHTML = reviews.list.map(function (r) {
+      var t = Date.parse(r.created_at), end = t + CONFIG.REVIEW_SNOOZE_MIN * 60000;
+      var status = Date.now() < end ? "Snoozed until " + fmtClock(end) + " (sooner if a new signal appears)" : "Snooze over";
+      return "<tr><td>" + fmtClock(t) + "</td><td>" + esc(r.agent_name) + "</td><td class='wrap'>" + esc(r.reason) + "</td><td>" + esc(r.reviewer_name) + "</td>" +
+        "<td class='tiny muted'>" + esc(status) + "</td><td><button class='btn' data-review-undo='" + r.id + "'>Undo</button></td></tr>";
+    }).join("") || "<tr><td colspan='6' class='muted'>No reviews yet today.</td></tr>";
   }
 
   var STATE_ORDER = { "st-red": 0, "st-green": 1, "st-yellow": 2, "st-grey": 3 };
@@ -1677,6 +1799,15 @@
       return;
     }
     // Long calls: Listen / Barge in / Stop, and saving the "ring me at" number.
+    // Watch reviews: open / cancel / save / undo.
+    var ro = ev.target.closest("[data-review-open]");
+    if (ro) { var rk = ro.getAttribute("data-review-open"); drafts[rk] = ""; render(); var inp = document.querySelector("[data-review-input='" + rk.replace(/'/g, "\\'") + "']"); if (inp) inp.focus(); return; }
+    var rc = ev.target.closest("[data-review-cancel]");
+    if (rc) { delete drafts[rc.getAttribute("data-review-cancel")]; if (document.activeElement) document.activeElement.blur(); render(); return; }
+    var rs = ev.target.closest("[data-review-save]");
+    if (rs) { var sk2 = rs.getAttribute("data-review-save"); var inp2 = document.querySelector("[data-review-input='" + sk2.replace(/'/g, "\\'") + "']"); if (inp2) drafts[sk2] = inp2.value; if (document.activeElement) document.activeElement.blur(); saveReview(sk2); return; }
+    var ru = ev.target.closest("[data-review-undo]");
+    if (ru) { undoReview(+ru.getAttribute("data-review-undo")); return; }
     var mb = ev.target.closest("[data-mon]");
     if (mb) { startMonitor(mb.getAttribute("data-uii"), mb.getAttribute("data-mon")); return; }
     var ms = ev.target.closest("[data-mon-stop]");
@@ -1717,6 +1848,8 @@
     $("signinView").hidden = true; $("liveView").hidden = false; startPolling(); startPresence();
     // Time off: the Supabase function reads Smartsheet at most every 30 min, so ask on the same cadence.
     loadPto(); clearInterval(ptoTimer); ptoTimer = setInterval(loadPto, 30 * 60 * 1000);
+    // Reviews: on start, every 2 minutes as a backstop, and instantly when another viewer changes one.
+    loadReviews(); setInterval(loadReviews, 2 * 60 * 1000);
   }
 
   // ---------------- auto-update ----------------
