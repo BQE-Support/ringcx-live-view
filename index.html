@@ -305,7 +305,7 @@
           <li><b>SLA</b> is RingCX's own service-level count for each queue, from its real-time data (<code>slaPass</code> / <code>slaFail</code>). A call passes if it is answered within the queue's SLA time, which is 30 seconds on every BQE queue. Calls answered later, or abandoned after 30 seconds, fail. The top tile adds up all queues. The counts are today's running totals.</li>
           <li><b>Queue hours:</b> the viewer shows a queue as Open only if RingCX says it's open and, for queues with configured hours, the current time is inside them. Payroll Specialist is open M–F 6am–4pm Pacific, which matches its RingCX schedule. Outside those hours it shows Closed and raises no staffing alerts. If RingCX ever reports it open outside those hours, the page flags it as a schedule problem.</li>
           <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up. The tiles split this into <b>Working</b> (yellow statuses) and <b>Break / lunch</b> (grey: On-Break, Away, Lunch).</li>
-          <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, only while they are taking queue calls (Available, or on a call from a queue). Some agents also count as supervisors while in a specific status: Connor Lenhart while in Escalation Support. Those rules are set in the page's settings (SUPERVISOR_DUTY).</li>
+          <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, whenever they are Available or Engaged. Connor Lenhart is treated as a supervisor too (TREAT_AS_SUPERVISOR in the page settings).</li>
           <li>The avoidance watch flags an agent only when at least <b><span data-cfg="MIN_SIGNALS"></span> of these signals</b> are true at the same time. One signal alone is not flagged.
             <ul>
               <li>Any RNA (ring, no answer) this login session. Two or more is critical.</li>
@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.5</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.6</footer>
     </main>
   </section>
 </div>
@@ -382,11 +382,8 @@
     QUEUE_HOURS: {
       "Payroll Specialist": { days: [1, 2, 3, 4, 5], open: "06:00", close: "16:00", tz: "America/Los_Angeles", label: "M–F 6am–4pm PT" }
     },
-    // Agents who act as supervisors while in certain statuses: listed in the
-    // Supervisors section (and kept off the avoidance watch) while in one of them.
-    SUPERVISOR_DUTY: [
-      { agent: "Connor Lenhart", states: ["ESCALATION SUPPORT"] }
-    ]
+    // Agents treated exactly like RingCX supervisors (agent type AGENT in RingCX, supervisor role at BQE).
+    TREAT_AS_SUPERVISOR: ["Connor Lenhart"]
   };
   var IS_LOCAL_DEV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.port === "8765";
   var STORE_KEY = "rcxLiveView.session.v1";
@@ -609,15 +606,14 @@
   function isSupervisor(a) { return String(a.agentType || "").toUpperCase() === "SUPERVISOR"; }
   // Supervisors only count as call-takers while Available or on a call that came from a queue.
   function fullName(a) { return (a.firstName || "") + " " + (a.lastName || ""); }
-  function onSupervisorDuty(a) {
-    var name = fullName(a).trim().toLowerCase(), st = String(a.agentState || "").toUpperCase();
-    return CONFIG.SUPERVISOR_DUTY.some(function (r) {
-      return r.agent.toLowerCase() === name && r.states.some(function (s) { return s.toUpperCase() === st; });
-    });
+  function treatedAsSupervisor(a) {
+    var name = fullName(a).trim().toLowerCase();
+    return CONFIG.TREAT_AS_SUPERVISOR.some(function (n) { return n.toLowerCase() === name; });
   }
+  // Supervisors (RingCX SUPERVISOR type, or on TREAT_AS_SUPERVISOR) sit in the Supervisors table
+  // unless they are Available or Engaged, in which case they show with the agents.
   function inAgentSection(a) {
-    if (onSupervisorDuty(a)) return false;
-    return !isSupervisor(a) || isAvailable(a) || (isOnCall(a) && +a.gateId > 0);
+    return !(isSupervisor(a) || treatedAsSupervisor(a)) || isAvailable(a) || isOnCall(a);
   }
 
   // ---------------- status-change history (observed by this browser) ----------------
@@ -657,7 +653,7 @@
       var sk = String(a.loginDts || "session");
       h.sessions = h.sessions || {};
       h.sessions[sk] = { login: a.loggedInDuration || a.loginTime || 0, rna: a.rna || 0 };
-      h.name = fullName(a); h.sup = isSupervisor(a);
+      h.name = fullName(a); h.sup = isSupervisor(a) || treatedAsSupervisor(a);
       h.label = label; h.base = b; h.start = start; h.calls = a.callsHandled || 0; h.rna = a.rna || 0;
       h.ev = h.ev.filter(function (e) { return e.t > keepAfter; });
     });
@@ -1073,7 +1069,7 @@
       (rows.map(function (r) {
         var a = r.a;
         return "<tr class='" + (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "") + "'>" +
-          "<td>" + esc(fullName(a)) + (isSupervisor(a) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+          "<td>" + esc(fullName(a)) + ((isSupervisor(a) || treatedAsSupervisor(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
           "<td>" + stateHtml(a) + "</td>" +
           "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
           "<td>" + esc(isOnCall(a) ? (+a.gateId > 0 ? gateName(a.gateId) : "Outbound/direct") : "") + "</td>" +
@@ -1167,7 +1163,7 @@
     $("agentBody").innerHTML = rows.map(function (r) {
       var a = r.a, cls = (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "");
       return "<tr class='" + cls + "'>" +
-        "<td>" + esc(r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + (isSupervisor(a) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+        "<td>" + esc(r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + ((isSupervisor(a) || treatedAsSupervisor(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td>" + stateHtml(a) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
         "<td>" + esc(r.queue) + "</td>" +
@@ -1187,7 +1183,7 @@
     sups.sort(function (x, y) { return fullName(x).localeCompare(fullName(y)); });
     $("supBody").innerHTML = sups.map(function (a) {
       return "<tr class='" + (String(a.agentId) === me ? "me" : "") + "'>" +
-        "<td>" + esc(fullName(a)) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + (isSupervisor(a) ? "" : " <span class='chip info'>Agent, supervisor duty</span>") + "</td>" +
+        "<td>" + esc(fullName(a)) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + (isSupervisor(a) ? "" : " <span class='chip info'>Treated as supervisor</span>") + "</td>" +
         "<td>" + stateHtml(a) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
         "<td class='num'>" + (a.callsHandled || 0) + "</td>" +
