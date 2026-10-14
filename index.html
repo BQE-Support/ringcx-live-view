@@ -55,7 +55,7 @@
 
   /* Layout: queues anchored top-left (sticky), everything else to the right */
   .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 12px; align-items: start; }
-  .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+  .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; overflow-x: hidden; }
   .content { min-width: 0; }
   /* Below ~1200px the pinned Queues column would squeeze the tables into sideways scrolling,
      so it moves above the rest instead (normal laptop/desktop widths keep it pinned on the left). */
@@ -118,7 +118,8 @@
   .pto-h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); margin: 6px 0 4px; }
   .pto-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-top: 1px solid var(--border); font-size: 13px; }
   .pto-row:first-of-type { border-top: 0; }
-  .pto-row .when { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+  .pto-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+  .pto-row .when { color: var(--ink-3); font-size: 12px; text-align: right; min-width: 0; overflow-wrap: anywhere; }
 
   /* Who's viewing: initials avatars in the top-right tag */
   .avatar { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; margin-left: 4px;
@@ -348,7 +349,7 @@
             <tbody id="loginBody"></tbody>
           </table>
         </div>
-        <div class="tiny muted" style="margin-top:6px">First login and session times come from RingCX (Pacific). Scheduled start is the Support Roster "Shift Start". Late = first login more than <span data-cfg="LOGIN_GRACE_MIN"></span> min after the scheduled start (red after <span data-cfg="LOGIN_LATE_CRIT_MIN"></span>). How sure each first login is: <b>confirmed</b> = when this page first saw their earliest session, RingCX had no other login time for them today. <b>from login time</b> = RingCX had earlier login time this page did not see. Those sessions all came before, so the first login was no later than the earliest session we saw minus that time (for example, a 6:05 session with 59 min logged earlier means 5:06 at the latest). <b>on a call by</b> = same, but their earliest queue call pins it even earlier. <b>earlier session not seen</b> = nothing to pin it down. Only confirmed times count as late (yellow or red, and in the Performance score); the others show "at most" and are not counted. "2+" logins = RingCX counted more logged-in time than the sessions this page saw. <b>Notes</b> = any approved viewer can add a note to a row (Enter or Save); everyone sees it with who wrote it and when. You can edit or delete (×) only your own notes ("edit"; Shift+Enter for a new line). Long notes fold after a few lines ("more").</div>
+        <div class="tiny muted" style="margin-top:6px">First login and session times come from RingCX (Pacific). Supervisors are listed in their own group below the agents. Scheduled start is the Support Roster "Shift Start". Late = first login more than <span data-cfg="LOGIN_GRACE_MIN"></span> min after the scheduled start (red after <span data-cfg="LOGIN_LATE_CRIT_MIN"></span>). How sure each first login is: <b>confirmed</b> = when this page first saw their earliest session, RingCX had no other login time for them today. <b>from login time</b> = RingCX had earlier login time this page did not see. Those sessions all came before, so the first login was no later than the earliest session we saw minus that time (for example, a 6:05 session with 59 min logged earlier means 5:06 at the latest). <b>on a call by</b> = same, but their earliest queue call pins it even earlier. <b>earlier session not seen</b> = nothing to pin it down. Only confirmed times count as late (yellow or red, and in the Performance score); the others show "at most" and are not counted. "2+" logins = RingCX counted more logged-in time than the sessions this page saw. <b>Notes</b> = any approved viewer can add a note to a row (Enter or Save); everyone sees it with who wrote it and when. You can edit or delete (×) only your own notes ("edit"; Shift+Enter for a new line). Long notes fold after a few lines ("more").</div>
       </div>
 
       <details class="panel">
@@ -386,7 +387,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.14</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.15</footer>
     </main>
   </section>
 </div>
@@ -853,7 +854,7 @@
       var k = normName(s.name);
       if (live[k] || skip[k] || out[k] || !inQueue(s.name)) return;
       var L = lunchFor(histByName[k], s, false);
-      if (L && L.active) atLunch.push({ name: s.name, s: s, from: L.from, L: L, how: " · logged out" + (L.unsure ? " (at least; left before this page was watching)" : "") });
+      if (L && L.active) atLunch.push({ name: s.name, s: s, from: L.from, L: L, how: " · logged out" + (L.unsure ? " (at least)" : "") });
     });
     pto.schedule.forEach(function (s) {
       var k = normName(s.name), a = live[k];
@@ -872,7 +873,7 @@
         overdue.push({ a: a, s: s, late: nowMin - s.lunch });
       }
     });
-    function item(name, right, cls) { return "<div class='pto-row'><span>" + esc(name) + "</span><span class='when " + (cls || "") + "'>" + right + "</span></div>"; }
+    function item(name, right, cls) { return "<div class='pto-row'><span>" + esc(name) + (isSupervisorName(name, false) ? " <span class='chip info'>Sup</span>" : "") + "</span><span class='when " + (cls || "") + "'>" + right + "</span></div>"; }
     var html =
       "<div class='pto-h'>At lunch now</div>" +
       (atLunch.sort(function (x, y) { return x.from - y.from; }).map(function (x) {
@@ -1004,7 +1005,8 @@
     var rows = [], seenNames = {};
     Object.keys(hist.agents).forEach(function (id) {
       var h = hist.agents[id]; if (!h.name || !h.sessions) return;
-      if (isSupervisorName(h.name, h.sup)) return;
+      // Supervisors are tracked too (Fred, 2026-10-14), listed in their own group below the agents.
+      var isSup = isSupervisorName(h.name, h.sup);
       var keys = Object.keys(h.sessions).filter(function (k) { return k !== "session"; }).sort();
       if (!keys.length) return;
       var first = dtsMinutes(keys[0]), total = 0, lastSeen = 0;
@@ -1035,7 +1037,7 @@
       var late = start !== null && first !== null ? first - start : null;
       seenNames[normName(h.name)] = 1;
       loginByName[normName(h.name)] = { late: late, conf: conf };
-      rows.push({ name: h.name, sup: h.sup, start: start, noDst: !!(s && s.noDst), first: first, late: late, conf: conf,
+      rows.push({ name: h.name, sup: isSup, start: start, noDst: !!(s && s.noDst), first: first, late: late, conf: conf,
         logins: keys.length, moreLogins: hidden,
         total: Math.max(total, h.dayLogin || 0, live ? live.loggedInDuration || 0 : 0), live: live, lastSeen: lastSeen });
     });
@@ -1043,13 +1045,13 @@
     (pto.schedule || []).forEach(function (s) {
       var k = normName(s.name);
       if (seenNames[k] || out[k] || s.shift === null || s.days.indexOf(n.day) < 0) return;
-      if (!supNames || isSupervisorName(s.name, false)) return;   // wait for the supervisor list before calling anyone missing
+      if (!supNames) return;   // wait for the supervisor list so the row lands in the right group
       if (CONFIG.LUNCH_EXCLUDE.some(function (x) { return normName(x) === k; })) return;
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN) return;
-      rows.push({ name: s.name, start: s.shift, first: null, late: nowMin - s.shift, logins: 0, total: 0, missing: true });
+      rows.push({ name: s.name, sup: isSupervisorName(s.name, false), start: s.shift, first: null, late: nowMin - s.shift, logins: 0, total: 0, missing: true });
     });
     rows = rows.filter(function (r) { return inQueue(r.name); });   // queue filter
-    rows.sort(function (x, y) { return (y.missing ? 1 : 0) - (x.missing ? 1 : 0) || (y.late || -999) - (x.late || -999) || x.name.localeCompare(y.name); });
+    rows.sort(function (x, y) { return (x.sup ? 1 : 0) - (y.sup ? 1 : 0) || (y.missing ? 1 : 0) - (x.missing ? 1 : 0) || (y.late || -999) - (x.late || -999) || x.name.localeCompare(y.name); });
     // Only a CONFIRMED first login can be red. "On a call by" is an upper bound (at most that late),
     // and an unseen earlier session means we can't say they were late at all.
     function lateCell(r) {
@@ -1068,14 +1070,16 @@
     }
     // Only a confirmed first login counts as late; an "at most" bound may well be on time.
     function isLate(r) { return r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN && (r.conf === "confirmed" || r.missing); }
-    body.innerHTML = rows.map(function (r) {
+    body.innerHTML = rows.map(function (r, i) {
+      var group = r.sup && (i === 0 || !rows[i - 1].sup)
+        ? "<tr><td colspan='8' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" : "";
       var flag = r.missing || (r.conf === "confirmed" && r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (isLate(r) ? "flag-warn" : "");
       var pastEnd = r.live && r.start !== null && nowMin > r.start + CONFIG.SHIFT_HOURS * 60;
       var status = r.missing ? "<span class='chip crit'>Not logged in yet</span>"
         : (r.live ? "<span class='st st-green' style='font-weight:400'>Logged in</span>" +
             (pastEnd ? " <span class='chip warn'>Past shift end (" + clockOf(r.start + CONFIG.SHIFT_HOURS * 60) + ") by " + fmtShort((nowMin - r.start - CONFIG.SHIFT_HOURS * 60) * 60) + "</span>" : "")
           : "<span class='muted'>Logged out" + (r.lastSeen ? " · last seen " + fmtClock(r.lastSeen) : "") + "</span>");
-      return "<tr class='" + flag + "'><td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+      return group + "<tr class='" + flag + "'><td>" + esc(r.name) + "</td>" +
         "<td class='num'>" + (r.start !== null ? clockOf(r.start) + (r.noDst ? " <span class='chip info' title='Hours do not follow daylight saving; roster time +1h while Pacific is on daylight time'>no DST</span>" : "") : "<span class='muted'>–</span>") + "</td>" +
         "<td class='num'>" + firstCell(r) + "</td>" +
         "<td class='num'>" + lateCell(r) + "</td>" +
@@ -1087,7 +1091,8 @@
     }).join("") || "<tr><td colspan='8' class='muted'>No logins seen yet today.</td></tr>";
     var lateN = rows.filter(function (r) { return !r.missing && isLate(r); }).length;
     var missN = rows.filter(function (r) { return r.missing; }).length;
-    $("loginSub").textContent = rows.length + " people" + (lateN ? " · " + lateN + " late" : "") + (missN ? " · " + missN + " not logged in" : "") + " · " + trackedLabel();
+    var supN = rows.filter(function (r) { return r.sup; }).length;
+    $("loginSub").textContent = (rows.length - supN) + " agents" + (supN ? " · " + supN + " supervisors" : "") + (lateN ? " · " + lateN + " late" : "") + (missN ? " · " + missN + " not logged in" : "") + " · " + trackedLabel();
   }
 
   // ---------------- who's viewing (Supabase Realtime presence) ----------------
