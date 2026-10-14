@@ -322,7 +322,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.0</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.1</footer>
     </main>
   </section>
 </div>
@@ -357,6 +357,7 @@
     // Only these RingCX agent IDs may use the viewer (Fred approves each one). The names
     // behind the IDs are kept in the internal README, not here, because this page is public.
     ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144"],
+    HIDDEN_QUEUES: ["Test Queue"],                   // never shown anywhere on the page
     CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
     // Business hours enforced by the viewer, on top of RingCX's own open/closed flag.
     // Outside these hours the queue shows Closed and raises no staffing alerts.
@@ -650,7 +651,9 @@
     if (document.hidden) { setStatus("paused", "Paused while hidden"); return; }
     try {
       var res = await Promise.all([api("realTimeData/agent"), api("realTimeData/inbound")]);
-      data = { agents: res[0] || [], queues: res[1] || [], fetchedAt: Date.now() };
+      // Hidden queues are dropped right here, so they never reach cards, tiles, alerts or totals.
+      var queues = (res[1] || []).filter(function (q) { return CONFIG.HIDDEN_QUEUES.indexOf(q.gateName) < 0; });
+      data = { agents: res[0] || [], queues: queues, fetchedAt: Date.now() };
       observe(data.agents, data.fetchedAt);
       lastError = null; backoff = 1;
       $("errorBanner").hidden = true;
@@ -859,7 +862,7 @@
         reportType: "GLOBAL_CALL_TYPE_DELIMITED",
         reportCriteria: { criteriaType: "GLOBAL_CALL_TYPE_CRITERIA", startDate: ptMidnightIso(), containGates: true, containAgents: true, includeNoAnswers: true }
       });
-      abandons.all = parseCsv(csv);
+      abandons.all = parseCsv(csv).filter(function (r) { return CONFIG.HIDDEN_QUEUES.indexOf(r.source_name) < 0; });
       abandons.rows = abandons.all.filter(function (r) { return r.call_result === "ABANDON" && r.source_type === "ACD-INBOUND"; })
         .sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
       abandons.at = Date.now(); abandons.err = null;
