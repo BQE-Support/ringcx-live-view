@@ -306,7 +306,7 @@
           <button class="pill" data-filter="all" aria-pressed="true">All</button>
           <button class="pill" data-filter="available" aria-pressed="false"><span class="st st-green">Available</span></button>
           <button class="pill" data-filter="oncall" aria-pressed="false"><span class="st st-red">Engaged</span></button>
-          <button class="pill" data-filter="working" aria-pressed="false"><span class="st st-yellow">Working</span></button>
+          <button class="pill" data-filter="working" aria-pressed="false"><span class="st st-yellow">Busy</span></button>
           <button class="pill" data-filter="away" aria-pressed="false"><span class="st st-grey">Break / lunch</span></button>
           <button class="pill" data-filter="flagged" aria-pressed="false">Flagged</button>
           <input id="agentSearch" class="search" type="search" placeholder="Search agent…">
@@ -338,7 +338,7 @@
         </div>
         <div id="boardAll" hidden><div class="board-h">Everyone, ranked</div><div id="boardAllList"></div></div>
         <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10, minus 5 if lunch ran 5+ min over the hour (minus 10 if 15+ min over; timed from when they actually went to lunch), minus 5 for a confirmed late first login of 5+ min (minus 10 if 15+; see Logins today, unconfirmed times don't count). Calls per hour uses RingCX's logged-in total for the whole day. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
-        <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Working, Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
+        <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Busy (yellow), Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
       </div>
 
       <div class="panel" id="loginPanel">
@@ -356,10 +356,10 @@
         <summary>Methodology &amp; notes</summary>
         <ul>
           <li>Data comes from RingCX's real-time supervisor API (<code>realTimeData/agent</code> and <code>realTimeData/inbound</code>), the same source as the RingCX wallboards. It is read with your own RingCentral sign-in, so you only see what your RingCX permissions allow.</li>
-          <li>Status colors follow the RingCX agent app. Green means the status takes calls (Available, Payroll Support). Grey is On-Break, Away and Lunch. Yellow is every Working-type status (Training, Testing, Meeting, ticket and escalation work, ePayment, Yodlee and similar). Red means on a call or in wrap-up.</li>
+          <li>Status colors follow the RingCX agent app. Green means the status takes calls (Available, Payroll Support). Grey is On-Break, Away and Lunch. Yellow (Busy) is every Working-type status (Training, Testing, Meeting, ticket and escalation work, ePayment, Yodlee and similar). Red means on a call or in wrap-up.</li>
           <li><b>SLA</b> is RingCX's own service-level count for each queue, from its real-time data (<code>slaPass</code> / <code>slaFail</code>). A call passes if it is answered within the queue's SLA time, which is 30 seconds on every BQE queue. Calls answered later, or abandoned after 30 seconds, fail. The top tile adds up all queues. The counts are today's running totals.</li>
           <li><b>Queue hours:</b> the viewer shows a queue as Open only if RingCX says it's open and, for queues with configured hours, the current time is inside them. Payroll Specialist is open M–F 6am–4pm Pacific, which matches its RingCX schedule. Outside those hours it shows Closed and raises no staffing alerts. If RingCX ever reports it open outside those hours, the page flags it as a schedule problem.</li>
-          <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up. The tiles split this into <b>Working</b> (yellow statuses) and <b>Break / lunch</b> (grey: On-Break, Away, Lunch).</li>
+          <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up. The tiles split this into <b>Busy</b> (yellow statuses) and <b>Break / lunch</b> (grey: On-Break, Away, Lunch).</li>
           <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, whenever they are Available or Engaged. Connor Lenhart is treated as a supervisor too (TREAT_AS_SUPERVISOR in the page settings).</li>
           <li>The avoidance watch flags an agent only when at least <b><span data-cfg="MIN_SIGNALS"></span> of these signals</b> are true at the same time. One signal alone is not flagged.
             <ul>
@@ -387,7 +387,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.15</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.16</footer>
     </main>
   </section>
 </div>
@@ -1583,7 +1583,7 @@
           cls: lc.length ? (longest + e >= CONFIG.LONG_CALL_CRIT_SEC ? "crit" : "warn") : "",
           note: lc.length ? "longest " + count(longest) + " · listen / barge in" : "on a call " + fmtShort(CONFIG.LONG_CALL_SEC) + "+" };
       })(),
-      { label: "<span class='st st-yellow'>Working</span>", value: agents.filter(DRILLS.working.test).length, filter: "working", note: "yellow statuses, no calls" },
+      { label: "<span class='st st-yellow'>Busy</span>", value: agents.filter(DRILLS.working.test).length, filter: "working", note: "yellow statuses, no calls" },
       { label: "<span class='st st-grey'>Break / lunch</span>", value: agents.filter(DRILLS.away.test).length, filter: "away", note: "grey statuses, no calls" },
       { label: "Flagged", value: watch.length, filter: "flagged", cls: watch.length ? "warn" : "", note: "avoidance watch" },
       { label: "Presented", value: presented, note: "calls today" },
@@ -1645,7 +1645,7 @@
     all: { title: "Agents logged in", test: function () { return true; } },
     available: { title: "Available", test: isAvailable },
     oncall: { title: "Engaged (on a call, incl. wrap-up)", test: isOnCall },
-    working: { title: "Working (yellow statuses)", test: function (a) { return stateColor(a) === "st-yellow"; } },
+    working: { title: "Busy (yellow statuses)", test: function (a) { return stateColor(a) === "st-yellow"; } },
     away: { title: "Break / lunch (grey statuses)", test: function (a) { return stateColor(a) === "st-grey"; } },
     flagged: { title: "Flagged on the avoidance watch", test: null },
     abandoned: { title: "Abandoned calls today" },      // call list, not an agent list (no test)
