@@ -380,7 +380,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.6</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.7</footer>
     </main>
   </section>
 </div>
@@ -1800,7 +1800,45 @@
   // Opens in the viewer's own Zendesk sign-in; no token needed. (Direct ticket links need a server lookup.)
   function zdLink(uii) {
     if (!uii) return "<span class='muted'>–</span>";
-    return "<a href='https://bqe.zendesk.com/agent/search/1?type=ticket&q=" + encodeURIComponent(uii) + "' target='_blank' rel='noopener' title='Search Zendesk for the ticket logged for this call (call ID " + esc(uii) + ")'>Zendesk ↗</a>";
+    return "<a href='https://bqe.zendesk.com/agent/search/1?type=ticket&q=" + encodeURIComponent(uii) + "' target='_blank' rel='noopener' title='Search Zendesk for the ticket logged for this call (call ID " + esc(uii) + ")'>Ticket ↗</a>";
+  }
+  // RingSense (ACE) page per call, via the "calllinks" function (server-side RingCentral credential).
+  // The session ID is in the recording URL. RingSense has a record ~10 min after a call; "–" until then.
+  var rsLinks = {}, rsAsked = {}, rsLoading = false;   // session -> url | null; session -> when last asked
+  function rsSession(r) { var m = /dialogs\/([^\/?]+)\/segments/.exec(r.recording_url || ""); return m ? m[1] : ""; }
+  function rsCell(sid) {
+    if (!sid) return "<span class='muted' title='No recording, so no RingSense record'>–</span>";
+    var u = rsLinks[sid];
+    if (u) return "<a href='" + esc(u) + "' target='_blank' rel='noopener' title='Open this call in RingSense (transcript, AI score)'>Call ↗</a>";
+    if (u === null) return "<span class='muted' title='RingSense has no record for this call yet (it usually appears about 10 minutes after the call). Checked again automatically.'>–</span>";
+    return "<span class='muted'>…</span>";
+  }
+  async function loadRsLinks(sids) {
+    if (rsLoading || !session) return;
+    var now = Date.now();
+    var todo = sids.filter(function (s) { return s && rsLinks[s] !== undefined ? (rsLinks[s] === null && now - (rsAsked[s] || 0) > 5 * 60000) : !!s && now - (rsAsked[s] || 0) > 60000; });
+    if (!todo.length) return;
+    rsLoading = true;
+    try {
+      for (var i = 0; i < todo.length; i += 150) {
+        var part = todo.slice(i, i + 150);
+        part.forEach(function (s) { rsAsked[s] = now; });
+        var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/calllinks", {
+          method: "POST", headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess, "Content-Type": "application/json" },
+          body: JSON.stringify({ sessions: part })
+        });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+        Object.keys(j.links || {}).forEach(function (s) { rsLinks[s] = j.links[s]; });
+        // Not looked up yet this round (server caps lookups per request): ask again soon.
+        part.forEach(function (s) { if (!(s in (j.links || {}))) delete rsAsked[s]; });
+      }
+    } catch (x) { /* links are a nice-to-have; the next render tries again */ }
+    finally {
+      rsLoading = false;
+      // Fill the cells in place so a playing recording isn't interrupted.
+      [].forEach.call(document.querySelectorAll("[data-rs]"), function (td) { td.innerHTML = rsCell(td.getAttribute("data-rs")); });
+    }
   }
   // Shared call list for the Answered and Short calls tiles (kind = "answered" | "shortcalls").
   function renderCallDrill(box, kind, force) {
@@ -1820,7 +1858,7 @@
     box.innerHTML = "<div class='section-title'>" + title + " <span class='sub'>" + what + rows.length + " call" + (rows.length === 1 ? "" : "s") + (agentsLine ? " · " + agentsLine : "") + "</span>" +
       "<span class='sub'>" + status + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
-      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th>Agent</th><th class='num'>Talked</th><th>Caller</th><th>Recording</th><th>Ticket</th></tr></thead><tbody>" +
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th>Agent</th><th class='num'>Talked</th><th>Caller</th><th>Recording</th><th>Zendesk</th><th>RingSense</th></tr></thead><tbody>" +
       (rows.map(function (r) {
         var uii = String(r.UII || "").replace(/^'/, ""), d = callTalkSec(r);
         var rec = recordings[uii] ? "<audio controls src='" + recordings[uii] + "'></audio>"
@@ -1834,12 +1872,14 @@
           "<td class='num'><span class='" + (hl ? "warmn" : "") + "'>" + fmtDur(d) + "</span></td>" +
           "<td>" + esc(r.ANI) + "</td>" +
           "<td data-rec='" + esc(uii) + "'>" + rec + "</td>" +
-          "<td>" + zdLink(uii) + "</td></tr>";
-      }).join("") || "<tr><td colspan='7' class='muted'>" + (abandons.all ? (isShort ? "No answered calls under " + CONFIG.SHORT_CALL_SEC + "s yet today." : "No answered calls in the call report yet today.") : "") + "</td></tr>") +
+          "<td>" + zdLink(uii) + "</td>" +
+          "<td data-rs='" + esc(rsSession(r)) + "'>" + rsCell(rsSession(r)) + "</td></tr>";
+      }).join("") || "<tr><td colspan='8' class='muted'>" + (abandons.all ? (isShort ? "No answered calls under " + CONFIG.SHORT_CALL_SEC + "s yet today." : "No answered calls in the call report yet today.") : "") + "</td></tr>") +
       "</tbody></table></div>" +
       "<div class='tiny muted' style='margin-top:6px'>" + (isShort
         ? "Answered queue calls under " + CONFIG.SHORT_CALL_SEC + " seconds from answer to hang-up, counting the whole call and not just the first agent, so calls handed to someone else are not listed (rows under 30s are highlighted). Logging a real question takes about a minute, so these are worth a listen. 0:00 usually means the call dropped or was transferred right away."
         : "Every answered queue call today from RingCX's call report, newest first. Talk time runs from answer to hang-up for the whole call. Calls under " + CONFIG.SHORT_CALL_SEC + "s are highlighted. The report can trail the live Answered counter by a few minutes, and a call handed to another agent is listed under the agent who answered it first.") + "</div>";
+    loadRsLinks(rows.map(rsSession));
   }
   async function playRecording(btn) {
     var uii = btn.getAttribute("data-play"), url = btn.getAttribute("data-url");
