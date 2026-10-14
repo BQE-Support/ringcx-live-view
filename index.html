@@ -225,6 +225,7 @@
           </label>
           <button id="refreshBtn" class="btn" title="Refresh now">Refresh</button>
           <button id="themeBtn" class="btn" title="Toggle light/dark">Theme</button>
+          <span id="viewerTag" class="snapshot-tag" hidden></span>
           <button id="signoutBtn" class="btn">Sign out</button>
         </div>
       </header>
@@ -322,7 +323,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.1</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.2</footer>
     </main>
   </section>
 </div>
@@ -452,12 +453,28 @@
     });
     if (!x.ok) throw new Error("RingCentral sign-in worked, but RingCX refused it (HTTP " + x.status + "). Your RingCentral user may not have a RingCX account.");
     var rcx = await x.json();
-    setSession(rcx.accessToken, rcx.refreshToken);
+    setSession(rcx.accessToken, rcx.refreshToken, rcx);
   }
 
-  function setSession(access, refresh) {
-    session = { rcxAccess: access, rcxRefresh: refresh, obtained: Date.now() };
+  // resp (optional) is the RingCX login/refresh response; its agentDetails carries the viewer's name.
+  function setSession(access, refresh, resp) {
+    var d = resp && resp.agentDetails && resp.agentDetails[0];
+    var name = d ? ((d.firstName || "") + " " + (d.lastName || "")).trim() : (session && session.name) || "";
+    session = { rcxAccess: access, rcxRefresh: refresh, obtained: Date.now(), name: name };
     save(STORE_KEY, session);
+    showViewer();
+  }
+  function viewerName() {
+    if (session && session.name) return session.name;
+    var id = session ? String(jwtClaims(session.rcxAccess).agnt || "") : "";
+    var a = data.agents.filter(function (x) { return String(x.agentId) === id; })[0];
+    return a ? fullName(a) : "";
+  }
+  function showViewer() {
+    var el = $("viewerTag"); if (!el) return;
+    var n = viewerName();
+    el.hidden = !n;
+    el.innerHTML = "<span class='dot live'></span>Viewing: <b>" + esc(n) + "</b>";
   }
 
   var refreshing = null;
@@ -472,7 +489,7 @@
         });
         if (!r.ok) throw new Error("refresh HTTP " + r.status);
         var t = await r.json();
-        setSession(t.accessToken, t.refreshToken || session.rcxRefresh);
+        setSession(t.accessToken, t.refreshToken || session.rcxRefresh, t);
       } finally { refreshing = null; }
     })();
     return refreshing;
@@ -719,6 +736,7 @@
     renderAgents(e, agents);
     renderSups(e, sups);
     renderBoard();
+    showViewer();
     // Today's call report feeds the leaderboard (and the Abandoned list): refresh every 5 minutes.
     if (!abandons.loading && Date.now() - abandons.at > 5 * 60 * 1000) loadAbandons(true);
   }
