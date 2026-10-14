@@ -380,7 +380,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.3</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.4</footer>
     </main>
   </section>
 </div>
@@ -651,34 +651,45 @@
   function lunchLevel(L) { return !L ? null : (L.over >= CONFIG.LUNCH_OVER_CRIT_MIN ? "crit" : (L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? "warn" : null)); }
 
   // ---------------- status changes for one agent (drill from the watch's 60m columns) ----------------
-  var drillLog = { id: "", name: "" };
-  function statusLogLink(a, n) {
-    return "<a href='#' data-status-log='" + esc(String(a.agentId)) + "' data-status-name='" + esc(fullName(a)) + "' title='Show this agent&#39;s status changes, with times'>" + n + "</a>";
+  var drillLog = { id: "", name: "", mode: "changes" };
+  function statusLogLink(a, n, mode) {
+    return "<a href='#' data-status-log='" + esc(String(a.agentId)) + "' data-status-name='" + esc(fullName(a)) + "' data-status-mode='" + mode + "' title='Show this agent&#39;s status changes, with the ones behind this number highlighted'>" + n + "</a>";
   }
   function statusName(label, baseCode) {
     if (label) return label;
     return { ONCALL: "On a call", AVAILABLE: "Available", LUNCH: "Lunch", "ON-BREAK": "On-Break", AWAY: "Away", WORKING: "Working (status)", BRIEF: "(brief change between refreshes)" }[baseCode] || baseCode || "?";
   }
+  // Same rules as changeStats(): which events feed "Changes 60m" and "Left Avail 60m".
+  function isExit(e) { return e.fb === "AVAILABLE" && e.tb !== "ONCALL" && e.tb !== "AVAILABLE"; }
   function renderStatusLog(box) {
     box.setAttribute("data-kind", "statuslog");
     var h = hist.agents[drillLog.id] || {};
     // Fall back to a name match (e.g. a logged-out entry whose id we only know by name).
     if (!h.ev) Object.keys(hist.agents).forEach(function (id) { if (normName(hist.agents[id].name) === normName(drillLog.name)) h = hist.agents[id]; });
     var ev = (h.ev || []).slice().sort(function (x, y) { return y.t - x.t; });
-    var cutoff = Date.now() - 3600 * 1000;
-    var nowRow = h.label ? "<tr><td>" + fmtClock(h.start) + "</td><td class='muted'>…</td><td><b>" + esc(h.label) + "</b> (now)</td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td></tr>" : "";
+    var cutoff = Date.now() - 3600 * 1000, exitsMode = drillLog.mode === "exits";
+    var nChanges = 0, nExits = 0;
+    ev.forEach(function (x) { if (x.t >= cutoff) { nChanges += x.hidden ? 2 : 1; if (isExit(x)) nExits++; } });
+    // The newest change normally IS the current status; show it live instead of a separate "now" row.
+    var newestIsNow = h.label && ev.length && Math.abs(h.start - ev[0].t) < 60000;
+    var nowRow = h.label && !newestIsNow ? "<tr><td>" + fmtClock(h.start) + "</td><td class='muted'>…</td><td><b>" + esc(h.label) + "</b> (now)</td><td></td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td></tr>" : "";
     var rows = ev.map(function (x, i) {
-      var nextT = i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t;   // when the status it switched TO ended
-      var lasted = x.hidden ? "brief" : fmtDur(Math.max(0, (nextT - x.t) / 1000));
-      var recent = x.t >= cutoff;
-      return "<tr class='" + (recent ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + esc(statusName(x.fl, x.fb)) + "</td><td>" + esc(statusName(x.tl, x.tb)) + "</td><td class='num'>" + lasted + "</td></tr>";
+      var lasted;
+      if (x.hidden) lasted = "brief";
+      else if (i === 0 && newestIsNow) lasted = count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>";
+      else lasted = fmtDur(Math.max(0, ((i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t) - x.t) / 1000));
+      var recent = x.t >= cutoff, exit = recent && isExit(x);
+      var tags = (recent ? "<span class='chip info'>Changes" + (x.hidden ? " ×2" : "") + "</span>" : "") + (exit ? " <span class='chip warn'>Left Avail</span>" : "");
+      var hit = exitsMode ? exit : recent;
+      return "<tr class='" + (hit ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + esc(statusName(x.fl, x.fb)) + "</td><td>" + (i === 0 && newestIsNow ? "<b>" + esc(statusName(x.tl, x.tb)) + "</b>" : esc(statusName(x.tl, x.tb))) + "</td><td>" + tags + "</td><td class='num'>" + lasted + "</td></tr>";
     }).join("");
-    var recentN = ev.filter(function (x) { return x.t >= cutoff; }).length;
-    box.innerHTML = "<div class='section-title'>Status changes (last 10 hours): " + esc(drillLog.name) + " <span class='sub'>" + ev.length + " change" + (ev.length === 1 ? "" : "s") + " · " + recentN + " in the last 60 min (highlighted) · " + esc(trackedLabel()) + "</span>" +
+    var what = exitsMode ? nExits + " time" + (nExits === 1 ? "" : "s") + " left Available in the last 60 min (highlighted)"
+      : nChanges + " change" + (nChanges === 1 ? "" : "s") + " in the last 60 min (highlighted)";
+    box.innerHTML = "<div class='section-title'>Status changes (last 10 hours): " + esc(drillLog.name) + " <span class='sub'>" + what + " · " + ev.length + " in all · " + esc(trackedLabel()) + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
-      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th class='num'>Lasted</th></tr></thead><tbody>" +
-      (nowRow + rows || "<tr><td colspan='4' class='muted'>No status changes recorded in the last 10 hours.</td></tr>") + "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>\"Lasted\" is how long they stayed in the status they switched to. A \"brief change between refreshes\" means they left a status and came back in under a refresh cycle, without a call explaining it. Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th>Counted in</th><th class='num'>Lasted</th></tr></thead><tbody>" +
+      (nowRow + rows || "<tr><td colspan='5' class='muted'>No status changes recorded in the last 10 hours.</td></tr>") + "</tbody></table></div>" +
+      "<div class='tiny muted' style='margin-top:6px'>Highlighted rows are the ones behind the number you clicked. \"Changes\" counts every status change in the last 60 minutes (a brief change between refreshes counts twice: out and back). \"Left Avail\" counts moves from Available to anything except a call. \"Lasted\" is how long they stayed in the status they switched to. Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
   }
 
   // ---------------- Snapshot: download the main numbers as a time-stamped CSV ----------------
@@ -2025,8 +2036,8 @@
           "<td>" + stateHtml(a) + "</td>" +
           "<td class='wrap'>" + w.reasons.map(function (r) { return "<span class='chip " + r.lvl + "'>" + esc(r.text) + "</span>"; }).join("") + prior + "</td>" +
           "<td class='num'>" + rnaCell(dayStats(a).rna) + "</td>" +
-          "<td class='num'>" + statusLogLink(a, w.cs.exits) + "</td>" +
-          "<td class='num'>" + statusLogLink(a, w.cs.changes) + "</td>" +
+          "<td class='num'>" + statusLogLink(a, w.cs.exits, "exits") + "</td>" +
+          "<td class='num'>" + statusLogLink(a, w.cs.changes, "changes") + "</td>" +
           "<td class='num'>" + (nr != null ? count(nr) : "–") + "</td>" +
           "<td class='wrap'>" + reviewCell + "</td>" +
           "</tr>";
@@ -2131,7 +2142,7 @@
     // Long calls: Listen / Barge in / Stop, and saving the "ring me at" number.
     // Left Avail / Changes numbers in the watch: that agent's status changes today, with times.
     var sl = ev.target.closest("[data-status-log]");
-    if (sl) { ev.preventDefault(); drillLog = { id: sl.getAttribute("data-status-log"), name: sl.getAttribute("data-status-name") }; drill = "statuslog"; render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (sl) { ev.preventDefault(); drillLog = { id: sl.getAttribute("data-status-log"), name: sl.getAttribute("data-status-name"), mode: sl.getAttribute("data-status-mode") || "changes" }; drill = "statuslog"; render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     // Calls number in the Agents table: that agent's calls today, with recordings.
     var ac = ev.target.closest("[data-agent-calls]");
     if (ac) { ev.preventDefault(); drillAgent = ac.getAttribute("data-agent-calls"); drill = "agentcalls"; loadAbandons(true); render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
