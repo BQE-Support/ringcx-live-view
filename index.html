@@ -371,7 +371,7 @@
               <li>Plus up to 10 for the share of time spent Available or Engaged. Until 30 minutes of someone's time has been observed, this part counts as half.</li>
             </ul>
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
-          <li><b>Plain "WORKING"</b> (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets a "Blocks calls" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
+          <li><b>Plain "WORKING"</b> (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets an "Only use for RNA" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
           <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
           <li>Calls, talk time, RNA and logged-in time are <b>today's totals</b> everywhere on the page, so the Agents table and Performance always agree. RingCX's live counters reset each time someone logs in again, so this page adds up every login session it saw today, and also uses the day's call report for calls and talk. Login sessions from before the page started tracking can't be counted. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
@@ -380,7 +380,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.2</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.3</footer>
     </main>
   </section>
 </div>
@@ -1150,7 +1150,7 @@
   function stateHtml(a) {
     var s = stuckLevel(a);
     return "<span class='st " + stateColor(a) + "'>" + esc(stateLabel(a)) + "</span>" +
-      (s ? " <span class='chip " + s + "' title='System default status (not agent-selectable); blocks calls. Ask the agent to update their status.'>Blocks calls</span>" : "") +
+      (s ? " <span class='chip " + s + "' title='System default status (not agent-selectable). RingCX puts agents here after an RNA; it blocks calls, so it should only be used for RNA. Ask the agent to update their status.'>Only use for RNA</span>" : "") +
       (a.onHoldDts ? " <span class='chip info'>On hold</span>" : "");
   }
   function isSupervisor(a) { return String(a.agentType || "").toUpperCase() === "SUPERVISOR"; }
