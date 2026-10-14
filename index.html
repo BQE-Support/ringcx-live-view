@@ -124,8 +124,8 @@
   .avatar.me { background: var(--accent); color: #fff; }
 
   /* Performance today */
-  .board-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; }
-  @media (max-width: 520px) { .board-grid { grid-template-columns: minmax(0, 1fr); } }
+  /* Top 5 and Lowest 5 stacked (one above the other) so each table gets the full width: no sideways scroll. */
+  .board-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .board-grid > div { min-width: 0; }
   .board-h { font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
   .board-h.good { color: var(--good); }
@@ -363,7 +363,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 4.4</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 4.5</footer>
     </main>
   </section>
 </div>
