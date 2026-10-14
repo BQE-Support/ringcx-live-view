@@ -232,7 +232,8 @@
           <button class="pill" data-filter="all" aria-pressed="true">All</button>
           <button class="pill" data-filter="available" aria-pressed="false">Available</button>
           <button class="pill" data-filter="oncall" aria-pressed="false">On a call</button>
-          <button class="pill" data-filter="notready" aria-pressed="false">Not taking calls</button>
+          <button class="pill" data-filter="working" aria-pressed="false"><span class="st st-yellow">Working</span></button>
+          <button class="pill" data-filter="away" aria-pressed="false"><span class="st st-grey">Break / away</span></button>
           <button class="pill" data-filter="flagged" aria-pressed="false">Flagged</button>
           <input id="agentSearch" class="search" type="search" placeholder="Search agent…">
         </div>
@@ -261,7 +262,7 @@
           <li>Status colors follow the RingCX agent app. Green means the status takes calls (Available, Payroll Support). Grey is On-Break, Away and Lunch. Yellow is every Working-type status (Training, Testing, Meeting, ticket and escalation work, ePayment, Yodlee and similar). Red means on a call or in wrap-up.</li>
           <li><b>SLA</b> is RingCX's own service-level count for each queue, from its real-time data (<code>slaPass</code> / <code>slaFail</code>). A call passes if it is answered within the queue's SLA time, which is 30 seconds on every BQE queue. Calls answered later, or abandoned after 30 seconds, fail. The top tile adds up all queues. The counts are today's running totals.</li>
           <li><b>Queue hours:</b> the viewer shows a queue as Open only if RingCX says it's open and, for queues with configured hours, the current time is inside them. Payroll Specialist is open M–F 6am–4pm Pacific, which matches its RingCX schedule. Outside those hours it shows Closed and raises no staffing alerts. If RingCX ever reports it open outside those hours, the page flags it as a schedule problem.</li>
-          <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up.</li>
+          <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up. The tiles split this into <b>Working</b> (yellow statuses) and <b>Break / away</b> (grey: On-Break, Away, Lunch).</li>
           <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, only while they are taking queue calls (Available, or on a call from a queue). Some agents also count as supervisors while in a specific status: Connor Lenhart while in Escalation Support. Those rules are set in the page's settings (SUPERVISOR_DUTY).</li>
           <li>The avoidance watch flags an agent for any of the following:
             <ul>
@@ -277,7 +278,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 1.4</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 1.5</footer>
     </main>
   </section>
 </div>
@@ -693,7 +694,8 @@
       { label: "Agents logged in", value: agents.length, filter: "all", note: "excl. supervisors off the queue" },
       { label: "Available", value: agents.filter(isAvailable).length, filter: "available", note: "ready for a call" },
       { label: "On a call", value: agents.filter(isOnCall).length, filter: "oncall", note: "incl. wrap-up" },
-      { label: "Not taking calls", value: agents.filter(isNotReady).length, filter: "notready", note: "grey or yellow status" },
+      { label: "<span class='st st-yellow'>Working</span>", value: agents.filter(function (a) { return stateColor(a) === "st-yellow"; }).length, filter: "working", note: "yellow statuses, no calls" },
+      { label: "<span class='st st-grey'>Break / away</span>", value: agents.filter(function (a) { return stateColor(a) === "st-grey"; }).length, filter: "away", note: "grey statuses, no calls" },
       { label: "Flagged", value: watch.length, filter: "flagged", cls: watch.length ? "warn" : "", note: "avoidance watch" },
       { label: "Presented", value: presented, note: "calls today" },
       { label: "Answered", value: accepted, note: pct(accepted, presented) + " of presented" },
@@ -768,7 +770,8 @@
       if (agentSearch && r.name.toLowerCase().indexOf(agentSearch) < 0) return false;
       if (agentFilter === "available") return isAvailable(r.a);
       if (agentFilter === "oncall") return isOnCall(r.a);
-      if (agentFilter === "notready") return isNotReady(r.a);
+      if (agentFilter === "working") return stateColor(r.a) === "st-yellow";
+      if (agentFilter === "away") return stateColor(r.a) === "st-grey";
       if (agentFilter === "flagged") return !!r.w;
       return true;
     });
