@@ -356,7 +356,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.9</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 4.0</footer>
     </main>
   </section>
 </div>
@@ -416,7 +416,7 @@
       "Payroll Specialist": { days: [1, 2, 3, 4, 5], open: "06:00", close: "16:00", tz: "America/Los_Angeles", label: "M–F 6am–4pm PT" }
     },
     // Agents treated exactly like RingCX supervisors (agent type AGENT in RingCX, supervisor role at BQE).
-    TREAT_AS_SUPERVISOR: ["Connor Lenhart"]
+    TREAT_AS_SUPERVISOR: ["Connor Lenhart", "Victor Guadarrama"]
   };
   var IS_LOCAL_DEV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.port === "8765";
   var STORE_KEY = "rcxLiveView.session.v1";
@@ -640,8 +640,30 @@
   // The page keeps every session it saw today in hist, so first login, re-logins and total time survive
   // logouts. Scheduled start is the roster "Shift Start" from the pto function.
   function dtsMinutes(s) { var m = /T?(\d{1,2}):(\d{2})/.exec(String(s || "").replace(/^\d{4}-\d{2}-\d{2}/, "")); return m ? +m[1] * 60 + +m[2] : null; }
+  // Logins today is agents only (Fred, 2026-10-14). Supervisors = RingCX type SUPERVISOR plus
+  // TREAT_AS_SUPERVISOR. RingCX's supervisor list is loaded once so supervisors who haven't logged in
+  // today are left out too.
+  var supNames = null, supLoading = false;
+  async function loadSupervisors() {
+    if (supNames || supLoading || !session) return;
+    supLoading = true;
+    try {
+      var set = {}, groups = await api("agentGroups");
+      for (var i = 0; i < groups.length; i++) {
+        var agents = await api("agentGroups/" + groups[i].agentGroupId + "/agents");
+        agents.forEach(function (a) { if (String(a.agentType).toUpperCase() === "SUPERVISOR") set[normName(a.firstName + " " + a.lastName)] = 1; });
+      }
+      supNames = set; renderLogins(elapsed());
+    } catch (x) { /* not critical: supervisors seen today are still left out */ }
+    finally { supLoading = false; }
+  }
+  function isSupervisorName(name, isSup) {
+    var k = normName(name);
+    return !!isSup || !!(supNames && supNames[k]) || CONFIG.TREAT_AS_SUPERVISOR.some(function (x) { return normName(x) === k; });
+  }
   function renderLogins(e) {
     var body = $("loginBody"); if (!body) return;
+    loadSupervisors();
     var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5);
     var sched = {}, out = {};
     (pto.schedule || []).forEach(function (s) { sched[normName(s.name)] = s; });
@@ -651,6 +673,7 @@
     var rows = [], seenNames = {};
     Object.keys(hist.agents).forEach(function (id) {
       var h = hist.agents[id]; if (!h.name || !h.sessions) return;
+      if (isSupervisorName(h.name, h.sup)) return;
       var keys = Object.keys(h.sessions).filter(function (k) { return k !== "session"; }).sort();
       if (!keys.length) return;
       var first = dtsMinutes(keys[0]), total = 0, lastSeen = 0;
@@ -658,8 +681,7 @@
       lastSeen = Math.max(lastSeen, h.lastSeen || 0);   // last refresh that still had them logged in
       var live = liveById[id], s = sched[normName(h.name)];
       var start = s && s.shift !== null && s.days.indexOf(n.day) >= 0 ? s.shift : null;
-      // Supervisors don't always log in to take calls, so they aren't marked late.
-      var late = !h.sup && start !== null && first !== null ? first - start : null;
+      var late = start !== null && first !== null ? first - start : null;
       seenNames[normName(h.name)] = 1;
       rows.push({ name: h.name, sup: h.sup, start: start, first: first, late: late, logins: keys.length,
         total: live ? Math.max(total, live.loggedInDuration || 0) : total, live: live, lastSeen: lastSeen });
@@ -668,6 +690,7 @@
     (pto.schedule || []).forEach(function (s) {
       var k = normName(s.name);
       if (seenNames[k] || out[k] || s.shift === null || s.days.indexOf(n.day) < 0) return;
+      if (!supNames || isSupervisorName(s.name, false)) return;   // wait for the supervisor list before calling anyone missing
       if (CONFIG.LUNCH_EXCLUDE.some(function (x) { return normName(x) === k; })) return;
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN) return;
       rows.push({ name: s.name, start: s.shift, first: null, late: nowMin - s.shift, logins: 0, total: 0, missing: true });
