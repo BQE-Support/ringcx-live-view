@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.8</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.9</footer>
     </main>
   </section>
 </div>
@@ -1060,10 +1060,17 @@
   // A real question takes about a minute just to log the ticket, so answered queue calls shorter
   // than that are worth a listen. Recordings are fetched with the viewer's RingCX token and played
   // in the page.
+  // The report's connected_duration is the answering agent's own talk time, and it can read 0 when
+  // the call was handed to someone else (e.g. 0s for Armando on a 14-minute call Kayla finished).
+  // So a call counts as short only if the whole call, minus queue wait, was short too.
+  function callTalkSec(r) {
+    var afterQueue = (+r.call_duration || 0) - (+r.queue_time || 0);
+    return Math.max(+r.connected_duration || 0, afterQueue, 0);
+  }
   function shortCalls() {
     var seen = {};
     return (abandons.all || []).filter(function (r) {
-      if (r.source_type !== "ACD-INBOUND" || !r.connected_name || (+r.connected_duration || 0) >= CONFIG.SHORT_CALL_SEC) return false;
+      if (r.source_type !== "ACD-INBOUND" || !r.connected_name || callTalkSec(r) >= CONFIG.SHORT_CALL_SEC) return false;
       if (seen[r.UII]) return false;
       seen[r.UII] = 1; return true;
     }).sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
@@ -1084,7 +1091,7 @@
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
       "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th>Agent</th><th class='num'>Talked</th><th>Caller</th><th>Recording</th></tr></thead><tbody>" +
       (rows.map(function (r) {
-        var uii = String(r.UII || "").replace(/^'/, ""), d = +r.connected_duration || 0;
+        var uii = String(r.UII || "").replace(/^'/, ""), d = callTalkSec(r);
         var rec = recordings[uii] ? "<audio controls src='" + recordings[uii] + "'></audio>"
           : (r.recording_url ? "<button class='btn' data-play='" + esc(uii) + "' data-url='" + esc(r.recording_url) + "'>▶ Play</button>" : "<span class='muted'>No recording</span>");
         return "<tr class='" + (d < 30 ? "flag-warn" : "") + "'>" +
@@ -1096,7 +1103,7 @@
           "<td data-rec='" + esc(uii) + "'>" + rec + "</td></tr>";
       }).join("") || "<tr><td colspan='6' class='muted'>" + (abandons.all ? "No answered calls under " + CONFIG.SHORT_CALL_SEC + "s yet today." : "") + "</td></tr>") +
       "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>Answered queue calls whose talk time was under " + CONFIG.SHORT_CALL_SEC + " seconds (rows under 30s are highlighted). Logging a real question takes about a minute, so these are worth a listen. 0:00 usually means the call dropped or was transferred right away.</div>";
+      "<div class='tiny muted' style='margin-top:6px'>Answered queue calls under " + CONFIG.SHORT_CALL_SEC + " seconds from answer to hang-up, counting the whole call and not just the first agent, so calls handed to someone else are not listed (rows under 30s are highlighted). Logging a real question takes about a minute, so these are worth a listen. 0:00 usually means the call dropped or was transferred right away.</div>";
   }
   async function playRecording(btn) {
     var uii = btn.getAttribute("data-play"), url = btn.getAttribute("data-url");
