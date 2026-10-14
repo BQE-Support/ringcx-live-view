@@ -404,7 +404,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.20</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.21</footer>
     </main>
   </section>
 </div>
@@ -1106,7 +1106,7 @@
       var pastEnd = r.live && r.start !== null && nowMin > r.start + CONFIG.SHIFT_HOURS * 60;
       var status = r.missing ? "<span class='chip crit'>Not logged in yet</span>"
         : (r.live ? "<span class='st st-green' style='font-weight:400'>Logged in</span>" +
-            (pastEnd ? " <span class='chip warn'>Past shift end (" + clockOf(r.start + CONFIG.SHIFT_HOURS * 60) + ") by " + fmtShort((nowMin - r.start - CONFIG.SHIFT_HOURS * 60) * 60) + "</span>" : "")
+            (pastEnd ? " <span class='chip warn'>Past shift end (" + clockOf(r.start + CONFIG.SHIFT_HOURS * 60) + ") by " + fmtShort((nowMin - r.start - CONFIG.SHIFT_HOURS * 60) * 60) + "</span> " + rcxLogoutLink(r.name) : "")
           : "<span class='muted'>Logged out" + (r.lastSeen ? " · last seen " + fmtClock(r.lastSeen) : "") + "</span>");
       return group + "<tr class='" + flag + "'><td>" + esc(r.name) + "</td>" +
         "<td class='num'>" + (r.start !== null ? clockOf(r.start) + (r.noDst ? " <span class='chip info' title='Hours do not follow daylight saving; roster time +1h while Pacific is on daylight time'>no DST</span>" : "") : "<span class='muted'>–</span>") + "</td>" +
@@ -2497,6 +2497,13 @@
     catch (err) { alert("Couldn't undo: " + err.message); }
   }
 
+  // RingCX has no API to log an agent out: its supervisor view does it over the supervisor's own agent
+  // connection, which this page never opens (that is what would sign the viewer in as an agent). So this
+  // opens RingCX's supervisor Agents view (named tab, reused on later clicks), where the X logs them out.
+  var RCX_SUPERVISOR_AGENTS = "https://ringcx.ringcentral.com/voice/agent/#/home/supervisor/agent";
+  function rcxLogoutLink(name) {
+    return "<a href='" + RCX_SUPERVISOR_AGENTS + "' target='ringcx-supervisor' rel='noopener' class='tiny' title='Opens the RingCX supervisor Agents view in a separate tab. Find " + esc(name) + " and click the X to log them out. If the RingCX agent app is already open in another tab, use that one instead.'>Log out in RingCX ↗</a>";
+  }
   function renderWatch(e, watch, snoozed) {
     snoozed = snoozed || [];
     // Keep a half-typed review intact: skip redrawing while someone is typing in the watch.
@@ -2522,7 +2529,7 @@
           "<td class='num'>" + statusLogLink(a, w.cs.exits, "exits") + "</td>" +
           "<td class='num'>" + statusLogLink(a, w.cs.changes, "changes") + "</td>" +
           "<td class='num'>" + (nr != null ? count(nr) : "–") + "</td>" +
-          "<td class='wrap'>" + reviewCell + "</td>" +
+          "<td class='wrap'>" + reviewCell + (a.offline ? "" : "<div style='margin-top:4px'>" + rcxLogoutLink(fullName(a)) + "</div>") + "</td>" +
           "</tr>";
       }).join("") || "<tr><td colspan='8' class='muted'>Nobody needs attention right now. " + snoozed.length + " reviewed.</td></tr>";
     }
