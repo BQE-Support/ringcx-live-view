@@ -308,7 +308,7 @@
           <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, whenever they are Available or Engaged. Connor Lenhart is treated as a supervisor too (TREAT_AS_SUPERVISOR in the page settings).</li>
           <li>The avoidance watch flags an agent only when at least <b><span data-cfg="MIN_SIGNALS"></span> of these signals</b> are true at the same time. One signal alone is not flagged.
             <ul>
-              <li>Any RNA (ring, no answer) this login session. Two or more is critical.</li>
+              <li>Any RNA (ring, no answer) today. Two or more is critical.</li>
               <li>Leaving Available for a status that doesn't take calls <span data-cfg="EXIT_WARN"></span>+ times in the last 60 minutes, or <span data-cfg="CHANGE_WARN"></span>+ status changes in 60 minutes.</li>
               <li>Being in a status that doesn't take calls for longer than <span data-cfgdur="NOTREADY_WARN_SEC"></span>. Longer than <span data-cfgdur="NOTREADY_CRIT_SEC"></span> is critical.</li>
               <li>Wrap-up longer than <span data-cfgdur="WRAP_WARN_SEC"></span>.</li>
@@ -324,13 +324,13 @@
           <li><b>Plain "WORKING"</b> (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets a "Blocks calls" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
           <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
-          <li>RNA, calls and talk time are RingCX's own counters for the agent's current login session. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
+          <li>Calls, talk time, RNA and logged-in time are <b>today's totals</b> everywhere on the page, so the Agents table and Performance always agree. RingCX's live counters reset each time someone logs in again, so this page adds up every login session it saw today, and also uses the day's call report for calls and talk. Login sessions from before the page started tracking can't be counted. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
           <li>The page makes two requests per refresh and pauses while the window is hidden. RingCX allows about 120 real-time requests per minute in total.</li>
           <li>This view is read-only. It cannot change agent states or take calls. Keep the normal RingCX agent window open for that.</li>
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.3</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.4</footer>
     </main>
   </section>
 </div>
@@ -680,7 +680,7 @@
   function watchFor(a, e) {
     var reasons = [], score = 0, lvl = null;
     function add(l, text, s) { reasons.push({ lvl: l, text: text }); score += s; if (l === "crit" || !lvl) lvl = l === "crit" ? "crit" : (lvl || l); }
-    var rna = a.rna || 0;
+    var rna = dayStats(a).rna;   // today's total, same number the tables show
     if (rna >= 2) add("crit", rna + " RNA", 300 + rna * 50);
     else if (rna === 1) add("warn", "1 RNA", 200);
     var cs = changeStats(a);
@@ -977,6 +977,36 @@
   //   + 10 x share of observed time spent Available or Engaged (neutral 0.5 until 30 min observed)
   // Everyone who answered queue calls today is ranked (supervisors included), plus anyone in the
   // Agents section logged in at least BOARD_MIN_LOGIN_SEC.
+  // ---------------- today's totals per person (one source for every table) ----------------
+  // RingCX's live counters (calls, talk, RNA, logged in) reset at each login, so a re-login made the
+  // Agents table and Performance disagree. Everything now shows today's totals:
+  //   RNA and logged-in time = sum of every login session this browser saw today (incl. the current one);
+  //   calls and talk = today's call report, or the live session if that is higher (report lags a few min).
+  var callIdx = { at: -2, map: {} };
+  function callIndex() {
+    if (callIdx.at !== abandons.at) {
+      var map = {};
+      (abandons.all || []).forEach(function (r) {
+        if (r.source_type !== "ACD-INBOUND" || !r.connected_name) return;
+        var c = map[r.connected_name] || (map[r.connected_name] = { uiis: {}, talk: 0 });
+        if (!c.uiis[r.UII]) { c.uiis[r.UII] = 1; c.talk += +r.connected_duration || 0; }
+      });
+      callIdx = { at: abandons.at, map: map };
+    }
+    return callIdx.map;
+  }
+  function rnaCell(n) { return n ? "<span class='" + (n >= 2 ? "hot" : "warmn") + "'>" + n + "</span>" : "0"; }
+  function lastFirst(n) { var p = String(n || "").trim().split(" "); return p.slice(1).join(" ") + ", " + p[0]; }
+  function dayStats(a) {
+    var h = hist.agents[String(a.agentId)] || {}, login = 0, rna = 0;
+    Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna += h.sessions[k].rna; });
+    login = Math.max(login, a.loggedInDuration || a.loginTime || 0);
+    rna = Math.max(rna, a.rna || 0);
+    var c = callIndex()[lastFirst(fullName(a))];
+    var reportCalls = c ? Object.keys(c.uiis).length : 0;
+    return { login: login, rna: rna, calls: Math.max(reportCalls, a.callsHandled || 0), talk: Math.max(c ? c.talk : 0, a.totalTalkTime || 0) };
+  }
+
   function boardRows() {
     var calls = {};   // "Last, First" -> { uiis, talk }
     (abandons.all || []).forEach(function (r) {
@@ -1001,6 +1031,9 @@
       var p = people[n], parts = n.split(" "), key = parts.slice(1).join(" ") + ", " + parts[0];
       var c = calls[key] || { uiis: {}, talk: 0 };
       var answered = Object.keys(c.uiis).length;
+      // Same totals the Agents table shows for anyone logged in right now.
+      var live = data.agents.filter(function (x) { return fullName(x) === n; })[0];
+      if (live) { var ds = dayStats(live); answered = ds.calls; c = { uiis: c.uiis, talk: ds.talk }; p.rna = ds.rna; p.login = ds.login; }
       var eligible = answered > 0 || (p.onDuty !== false && !p.sup && p.login >= CONFIG.BOARD_MIN_LOGIN_SEC);
       if (!eligible || p.login < 60) return;
       var perHr = answered / (p.login / 3600);
@@ -1230,8 +1263,8 @@
           "<td>" + stateHtml(a) + "</td>" +
           "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
           "<td>" + esc(isOnCall(a) ? (+a.gateId > 0 ? gateName(a.gateId) : "Outbound/direct") : "") + "</td>" +
-          "<td class='num'>" + (a.callsHandled || 0) + "</td>" +
-          "<td class='num'>" + (a.rna ? "<span class='" + (a.rna >= 2 ? "hot" : "warmn") + "'>" + a.rna + "</span>" : "0") + "</td>" +
+          "<td class='num'>" + dayStats(a).calls + "</td>" +
+          "<td class='num'>" + rnaCell(dayStats(a).rna) + "</td>" +
           "<td class='wrap'>" + (r.w ? r.w.reasons.map(function (x) { return "<span class='chip " + x.lvl + "'>" + esc(x.text) + "</span>"; }).join("") : "") + "</td>" +
           "</tr>";
       }).join("") || "<tr><td colspan='7' class='muted'>Nobody right now.</td></tr>") +
@@ -1277,7 +1310,7 @@
         "<td>" + esc(fullName(a)) + "</td>" +
         "<td>" + stateHtml(a) + "</td>" +
         "<td class='wrap'>" + w.reasons.map(function (r) { return "<span class='chip " + r.lvl + "'>" + esc(r.text) + "</span>"; }).join("") + "</td>" +
-        "<td class='num'>" + (a.rna ? "<span class='" + (a.rna >= 2 ? "hot" : "warmn") + "'>" + a.rna + "</span>" : "0") + "</td>" +
+        "<td class='num'>" + rnaCell(dayStats(a).rna) + "</td>" +
         "<td class='num'>" + w.cs.exits + "</td>" +
         "<td class='num'>" + w.cs.changes + "</td>" +
         "<td class='num'>" + (nr != null ? count(nr) : "–") + "</td>" +
@@ -1290,12 +1323,12 @@
   function renderAgents(e, agents) {
     var me = myAgentId();
     var rows = agents.map(function (a) {
-      var calls = a.callsHandled || 0, w = watchFor(a, e);
+      var d = dayStats(a), w = watchFor(a, e);
       return {
         a: a, w: w, name: fullName(a), stateTime: (a.stateTime || 0) + e,
         queue: isOnCall(a) && +a.gateId > 0 ? gateName(a.gateId) : (isOnCall(a) ? "Outbound/direct" : ""),
-        calls: calls, talk: a.totalTalkTime || 0, aht: calls ? (a.totalTalkTime || 0) / calls : 0,
-        rna: a.rna || 0, exits: changeStats(a).exits, login: (a.loggedInDuration || a.loginTime || 0) + e
+        calls: d.calls, talk: d.talk, aht: d.calls ? d.talk / d.calls : 0,
+        rna: d.rna, exits: changeStats(a).exits, loginBase: d.login, login: d.login + e
       };
     }).filter(function (r) {
       if (agentSearch && r.name.toLowerCase().indexOf(agentSearch) < 0) return false;
@@ -1329,7 +1362,7 @@
         "<td class='num'>" + (r.calls ? fmtDur(r.aht) : "–") + "</td>" +
         "<td class='num'>" + (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0") + "</td>" +
         "<td class='num'>" + (r.exits >= CONFIG.EXIT_WARN ? "<span class='warmn'>" + r.exits + "</span>" : r.exits) + "</td>" +
-        "<td class='num'>" + count(a.loggedInDuration || a.loginTime || 0) + "</td>" +
+        "<td class='num'>" + count(r.loginBase) + "</td>" +
         "</tr>";
     }).join("") || "<tr><td colspan='" + COLS.length + "' class='muted'>No agents match.</td></tr>";
     $("agentSub").textContent = rows.length + " of " + agents.length + " logged in";
@@ -1343,8 +1376,8 @@
         "<td>" + esc(fullName(a)) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + (isSupervisor(a) ? "" : " <span class='chip info'>Treated as supervisor</span>") + "</td>" +
         "<td>" + stateHtml(a) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
-        "<td class='num'>" + (a.callsHandled || 0) + "</td>" +
-        "<td class='num'>" + count(a.loggedInDuration || a.loginTime || 0) + "</td>" +
+        "<td class='num'>" + dayStats(a).calls + "</td>" +
+        "<td class='num'>" + count(dayStats(a).login) + "</td>" +
         "</tr>";
     }).join("") || "<tr><td colspan='5' class='muted'>No supervisors logged in outside the call queues.</td></tr>";
     $("supSub").textContent = sups.length + " logged in, not taking queue calls";
