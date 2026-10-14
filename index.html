@@ -322,7 +322,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 1.8</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 1.9</footer>
     </main>
   </section>
 </div>
@@ -789,6 +789,7 @@
       { label: "Abandoned", value: abandoned, cls: abandoned ? "warn" : "", filter: "abandoned", note: pct(abandoned, presented) + " · click for calls" },
       { label: "SLA", value: pct(slaP, slaP + slaF), note: slaP + slaF ? slaP + " of " + (slaP + slaF) + " answered ≤30s" : "no SLA calls yet" }
     ];
+    tiles.unshift(tiles.pop());   // SLA (last in the list) goes first, per Fred
     $("kpiGrid").innerHTML = tiles.map(function (t) {
       var active = t.filter && t.filter === drill;
       return "<button class='kpi " + (t.cls || "") + (t.filter ? "" : " static") + (active ? " active" : "") + "'" +
