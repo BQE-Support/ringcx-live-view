@@ -363,7 +363,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 4.3</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 4.4</footer>
     </main>
   </section>
 </div>
@@ -427,7 +427,8 @@
     SUPABASE_URL: "https://qevavlolbygnjynyikru.supabase.co",
     SUPABASE_ANON_KEY: "sb_publishable_dvaKYnU6ab7qzSTWMUl00Q_hEVNOVDk",
     ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144", "3301145", "3301139"],
-    HIDDEN_QUEUES: ["Test Queue"],                   // never shown anywhere on the page
+    // Queue names are shown with the word CORE always in capitals, in every part of the page (Fred).
+    HIDDEN_QUEUES: ["Test Queue"],                  // never shown anywhere on the page
     // Business hours enforced by the viewer, on top of RingCX's own open/closed flag.
     // Outside these hours the queue shows Closed and raises no staffing alerts.
     // days: 0=Sun..6=Sat. Payroll matches its RingCX gate schedule (M-F 06:00-16:00 Pacific).
@@ -460,6 +461,8 @@
   function b64url(bytes) { var s = ""; bytes.forEach(function (b) { s += String.fromCharCode(b); }); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
   function jwtClaims(t) { try { var p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); while (p.length % 4) p += "="; return JSON.parse(atob(p)); } catch (e) { return {}; } }
   function form(obj) { return Object.keys(obj).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(obj[k]); }).join("&"); }
+  // "Core", "core", "Core Overflow" -> "CORE", "CORE Overflow". Applied to every queue name as it arrives.
+  function queueLabel(name) { return String(name == null ? "" : name).replace(/\bcore\b/gi, "CORE"); }
   function todayKey() { var d = new Date(); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); }
 
   document.querySelectorAll("[data-cfg]").forEach(function (el) { el.textContent = CONFIG[el.getAttribute("data-cfg")]; });
@@ -1140,7 +1143,8 @@
     try {
       var res = await Promise.all([api("realTimeData/agent"), api("realTimeData/inbound")]);
       // Hidden queues are dropped right here, so they never reach cards, tiles, alerts or totals.
-      var queues = (res[1] || []).filter(function (q) { return CONFIG.HIDDEN_QUEUES.indexOf(q.gateName) < 0; });
+      var queues = (res[1] || []).filter(function (q) { return CONFIG.HIDDEN_QUEUES.indexOf(q.gateName) < 0; })
+        .map(function (q) { q.gateName = queueLabel(q.gateName); return q; });
       data = { agents: res[0] || [], queues: queues, fetchedAt: Date.now() };
       observe(data.agents, data.fetchedAt);
       lastError = null; backoff = 1;
@@ -1373,7 +1377,8 @@
         reportType: "GLOBAL_CALL_TYPE_DELIMITED",
         reportCriteria: { criteriaType: "GLOBAL_CALL_TYPE_CRITERIA", startDate: ptMidnightIso(), containGates: true, containAgents: true, includeNoAnswers: true }
       });
-      abandons.all = parseCsv(csv).filter(function (r) { return CONFIG.HIDDEN_QUEUES.indexOf(r.source_name) < 0; });
+      abandons.all = parseCsv(csv).filter(function (r) { return CONFIG.HIDDEN_QUEUES.indexOf(r.source_name) < 0; })
+        .map(function (r) { r.source_name = queueLabel(r.source_name); return r; });
       abandons.rows = abandons.all.filter(function (r) { return r.call_result === "ABANDON" && r.source_type === "ACD-INBOUND"; })
         .sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
       abandons.at = Date.now(); abandons.err = null;
