@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.1</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.2</footer>
     </main>
   </section>
 </div>
@@ -875,6 +875,13 @@
       { label: "Agents logged in", value: agents.length, filter: "all", note: "excl. supervisors off the queue" },
       { label: "<span class='st st-green'>Available</span>", value: agents.filter(isAvailable).length, filter: "available", note: "ready for a call" },
       { label: "<span class='st st-red'>Engaged</span>", value: agents.filter(isOnCall).length, filter: "oncall", note: "on a call, incl. wrap-up" },
+      (function () {
+        var lc = agents.filter(function (a) { return isLongCall(a, e); });
+        var longest = lc.reduce(function (m, a) { return Math.max(m, a.stateTime || 0); }, 0);
+        return { label: "Long calls", value: lc.length, filter: "longcalls",
+          cls: lc.length ? (longest + e >= 2 * CONFIG.LONG_CALL_SEC ? "crit" : "warn") : "",
+          note: lc.length ? "longest " + count(longest) + " · listen / barge in" : "on a call " + fmtShort(CONFIG.LONG_CALL_SEC) + "+" };
+      })(),
       { label: "<span class='st st-yellow'>Working</span>", value: agents.filter(DRILLS.working.test).length, filter: "working", note: "yellow statuses, no calls" },
       { label: "<span class='st st-grey'>Break / lunch</span>", value: agents.filter(DRILLS.away.test).length, filter: "away", note: "grey statuses, no calls" },
       { label: "Flagged", value: watch.length, filter: "flagged", cls: watch.length ? "warn" : "", note: "avoidance watch" },
@@ -906,7 +913,8 @@
     flagged: { title: "Flagged on the avoidance watch", test: null },
     abandoned: { title: "Abandoned calls today" },      // call list, not an agent list (no test)
     shortcalls: { title: "Short calls today" },         // call list, not an agent list (no test)
-    answered: { title: "Answered calls today" }         // call list, not an agent list (no test)
+    answered: { title: "Answered calls today" },        // call list, not an agent list (no test)
+    longcalls: { title: "Long calls right now" }        // live call list with Listen / Barge in (no test)
   };
 
   // ---------------- abandoned calls (RingCX call detail report) ----------------
@@ -1132,9 +1140,75 @@
     }
   }
 
+  // ---------------- long calls: listen / barge in ----------------
+  // RingCX "addSessionToCall" bridges the supervisor into a live call by ringing their phone:
+  // MONITOR = silent listen, BARGEIN = everyone hears everyone. hangupSession drops it again.
+  var MON_KEY = "rcxLiveView.monitorPhone.v1";
+  var monitor = {};   // uii -> { type: "MONITOR"|"BARGEIN", state: "calling"|"error", msg }
+  function isLongCall(a, e) { return isOnCall(a) && !a.pendingDisposition && !!a.callUii && (a.stateTime || 0) + e >= CONFIG.LONG_CALL_SEC; }
+  function monitorPhone() { try { return localStorage.getItem(MON_KEY) || ""; } catch (x) { return ""; } }
+  function normalizePhone(s) {
+    var d = String(s || "").replace(/[^\d]/g, "");
+    if (d.length === 10) d = "1" + d;
+    return d.length === 11 ? "+" + d : "";
+  }
+  async function apiPostQuery(path, params) {
+    if (tokenNearExpiry()) await refreshToken();
+    var url = CONFIG.RCX_SERVER + "/voice/api/v1/admin/accounts/" + CONFIG.ACCOUNT_ID + "/" + path + "?" + form(params);
+    var go = function () { return fetch(url, { method: "POST", headers: { Authorization: "Bearer " + session.rcxAccess } }); };
+    var r = await go();
+    if (r.status === 401) { await refreshToken(); r = await go(); }
+    if (!r.ok) { var t = await r.text(); var err = new Error("HTTP " + r.status + (t ? ": " + t.slice(0, 160) : "")); err.status = r.status; throw err; }
+  }
+  async function startMonitor(uii, type) {
+    var phone = monitorPhone();
+    if (!phone) { alert("Enter the phone number RingCX should ring for you first (top of this list)."); return; }
+    if (type === "BARGEIN" && !confirm("Barge in? The agent AND the customer will hear you.")) return;
+    try {
+      if (monitor[uii]) await apiPostQuery("activeCalls/" + encodeURIComponent(uii) + "/hangupSession", { phone: phone }).catch(function () {});
+      monitor[uii] = { type: type, state: "calling" }; renderDrillOnly();
+      await apiPostQuery("activeCalls/" + encodeURIComponent(uii) + "/addSessionToCall", { destination: phone, sessionType: type });
+      monitor[uii].msg = "Ringing " + phone + ". Answer to " + (type === "MONITOR" ? "listen." : "join the call.");
+    } catch (x) {
+      monitor[uii] = { type: type, state: "error", msg: x.status === 403 ? "RingCX says you don't have supervisor rights to do this (403)." : "Couldn't start (" + x.message + ")." };
+    }
+    renderDrillOnly();
+  }
+  async function stopMonitor(uii) {
+    try { await apiPostQuery("activeCalls/" + encodeURIComponent(uii) + "/hangupSession", { phone: monitorPhone() }); } catch (x) {}
+    delete monitor[uii]; renderDrillOnly();
+  }
+  function renderLongDrill(box, e, agents) {
+    // Keep the phone box intact while someone is typing in it.
+    if (document.activeElement && document.activeElement.id === "monPhone") return;
+    box.setAttribute("data-kind", "longcalls");
+    var rows = agents.filter(function (a) { return isLongCall(a, e); })
+      .sort(function (x, y) { return (y.stateTime || 0) - (x.stateTime || 0); });
+    var phone = monitorPhone();
+    box.innerHTML = "<div class='section-title'>Long calls right now <span class='sub'>on a call " + fmtShort(CONFIG.LONG_CALL_SEC) + "+ · " + rows.length + " agent" + (rows.length === 1 ? "" : "s") + "</span>" +
+      "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
+      "<div class='filters'><label class='tiny muted'>Ring me at <input id='monPhone' class='search' style='min-width:150px' placeholder='(555) 555-0123' value='" + esc(phone.replace(/^\+1/, "")) + "'></label>" +
+      "<button class='btn' data-mon-save>Save</button><span class='tiny muted'>Listen and Barge in work by RingCX calling this number, then connecting you into the call. It's saved only in this browser.</span></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Agent</th><th>Queue</th><th class='num'>On call</th><th>Caller</th><th>Listen / barge in</th></tr></thead><tbody>" +
+      (rows.map(function (a) {
+        var uii = String(a.callUii), m = monitor[uii];
+        var actions = "<button class='btn' data-mon='MONITOR' data-uii='" + esc(uii) + "'>🎧 Listen</button> " +
+          "<button class='btn' data-mon='BARGEIN' data-uii='" + esc(uii) + "'>Barge in</button>" +
+          (m ? " <button class='btn' data-mon-stop='" + esc(uii) + "'>Stop</button> <span class='tiny " + (m.state === "error" ? "hot" : "muted") + "'>" + esc(m.msg || (m.type === "MONITOR" ? "Starting listen…" : "Starting barge-in…")) + "</span>" : "");
+        return "<tr class='" + ((a.stateTime || 0) + e >= 2 * CONFIG.LONG_CALL_SEC ? "flag-crit" : "flag-warn") + "'>" +
+          "<td>" + esc(fullName(a)) + "</td>" +
+          "<td>" + esc(+a.gateId > 0 ? gateName(a.gateId) : "Outbound/direct") + "</td>" +
+          "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
+          "<td>" + esc(a.callAni || "") + "</td>" +
+          "<td class='wrap'>" + actions + "</td></tr>";
+      }).join("") || "<tr><td colspan='5' class='muted'>Nobody has been on a call longer than " + fmtShort(CONFIG.LONG_CALL_SEC) + " right now.</td></tr>") +
+      "</tbody></table></div>";
+  }
+
   function renderDrill(e, agents, watch) {
     var box = $("kpiDrill");
     if (!drill) { box.hidden = true; box.removeAttribute("data-kind"); return; }
+    if (drill === "longcalls") { box.hidden = false; renderLongDrill(box, e, agents); return; }
     if (drill === "shortcalls" || drill === "answered") { box.hidden = false; loadAbandons(false); renderCallDrill(box, drill); return; }
     box.removeAttribute("data-kind");
     if (drill === "abandoned") { box.hidden = false; loadAbandons(false); renderAbandonDrill(box); return; }
@@ -1294,6 +1368,18 @@
       // Agent lists also filter the Agents table; the call list leaves it alone.
       setFilter(drill && DRILLS[drill].test !== undefined ? drill : "all", true);
       return;
+    }
+    // Long calls: Listen / Barge in / Stop, and saving the "ring me at" number.
+    var mb = ev.target.closest("[data-mon]");
+    if (mb) { startMonitor(mb.getAttribute("data-uii"), mb.getAttribute("data-mon")); return; }
+    var ms = ev.target.closest("[data-mon-stop]");
+    if (ms) { stopMonitor(ms.getAttribute("data-mon-stop")); return; }
+    if (ev.target.closest("[data-mon-save]")) {
+      var ph = normalizePhone(($("monPhone") || {}).value);
+      if (!ph) { alert("Enter a 10-digit US number, e.g. (555) 555-0123."); return; }
+      try { localStorage.setItem(MON_KEY, ph); } catch (x) {}
+      if (document.activeElement) document.activeElement.blur();
+      renderDrillOnly(); return;
     }
     var pb = ev.target.closest("[data-play]");
     if (pb) { playRecording(pb); return; }
