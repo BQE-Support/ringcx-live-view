@@ -341,7 +341,8 @@
     RC_SERVER: "https://platform.ringcentral.com",
     RCX_SERVER: "https://ringcx.ringcentral.com",
     ACCOUNT_ID: "38000001",                          // SUB-BQE Software, Inc.
-    REDIRECT_URI: location.origin + location.pathname,
+    // Normalized so ".../index.html" and ".../" both send the same address RingCentral has on file.
+    REDIRECT_URI: location.origin + location.pathname.replace(/index\.html$/, ""),
     WAIT_CRIT_SEC: 120,                              // caller waiting longer than this = critical
     WAIT_FLASH_SEC: 5 * 60,                          // longest wait past this = flashing red until answered
     WRAP_WARN_SEC: 180,                              // wrap-up longer than this
