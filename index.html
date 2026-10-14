@@ -6,7 +6,7 @@
 <title>RingCX Live View</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3454D1">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
 <style>
   :root {
     --bg: #F5F6F9; --surface: #FFFFFF; --surface-alt: #ECEFF5; --border: #DDE1EA;
@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.4</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.5</footer>
     </main>
   </section>
 </div>
@@ -371,8 +371,8 @@
     // behind the IDs are kept in the internal README, not here, because this page is public.
     // "Who's viewing" uses Supabase Realtime presence (no database tables). The anon key is a
     // public client key by design. Empty values = presence off; the page shows only your own name.
-    SUPABASE_URL: "",
-    SUPABASE_ANON_KEY: "",
+    SUPABASE_URL: "https://qevavlolbygnjynyikru.supabase.co",
+    SUPABASE_ANON_KEY: "sb_publishable_dvaKYnU6ab7qzSTWMUl00Q_hEVNOVDk",
     ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144", "3301145", "3301139"],
     HIDDEN_QUEUES: ["Test Queue"],                   // never shown anywhere on the page
     CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
