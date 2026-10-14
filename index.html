@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.2</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.3</footer>
     </main>
   </section>
 </div>
@@ -354,7 +354,8 @@
     WAIT_CRIT_SEC: 120,                              // caller waiting longer than this = critical
     WAIT_FLASH_SEC: 5 * 60,                          // longest wait past this = flashing red until answered
     WRAP_WARN_SEC: 180,                              // wrap-up longer than this
-    LONG_CALL_SEC: 30 * 60,                          // single call longer than this
+    LONG_CALL_SEC: 30 * 60,                          // single call longer than this = Long calls (yellow)
+    LONG_CALL_CRIT_SEC: 45 * 60,                     // ...and red past this
     NOTREADY_WARN_SEC: 20 * 60,                      // in a no-calls status longer than this
     NOTREADY_CRIT_SEC: 40 * 60,
     EXIT_WARN: 3,                                    // left Available for a no-calls status N+ times in 60 min
@@ -879,7 +880,7 @@
         var lc = agents.filter(function (a) { return isLongCall(a, e); });
         var longest = lc.reduce(function (m, a) { return Math.max(m, a.stateTime || 0); }, 0);
         return { label: "Long calls", value: lc.length, filter: "longcalls",
-          cls: lc.length ? (longest + e >= 2 * CONFIG.LONG_CALL_SEC ? "crit" : "warn") : "",
+          cls: lc.length ? (longest + e >= CONFIG.LONG_CALL_CRIT_SEC ? "crit" : "warn") : "",
           note: lc.length ? "longest " + count(longest) + " · listen / barge in" : "on a call " + fmtShort(CONFIG.LONG_CALL_SEC) + "+" };
       })(),
       { label: "<span class='st st-yellow'>Working</span>", value: agents.filter(DRILLS.working.test).length, filter: "working", note: "yellow statuses, no calls" },
@@ -1195,10 +1196,11 @@
         var actions = "<button class='btn' data-mon='MONITOR' data-uii='" + esc(uii) + "'>🎧 Listen</button> " +
           "<button class='btn' data-mon='BARGEIN' data-uii='" + esc(uii) + "'>Barge in</button>" +
           (m ? " <button class='btn' data-mon-stop='" + esc(uii) + "'>Stop</button> <span class='tiny " + (m.state === "error" ? "hot" : "muted") + "'>" + esc(m.msg || (m.type === "MONITOR" ? "Starting listen…" : "Starting barge-in…")) + "</span>" : "");
-        return "<tr class='" + ((a.stateTime || 0) + e >= 2 * CONFIG.LONG_CALL_SEC ? "flag-crit" : "flag-warn") + "'>" +
+        var red = (a.stateTime || 0) + e >= CONFIG.LONG_CALL_CRIT_SEC;
+        return "<tr class='" + (red ? "flag-crit" : "flag-warn") + "'>" +
           "<td>" + esc(fullName(a)) + "</td>" +
           "<td>" + esc(+a.gateId > 0 ? gateName(a.gateId) : "Outbound/direct") + "</td>" +
-          "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
+          "<td class='num'><span class='" + (red ? "hot" : "warmn") + "'>" + count(a.stateTime || 0) + "</span></td>" +
           "<td>" + esc(a.callAni || "") + "</td>" +
           "<td class='wrap'>" + actions + "</td></tr>";
       }).join("") || "<tr><td colspan='5' class='muted'>Nobody has been on a call longer than " + fmtShort(CONFIG.LONG_CALL_SEC) + " right now.</td></tr>") +
