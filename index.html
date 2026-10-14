@@ -217,6 +217,10 @@
         <div id="queueList"></div>
         <label class="tiny muted"><input type="checkbox" id="showClosed"> show closed/idle queues</label>
       </div>
+      <div class="panel" id="lunchPanel">
+        <div class="section-title">Lunch <span class="sub" id="lunchSub"></span></div>
+        <div id="lunchList" class="tiny muted">Loading…</div>
+      </div>
       <div class="panel" id="ptoPanel">
         <div class="section-title">Time off <span class="sub" id="ptoSub"></span></div>
         <div id="ptoList" class="tiny muted">Loading…</div>
@@ -340,7 +344,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.7</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.8</footer>
     </main>
   </section>
 </div>
@@ -377,7 +381,11 @@
     STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
     STUCK_CRIT_SEC: 10 * 60,
     MIN_SIGNALS: 2,                                // flag an agent only when this many different signals are true
-    SHORT_CALL_SEC: 60,                              // answered calls shorter than this are listed for review
+    LUNCH_MAX_MIN: 60,                               // lunch longer than this shows red (RingCX's own max lunch is 60)
+    LUNCH_LEEWAY_MIN: 30,                            // "Due now" for this long after the scheduled time, then "Overdue"
+    LUNCH_LOOKAHEAD_MIN: 120,                        // "Next up" window
+    LUNCH_EXCLUDE: ["Sharik Parvaiz", "Danish Manzoor"], // left out of the Lunch panel for now (Fred)
+    SHORT_CALL_SEC: 60,                             // answered calls shorter than this are listed for review
     BOARD_MIN_LOGIN_SEC: 60 * 60,                   // agents with 0 calls are ranked once logged in this long
     // Only these RingCX agent IDs may use the viewer (Fred approves each one). The names
     // behind the IDs are kept in the internal README, not here, because this page is public.
@@ -518,7 +526,8 @@
       var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/pto", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
-      pto.at = Date.now(); renderPto(j);
+      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = j.schedule || [];
+      renderPto(j); renderLunch(elapsed());
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
       $("ptoSub").textContent = "";
@@ -539,6 +548,76 @@
       "<div class='pto-h'>Coming up (7 days)</div>" + (soon.map(function (r) { return row(r, false); }).join("") || "<div class='muted tiny'>Nothing scheduled.</div>");
     $("ptoSub").textContent = "from the PTO calendar · " + fmtClock(pto.at) +
       (j.hidden ? " · " + j.hidden + " hidden (not an active RingCX user)" : "");
+  }
+
+  // ---------------- lunch (Support Roster "Lunch Start", via the same Supabase function) ----------------
+  // Lunch is assumed to last LUNCH_MAX_MIN (RingCX's own max lunch setting is 60). Only people who are
+  // logged in to RingCX now, work today and aren't on PTO today are considered.
+  function normName(s) { return String(s || "").trim().replace(/\s+/g, " ").toLowerCase(); }
+  function clockOf(min) { var h = Math.floor(min / 60), m = min % 60; return ((h % 12) || 12) + ":" + String(m).padStart(2, "0") + (h >= 12 ? " PM" : " AM"); }
+  function renderLunch(e) {
+    var el = $("lunchList"); if (!el) return;
+    if (!pto.schedule) { return; }   // still loading (or the function errored; Time off shows why)
+    var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5);
+    var sinceMin = (function () {   // when this browser started watching today (Pacific minutes)
+      var d = new Date(hist.since);
+      var f = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d);
+      var g = function (t) { return +(f.filter(function (x) { return x.type === t; })[0] || {}).value; };
+      return g("hour") * 60 + g("minute");
+    })();
+    var out = {};
+    (pto.rows || []).forEach(function (r) { if (r.start <= pto.today && r.end >= pto.today) out[normName(r.name)] = 1; });
+    var sched = {};
+    pto.schedule.forEach(function (s) { sched[normName(s.name)] = s; });
+    var live = {};
+    data.agents.forEach(function (a) { live[normName(fullName(a))] = a; });
+
+    var skip = {};
+    CONFIG.LUNCH_EXCLUDE.forEach(function (x) { skip[normName(x)] = 1; });
+    var atLunch = [], due = [], overdue = [], next = [], done = 0, unknown = 0;
+    data.agents.forEach(function (a) {
+      if (skip[normName(fullName(a))]) return;
+      if (String(a.agentBaseState).toUpperCase() !== "LUNCH") return;
+      var s = sched[normName(fullName(a))];
+      atLunch.push({ a: a, s: s, t: (a.stateTime || 0) + e });
+    });
+    pto.schedule.forEach(function (s) {
+      var k = normName(s.name), a = live[k];
+      if (!a || s.lunch === null || out[k] || s.days.indexOf(n.day) < 0) return;
+      if (String(a.agentBaseState).toUpperCase() === "LUNCH") return;               // already listed above
+      var h = hist.agents[String(a.agentId)] || {};
+      var tookLunch = h.lunchDay === hist.day ||                                     // seen at lunch today, or
+        (h.ev || []).some(function (x) { return x.fb === "LUNCH" || x.tb === "LUNCH"; }); // a status change into/out of Lunch
+      if (tookLunch) { done++; return; }
+      if (s.lunch > nowMin && s.lunch <= nowMin + CONFIG.LUNCH_LOOKAHEAD_MIN) { next.push({ a: a, s: s }); return; }
+      if (s.lunch <= nowMin && nowMin < s.lunch + CONFIG.LUNCH_LEEWAY_MIN) { due.push({ a: a, s: s }); return; }
+      if (nowMin >= s.lunch + CONFIG.LUNCH_LEEWAY_MIN && nowMin < s.lunch + 4 * 60) {
+        // If this browser only started watching after their lunch time, they may have gone before we looked.
+        if (sinceMin > s.lunch) { unknown++; return; }
+        overdue.push({ a: a, s: s, late: nowMin - s.lunch });
+      }
+    });
+    function item(name, right, cls) { return "<div class='pto-row'><span>" + esc(name) + "</span><span class='when " + (cls || "") + "'>" + right + "</span></div>"; }
+    var html =
+      "<div class='pto-h'>At lunch now</div>" +
+      (atLunch.sort(function (x, y) { return y.t - x.t; }).map(function (x) {
+        var over = x.t >= CONFIG.LUNCH_MAX_MIN * 60;
+        return item(fullName(x.a), "<span class='" + (over ? "hot" : "") + "'>" + count(x.a.stateTime || 0) + "</span>" +
+          (x.s && x.s.lunch !== null ? " · sched " + clockOf(x.s.lunch) : " · no sched"));
+      }).join("") || "<div class='muted tiny'>Nobody.</div>") +
+      (overdue.length ? "<div class='pto-h'>Overdue</div>" + overdue.sort(function (x, y) { return y.late - x.late; }).map(function (x) {
+        return item(fullName(x.a), "sched " + clockOf(x.s.lunch) + " · <span class='warmn'>" + x.late + " min late</span>");
+      }).join("") : "") +
+      (due.length ? "<div class='pto-h'>Due now</div>" + due.map(function (x) { return item(fullName(x.a), "sched " + clockOf(x.s.lunch)); }).join("") : "") +
+      "<div class='pto-h'>Next up (" + (CONFIG.LUNCH_LOOKAHEAD_MIN / 60) + "h)</div>" +
+      (next.sort(function (x, y) { return x.s.lunch - y.s.lunch; }).map(function (x) { return item(fullName(x.a), clockOf(x.s.lunch)); }).join("") || "<div class='muted tiny'>Nobody scheduled.</div>");
+    el.className = ""; el.innerHTML = html;
+    var noSched = data.agents.filter(function (a) {
+      var k = normName(fullName(a)), s = sched[k];
+      return !skip[k] && inAgentSection(a) && (!s || s.lunch === null);
+    }).length;
+    $("lunchSub").textContent = "from the Support Roster" + (done ? " · " + done + " done" : "") +
+      (unknown ? " · " + unknown + " not seen yet" : "") + (noSched ? " · " + noSched + " logged in with no lunch time" : "");
   }
 
   // ---------------- who's viewing (Supabase Realtime presence) ----------------
@@ -703,6 +782,7 @@
       h.sessions = h.sessions || {};
       h.sessions[sk] = { login: a.loggedInDuration || a.loginTime || 0, rna: a.rna || 0 };
       h.name = fullName(a); h.sup = isSupervisor(a) || treatedAsSupervisor(a);
+      if (b === "LUNCH") h.lunchDay = hist.day;   // seen at lunch today (Lunch panel: "done")
       h.label = label; h.base = b; h.start = start; h.calls = a.callsHandled || 0; h.rna = a.rna || 0;
       h.ev = h.ev.filter(function (e) { return e.t > keepAfter; });
     });
@@ -853,6 +933,7 @@
     renderAgents(e, agents);
     renderSups(e, sups);
     renderBoard();
+    renderLunch(e);
     showViewer();
     // Today's call report feeds the leaderboard (and the Abandoned list): refresh every 5 minutes.
     if (!abandons.loading && Date.now() - abandons.at > 5 * 60 * 1000) loadAbandons(true);
