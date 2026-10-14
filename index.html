@@ -218,6 +218,12 @@
   .signin p { color: var(--ink-2); line-height: 1.5; }
   .error-box { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; background: var(--critical-soft); color: var(--critical); text-align: left; font-size: 13px; }
   details.panel summary { cursor: pointer; font-family: var(--serif); font-weight: 600; font-size: 15px; }
+  /* Collapsible sections keep the normal section-title look, with a turning arrow. */
+  details.collapsible > summary { list-style: none; font-size: 16px; }
+  details.collapsible > summary::-webkit-details-marker { display: none; }
+  details.collapsible > summary::before { content: "▸"; display: inline-block; margin-right: 6px; color: var(--ink-3); transition: transform .15s; }
+  details.collapsible[open] > summary::before { transform: rotate(90deg); }
+  details.collapsible:not([open]) > summary { margin-bottom: 0; }
   details.panel ul { color: var(--ink-2); line-height: 1.55; padding-left: 18px; }
   footer { text-align: center; color: var(--ink-3); font-size: 11px; margin-top: 4px; }
   [hidden] { display: none !important; }
@@ -331,10 +337,10 @@
         </div>
       </div>
 
-      <div class="panel" id="esPanel">
-        <div class="section-title">ES tickets waiting on L1 <span class="sub" id="esSub"></span></div>
+      <details class="panel collapsible" id="esPanel" open>
+        <summary class="section-title">ES tickets waiting on L1 <span class="sub" id="esSub"></span></summary>
         <div id="esBody" class="tiny muted">Loading…</div>
-      </div>
+      </details>
 
       <div class="panel">
         <div class="section-title">Supervisors <span class="sub" id="supSub"></span></div>
@@ -404,7 +410,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.22</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.23</footer>
     </main>
   </section>
 </div>
@@ -1429,6 +1435,12 @@
     else poll();
   });
   $("refreshBtn").addEventListener("click", function () { poll(); });
+  // Collapsible sections remember open/closed per viewer.
+  [].forEach.call(document.querySelectorAll("details.collapsible[id]"), function (d) {
+    var k = "open_" + d.id;
+    if (ui[k] === false) d.open = false;
+    d.addEventListener("toggle", function () { ui[k] = d.open; save(UI_KEY, ui); });
+  });
   $("intervalSel").addEventListener("change", function () { intervalSec = +this.value; ui.interval = intervalSec; save(UI_KEY, ui); poll(); });
   $("signoutBtn").addEventListener("click", signOut);
   $("signinBtn").addEventListener("click", function () { startSignIn().catch(function (e) { showSignin(e.message); }); });
