@@ -340,7 +340,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.5</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.6</footer>
     </main>
   </section>
 </div>
@@ -537,7 +537,8 @@
     $("ptoList").innerHTML =
       "<div class='pto-h'>Out today</div>" + (out.map(function (r) { return row(r, true); }).join("") || "<div class='muted tiny'>Nobody.</div>") +
       "<div class='pto-h'>Coming up (7 days)</div>" + (soon.map(function (r) { return row(r, false); }).join("") || "<div class='muted tiny'>Nothing scheduled.</div>");
-    $("ptoSub").textContent = "from the PTO calendar · " + fmtClock(pto.at);
+    $("ptoSub").textContent = "from the PTO calendar · " + fmtClock(pto.at) +
+      (j.hidden ? " · " + j.hidden + " hidden (not an active RingCX user)" : "");
   }
 
   // ---------------- who's viewing (Supabase Realtime presence) ----------------
