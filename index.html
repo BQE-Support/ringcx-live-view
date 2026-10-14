@@ -111,6 +111,14 @@
     .flash { animation: none; background: var(--critical); border-color: var(--critical); color: #fff; }
   }
 
+  /* Performance today */
+  .board-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; }
+  @media (max-width: 520px) { .board-grid { grid-template-columns: minmax(0, 1fr); } }
+  .board-grid > div { min-width: 0; }
+  .board-h { font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+  .board-h.good { color: var(--good); }
+  .board-h.low { color: var(--critical); }
+
   /* KPI drill-down list */
   .drill { border-color: var(--accent); }
   .drill .close { float: right; }
@@ -273,6 +281,15 @@
         </div>
       </div>
 
+      <div class="panel">
+        <div class="section-title">Performance today <span class="sub" id="boardSub"></span></div>
+        <div class="board-grid">
+          <div><div class="board-h good">Top 5</div><div id="boardTop"></div></div>
+          <div><div class="board-h low">Lowest 5</div><div id="boardLow"></div></div>
+        </div>
+        <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus up to 10 for the share of time spent Available or Engaged. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
+      </div>
+
       <details class="panel">
         <summary>Methodology &amp; notes</summary>
         <ul>
@@ -290,6 +307,13 @@
               <li>Wrap-up longer than <span data-cfgdur="WRAP_WARN_SEC"></span>.</li>
             </ul>
           </li>
+          <li><b>Performance today</b> ranks people on a score made of three parts:
+            <ul>
+              <li>Calls answered per logged-in hour, times 10.</li>
+              <li>Minus 5 for each RNA today.</li>
+              <li>Plus up to 10 for the share of time spent Available or Engaged. Until 30 minutes of someone's time has been observed, this part counts as half.</li>
+            </ul>
+            Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
           <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
           <li>RNA, calls and talk time are RingCX's own counters for the agent's current login session. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
@@ -298,7 +322,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 1.7</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 1.8</footer>
     </main>
   </section>
 </div>
@@ -328,6 +352,7 @@
     EXIT_CRIT: 5,
     CHANGE_WARN: 6,                                  // any status changes N+ times in 60 min
     MIN_SIGNALS: 2,                                  // flag an agent only when this many different signals are true
+    BOARD_MIN_LOGIN_SEC: 60 * 60,                    // agents with 0 calls are ranked once logged in this long
     CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
     // Business hours enforced by the viewer, on top of RingCX's own open/closed flag.
     // Outside these hours the queue shows Closed and raises no staffing alerts.
@@ -532,6 +557,20 @@
           if (!explained) h.ev.push({ t: start, fb: h.base, tb: "BRIEF", hidden: true });
         }
       }
+      // Time accounting for the leaderboard: credit the gap since the last refresh to the status
+      // the agent was in (capped, so a sleeping laptop doesn't credit hours).
+      if (h.lastSeen) {
+        var gap = Math.min((fetchedAt - h.lastSeen) / 1000, 3 * intervalSec);
+        h.seenSec = (h.seenSec || 0) + gap;
+        if (h.base === "AVAILABLE" || h.base === "ONCALL") h.readySec = (h.readySec || 0) + gap;
+      }
+      h.lastSeen = fetchedAt;
+      // Login time and RNA are per login session in RingCX; keep each session's latest values so
+      // the day total survives a logout/login.
+      var sk = String(a.loginDts || "session");
+      h.sessions = h.sessions || {};
+      h.sessions[sk] = { login: a.loggedInDuration || a.loginTime || 0, rna: a.rna || 0 };
+      h.name = fullName(a); h.sup = isSupervisor(a);
       h.label = label; h.base = b; h.start = start; h.calls = a.callsHandled || 0; h.rna = a.rna || 0;
       h.ev = h.ev.filter(function (e) { return e.t > keepAfter; });
     });
@@ -672,6 +711,9 @@
     renderWatch(e, watch);
     renderAgents(e, agents);
     renderSups(e, sups);
+    renderBoard();
+    // Today's call report feeds the leaderboard (and the Abandoned list): refresh every 5 minutes.
+    if (!abandons.loading && Date.now() - abandons.at > 5 * 60 * 1000) loadAbandons(true);
   }
   function tick() {
     if (!data.fetchedAt) return;
@@ -812,12 +854,78 @@
         reportType: "GLOBAL_CALL_TYPE_DELIMITED",
         reportCriteria: { criteriaType: "GLOBAL_CALL_TYPE_CRITERIA", startDate: ptMidnightIso(), containGates: true, containAgents: true, includeNoAnswers: true }
       });
-      abandons.rows = parseCsv(csv).filter(function (r) { return r.call_result === "ABANDON" && r.source_type === "ACD-INBOUND"; })
+      abandons.all = parseCsv(csv);
+      abandons.rows = abandons.all.filter(function (r) { return r.call_result === "ABANDON" && r.source_type === "ACD-INBOUND"; })
         .sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
       abandons.at = Date.now(); abandons.err = null;
     } catch (e) {
       abandons.err = e.status === 403 ? "Your RingCX user can't read call detail reports (HTTP 403)." : "Couldn't load call detail (" + e.message + ").";
-    } finally { abandons.loading = false; renderDrillOnly(); }
+    } finally { abandons.loading = false; renderDrillOnly(); renderBoard(); }
+  }
+
+  // ---------------- top / lowest performers today ----------------
+  // Composite score (Fred's choice, 2026-10-14):
+  //   calls answered per logged-in hour x 10
+  //   - 5 per RNA today
+  //   + 10 x share of observed time spent Available or Engaged (neutral 0.5 until 30 min observed)
+  // Everyone who answered queue calls today is ranked (supervisors included), plus anyone in the
+  // Agents section logged in at least BOARD_MIN_LOGIN_SEC.
+  function boardRows() {
+    var calls = {};   // "Last, First" -> { uiis, talk }
+    (abandons.all || []).forEach(function (r) {
+      if (r.source_type !== "ACD-INBOUND" || !r.connected_name) return;
+      var c = calls[r.connected_name] || (calls[r.connected_name] = { uiis: {}, talk: 0 });
+      if (!c.uiis[r.UII]) { c.uiis[r.UII] = 1; c.talk += +r.connected_duration || 0; }
+    });
+    var people = {};
+    Object.keys(hist.agents).forEach(function (id) {
+      var h = hist.agents[id]; if (!h.name) return;
+      var login = 0, rna = 0;
+      Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna += h.sessions[k].rna; });
+      people[h.name] = { id: id, name: h.name, sup: h.sup, login: login, rna: rna, ready: h.readySec || 0, seen: h.seenSec || 0 };
+    });
+    // Live session values are fresher than history for anyone logged in right now.
+    data.agents.forEach(function (a) {
+      var p = people[fullName(a)];
+      if (p) p.onDuty = inAgentSection(a);
+    });
+    var out = [];
+    Object.keys(people).forEach(function (n) {
+      var p = people[n], parts = n.split(" "), key = parts.slice(1).join(" ") + ", " + parts[0];
+      var c = calls[key] || { uiis: {}, talk: 0 };
+      var answered = Object.keys(c.uiis).length;
+      var eligible = answered > 0 || (p.onDuty !== false && !p.sup && p.login >= CONFIG.BOARD_MIN_LOGIN_SEC);
+      if (!eligible || p.login < 60) return;
+      var perHr = answered / (p.login / 3600);
+      var readyShare = p.seen >= 1800 ? p.ready / p.seen : 0.5;
+      var score = perHr * 10 - p.rna * 5 + readyShare * 10;
+      out.push({ name: n, sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: p.seen >= 1800 ? readyShare : null, login: p.login, score: score });
+    });
+    return out.sort(function (a, b) { return b.score - a.score; });
+  }
+
+  function renderBoard() {
+    if (!$("boardTop")) return;
+    var rows = boardRows();
+    var top = rows.slice(0, 5), low = rows.length > 5 ? rows.slice(-Math.min(5, rows.length - 5)).reverse() : [];
+    function table(list, startRank, dir) {
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+        (list.map(function (r, i) {
+          return "<tr><td class='num'>" + (dir > 0 ? startRank + i : rows.length - i) + "</td>" +
+            "<td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+            "<td class='num'><b>" + r.score.toFixed(1) + "</b></td>" +
+            "<td class='num'>" + r.answered + "</td>" +
+            "<td class='num'>" + r.perHr.toFixed(1) + "</td>" +
+            "<td class='num'>" + fmtDur(r.talk) + "</td>" +
+            "<td class='num'>" + (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0") + "</td>" +
+            "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
+            "<td class='num'>" + fmtDur(r.login) + "</td></tr>";
+        }).join("") || "<tr><td colspan='9' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
+        "</tbody></table></div>";
+    }
+    $("boardTop").innerHTML = table(top, 1, 1);
+    $("boardLow").innerHTML = table(low, 0, -1);
+    $("boardSub").textContent = rows.length + " ranked" + (abandons.at ? " · calls as of " + fmtClock(abandons.at) : "") + " · logged-in time and RNA tracked by this browser since " + fmtClock(hist.since);
   }
   function renderDrillOnly() {
     if (!data.fetchedAt) return;
@@ -910,6 +1018,7 @@
   }
 
   function renderWatch(e, watch) {
+    $("watchPanel").hidden = !watch.length;   // only shown when someone is flagged
     $("watchSub").textContent = "status changes counted by this browser since " + fmtClock(hist.since);
     $("watchBody").innerHTML = watch.map(function (x) {
       var a = x.a, w = x.w, nr = isNotReady(a) ? (a.stateTime || 0) : null;
