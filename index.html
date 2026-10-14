@@ -112,6 +112,12 @@
     .flash { animation: none; background: var(--critical); border-color: var(--critical); color: #fff; }
   }
 
+  /* Time off (left column) */
+  .pto-h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); margin: 6px 0 4px; }
+  .pto-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-top: 1px solid var(--border); font-size: 13px; }
+  .pto-row:first-of-type { border-top: 0; }
+  .pto-row .when { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+
   /* Who's viewing: initials avatars in the top-right tag */
   .avatar { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; margin-left: 4px;
     background: var(--accent-soft); color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .02em; border: 1px solid var(--accent); cursor: default; }
@@ -210,6 +216,10 @@
         <div class="section-title">Queues <span class="sub">today</span></div>
         <div id="queueList"></div>
         <label class="tiny muted"><input type="checkbox" id="showClosed"> show closed/idle queues</label>
+      </div>
+      <div class="panel" id="ptoPanel">
+        <div class="section-title">Time off <span class="sub" id="ptoSub"></span></div>
+        <div id="ptoList" class="tiny muted">Loading…</div>
       </div>
     </aside>
 
@@ -330,7 +340,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.4</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.5</footer>
     </main>
   </section>
 </div>
@@ -491,6 +501,43 @@
     if (presence.channel) { if (n && n !== presence.trackedName) trackPresence(); renderPresence(); return; }
     el.hidden = !n;
     el.innerHTML = "<span class='dot live'></span>Viewing: <b>" + esc(n) + "</b>";
+  }
+
+  // ---------------- time off (Smartsheet PTO calendar via the Supabase "pto" function) ----------------
+  // The function holds the Smartsheet token and only answers approved, signed-in viewers.
+  var pto = { at: 0, loading: false };
+  function ymdLabel(s) {
+    var p = String(s).split("-"), d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+    return d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }) + " " + (+p[1]) + "/" + (+p[2]);
+  }
+  async function loadPto() {
+    if (pto.loading || !session || !CONFIG.SUPABASE_URL) return;
+    pto.loading = true;
+    try {
+      if (tokenNearExpiry()) await refreshToken();
+      var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/pto", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      pto.at = Date.now(); renderPto(j);
+    } catch (e) {
+      $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
+      $("ptoSub").textContent = "";
+    } finally { pto.loading = false; }
+  }
+  function renderPto(j) {
+    var today = j.today, rows = j.rows || [];
+    var out = rows.filter(function (r) { return r.start <= today && r.end >= today; });
+    var soon = rows.filter(function (r) { return r.start > today; });
+    function row(r, isToday) {
+      var when = isToday ? (r.end > today ? "through " + ymdLabel(r.end) : "today")
+        : (r.start === r.end ? ymdLabel(r.start) : ymdLabel(r.start) + " – " + ymdLabel(r.end));
+      var hrs = r.hours ? " · " + r.hours + "h" : "";
+      return "<div class='pto-row'><span>" + esc(r.name) + " <span class='muted tiny'>" + esc(r.type || "") + esc(hrs) + "</span></span><span class='when'>" + esc(when) + "</span></div>";
+    }
+    $("ptoList").innerHTML =
+      "<div class='pto-h'>Out today</div>" + (out.map(function (r) { return row(r, true); }).join("") || "<div class='muted tiny'>Nobody.</div>") +
+      "<div class='pto-h'>Coming up (7 days)</div>" + (soon.map(function (r) { return row(r, false); }).join("") || "<div class='muted tiny'>Nothing scheduled.</div>");
+    $("ptoSub").textContent = "from the PTO calendar · " + fmtClock(pto.at);
   }
 
   // ---------------- who's viewing (Supabase Realtime presence) ----------------
@@ -1440,7 +1487,11 @@
       $("configWarning").textContent = IS_LOCAL_DEV ? "Local test mode: signs in with the dev server's credential." : "Not yet connected to a RingCentral app (CLIENT_ID is empty).";
     }
   }
-  function showLive() { $("signinView").hidden = true; $("liveView").hidden = false; startPolling(); startPresence(); }
+  var ptoTimer = null;
+  function showLive() {
+    $("signinView").hidden = true; $("liveView").hidden = false; startPolling(); startPresence();
+    loadPto(); clearInterval(ptoTimer); ptoTimer = setInterval(loadPto, 15 * 60 * 1000);
+  }
 
   // ---------------- auto-update ----------------
   // Every few minutes, re-fetch this page from the server (bypassing caches) and
