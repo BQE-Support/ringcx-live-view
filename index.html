@@ -340,7 +340,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.6</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.7</footer>
     </main>
   </section>
 </div>
@@ -1491,7 +1491,8 @@
   var ptoTimer = null;
   function showLive() {
     $("signinView").hidden = true; $("liveView").hidden = false; startPolling(); startPresence();
-    loadPto(); clearInterval(ptoTimer); ptoTimer = setInterval(loadPto, 15 * 60 * 1000);
+    // Time off: the Supabase function reads Smartsheet at most every 30 min, so ask on the same cadence.
+    loadPto(); clearInterval(ptoTimer); ptoTimer = setInterval(loadPto, 30 * 60 * 1000);
   }
 
   // ---------------- auto-update ----------------
