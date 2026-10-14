@@ -356,7 +356,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 4.0</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 4.1</footer>
     </main>
   </section>
 </div>
@@ -393,7 +393,10 @@
     STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
     STUCK_CRIT_SEC: 10 * 60,
     MIN_SIGNALS: 2,                                // flag an agent only when this many different signals are true
-    LOGIN_GRACE_MIN: 5,                              // first login this many min after scheduled start = late (yellow)
+    SHIFT_HOURS: 9,                                  // roster has no shift end: assume 8h work + 1h lunch
+    OFFLINE_MIN: 5,                                  // logged out this long during the shift = on the watch
+    OFFLINE_CRIT_MIN: 30,                            // ...red after this
+    LOGIN_GRACE_MIN: 5,                             // first login this many min after scheduled start = late (yellow)
     LOGIN_LATE_CRIT_MIN: 15,                         // ...red after this; also "not logged in yet" after this
     LUNCH_MAX_MIN: 60,                              // lunch longer than this shows red (RingCX's own max lunch is 60)
     LUNCH_LEEWAY_MIN: 30,                            // "Due now" for this long after the scheduled time, then "Overdue"
@@ -635,6 +638,44 @@
       (unknown ? " · " + unknown + " not seen yet" : "") + (noSched ? " · " + noSched + " logged in with no lunch time" : "");
   }
 
+  // ---------------- logged out during their shift -> call avoidance watch ----------------
+  // An agent goes on the watch when they are scheduled today (roster), inside their shift
+  // (start .. start + SHIFT_HOURS), not logged in to RingCX, not on PTO today, not inside their lunch
+  // window, and have been out OFFLINE_MIN+ minutes (or never logged in, 15+ min after their start).
+  // Supervisors are left out. Returns watch entries shaped like the live ones ({ a, w }).
+  function offlineAgents() {
+    if (!pto.schedule || !supNames) return [];   // need the roster and the supervisor list first
+    var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5);
+    var live = {}, out = {}, byName = {};
+    data.agents.forEach(function (a) { live[normName(fullName(a))] = 1; });
+    (pto.rows || []).forEach(function (r) { if (r.start <= pto.today && r.end >= pto.today) out[normName(r.name)] = 1; });
+    Object.keys(hist.agents).forEach(function (id) { var h = hist.agents[id]; if (h.name) byName[normName(h.name)] = { id: id, h: h }; });
+    var list = [];
+    pto.schedule.forEach(function (s) {
+      var k = normName(s.name);
+      if (live[k] || out[k] || s.shift === null || s.days.indexOf(n.day) < 0) return;
+      if (isSupervisorName(s.name, false) || CONFIG.LUNCH_EXCLUDE.some(function (x) { return normName(x) === k; })) return;
+      if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN || nowMin >= s.shift + CONFIG.SHIFT_HOURS * 60) return;
+      if (s.lunch !== null && nowMin >= s.lunch && nowMin < s.lunch + CONFIG.LUNCH_MAX_MIN + CONFIG.LUNCH_LEEWAY_MIN) return;
+      var seen = byName[k], offSec, reason;
+      if (seen && seen.h.sup) return;
+      if (seen && seen.h.lastSeen) {
+        offSec = (Date.now() - seen.h.lastSeen) / 1000;
+        if (offSec < CONFIG.OFFLINE_MIN * 60) return;
+        reason = "Logged out since " + fmtClock(seen.h.lastSeen) + ", not on lunch or PTO";
+      } else {
+        offSec = (nowMin - s.shift) * 60;
+        reason = "Not logged in yet, shift started " + clockOf(s.shift);
+      }
+      var lvl = offSec >= CONFIG.OFFLINE_CRIT_MIN * 60 ? "crit" : "warn";
+      var parts = s.name.split(" ");
+      var a = { agentId: seen ? seen.id : "offline-" + k, firstName: parts[0], lastName: parts.slice(1).join(" "),
+        agentState: "LOGGED OUT", agentBaseState: "OFFLINE", stateTime: Math.max(0, offSec - elapsed()), offline: true };
+      list.push({ a: a, w: { lvl: lvl, score: (lvl === "crit" ? 450 : 300) + offSec / 60, reasons: [{ lvl: lvl, text: reason }], cs: changeStats(a) } });
+    });
+    return list;
+  }
+
   // ---------------- logins today ----------------
   // RingCX gives each live session's start as loginDts (Pacific, no offset, e.g. "2026-10-14T06:02:20").
   // The page keeps every session it saw today in hist, so first login, re-logins and total time survive
@@ -814,7 +855,7 @@
     if (isOnCall(a)) return "st-red";
     var b = base(a);
     if (b === "AVAILABLE") return "st-green";
-    if (b === "ON-BREAK" || b === "BREAK" || b === "AWAY" || b === "LUNCH") return "st-grey";
+    if (b === "ON-BREAK" || b === "BREAK" || b === "AWAY" || b === "LUNCH" || b === "OFFLINE") return "st-grey";
     return "st-yellow";
   }
   function stateLabel(a) { return a.pendingDisposition ? "Wrap-up" : (a.agentState || ""); }
@@ -1024,6 +1065,7 @@
     var agents = data.agents.filter(inAgentSection);
     var sups = data.agents.filter(function (a) { return !inAgentSection(a); });
     var watch = agents.map(function (a) { return { a: a, w: watchFor(a, e) }; }).filter(function (x) { return x.w; })
+      .concat(offlineAgents())
       .sort(function (x, y) { return y.w.score - x.w.score; });
     renderQueues(e);
     renderAlerts(e, watch);
