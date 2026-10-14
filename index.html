@@ -322,7 +322,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 1.9</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.0</footer>
     </main>
   </section>
 </div>
@@ -354,6 +354,9 @@
     CHANGE_WARN: 6,                                  // any status changes N+ times in 60 min
     MIN_SIGNALS: 2,                                  // flag an agent only when this many different signals are true
     BOARD_MIN_LOGIN_SEC: 60 * 60,                    // agents with 0 calls are ranked once logged in this long
+    // Only these RingCX agent IDs may use the viewer (Fred approves each one). The names
+    // behind the IDs are kept in the internal README, not here, because this page is public.
+    ALLOWED_AGENT_IDS: ["3299715"],
     CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
     // Business hours enforced by the viewer, on top of RingCX's own open/closed flag.
     // Outside these hours the queue shows Closed and raises no staffing alerts.
@@ -1186,7 +1189,20 @@
       showSignin("RingCentral sign-in was cancelled or refused (" + params.get("error") + ").");
       return;
     }
-    if (session && session.rcxAccess) showLive(); else showSignin();
+    if (!(session && session.rcxAccess)) { showSignin(); return; }
+    if (!isAllowed()) { denyAccess(); return; }
+    showLive();
+  }
+
+  // ---------------- access list ----------------
+  function signedInAgentId() { var c = jwtClaims(session.rcxAccess); return c.agnt ? String(c.agnt) : ""; }
+  function isAllowed() { return CONFIG.ALLOWED_AGENT_IDS.indexOf(signedInAgentId()) >= 0; }
+  function denyAccess() {
+    var id = signedInAgentId();
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    session = null;
+    showSignin("You're signed in to RingCentral, but you haven't been given access to this viewer. Ask Fred Daniel to add you" +
+      (id ? ", and give him your RingCX agent ID: " + id + "." : "."));
   }
   boot();
 })();
