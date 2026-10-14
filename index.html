@@ -410,7 +410,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.23</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.24</footer>
     </main>
   </section>
 </div>
@@ -476,7 +476,7 @@
     // public client key by design. Empty values = presence off; the page shows only your own name.
     SUPABASE_URL: "https://qevavlolbygnjynyikru.supabase.co",
     SUPABASE_ANON_KEY: "sb_publishable_dvaKYnU6ab7qzSTWMUl00Q_hEVNOVDk",
-    ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144", "3301145", "3301139", "3301150"],   // + Adnan Bakshi
+    ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144", "3301145", "3301139", "3301150", "3301146"],   // + Adnan Bakshi, Natasha Gangal
     // Queue names are shown with the word CORE always in capitals, in every part of the page (Fred).
     HIDDEN_QUEUES: ["Test Queue"],                  // never shown anywhere on the page
     // Vendor status pages shown in What to Watch (Fred, 2026-10-14). All are Atlassian Statuspage
@@ -1191,7 +1191,22 @@
   }
 
   // GET returns parsed JSON; with a body it POSTs JSON and returns the raw text (reports come back as CSV).
+  // Viewers without a RingCX admin user get 403 from the admin API. They read the same data through the
+  // "relay" function (server credential, read-only), and controls that need their own rights are hidden.
+  function viaRelay() { return !!(session && session.relay); }
+  async function relayApi(path, body) {
+    if (tokenNearExpiry()) await refreshToken();
+    var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/relay", {
+      method: "POST", headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess, "Content-Type": "application/json" },
+      body: JSON.stringify(body ? { path: path, body: body } : { path: path })
+    });
+    var txt = await r.text();
+    if (!r.ok) { var msg = "HTTP " + r.status; try { msg = JSON.parse(txt).error || msg; } catch (x) {} var e = new Error(msg); e.status = r.status; throw e; }
+    if (body) return txt;
+    return txt ? JSON.parse(txt) : [];
+  }
   async function api(path, body) {
+    if (viaRelay()) return relayApi(path, body);
     if (tokenNearExpiry()) await refreshToken();
     var url = CONFIG.RCX_SERVER + "/voice/api/v1/admin/accounts/" + CONFIG.ACCOUNT_ID + "/" + path;
     function go() {
@@ -1201,6 +1216,7 @@
     }
     var r = await go();
     if (r.status === 401) { await refreshToken(); r = await go(); }
+    if (r.status === 403) { session.relay = true; return relayApi(path, body); }
     if (!r.ok) { var e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
     var txt = await r.text();
     if (body) return txt;
@@ -1629,7 +1645,7 @@
         var longest = lc.reduce(function (m, a) { return Math.max(m, a.stateTime || 0); }, 0);
         return { label: "Long calls", value: lc.length, filter: "longcalls",
           cls: lc.length ? (longest + e >= CONFIG.LONG_CALL_CRIT_SEC ? "crit" : "warn") : "",
-          note: lc.length ? "longest " + count(longest) + " · listen / barge in" : "on a call " + fmtShort(CONFIG.LONG_CALL_SEC) + "+" };
+          note: lc.length ? "longest " + count(longest) + (viaRelay() ? "" : " · listen / barge in") : "on a call " + fmtShort(CONFIG.LONG_CALL_SEC) + "+" };
       })(),
       { label: "<span class='st st-yellow'>Busy</span>", value: agents.filter(DRILLS.working.test).length, filter: "working", note: "yellow statuses, no calls" },
       { label: "<span class='st st-grey'>Break / lunch</span>", value: agents.filter(DRILLS.away.test).length, filter: "away", note: "grey statuses, no calls" },
@@ -2270,8 +2286,10 @@
     btn.disabled = true; btn.textContent = "Loading…";
     try {
       if (tokenNearExpiry()) await refreshToken();
-      var r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } });
-      if (r.status === 401) { await refreshToken(); r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } }); }
+      var viaR = function () { return fetch(CONFIG.SUPABASE_URL + "/functions/v1/relay", { method: "POST", headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess, "Content-Type": "application/json" }, body: JSON.stringify({ recording: url }) }); };
+      var r = viaRelay() ? await viaR() : await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } });
+      if (r.status === 401 && !viaRelay()) { await refreshToken(); r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } }); }
+      if (r.status === 403 && !viaRelay()) { session.relay = true; r = await viaR(); }
       if (!r.ok) throw new Error("HTTP " + r.status);
       recordings[uii] = URL.createObjectURL(await r.blob());
       var cell = btn.closest("td");
@@ -2329,9 +2347,9 @@
     var phone = monitorPhone();
     box.innerHTML = "<div class='section-title'>Long calls right now <span class='sub'>on a call " + fmtShort(CONFIG.LONG_CALL_SEC) + "+ · " + rows.length + " agent" + (rows.length === 1 ? "" : "s") + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
-      "<div class='filters'><label class='tiny muted'>Ring me at <input id='monPhone' class='search' style='min-width:150px' placeholder='(555) 555-0123' value='" + esc(phone.replace(/^\+1/, "")) + "'></label>" +
-      "<button class='btn' data-mon-save>Save</button><span class='tiny muted'>Listen and Barge in work by RingCX calling this number, then connecting you into the call. It's saved only in this browser.</span></div>" +
-      "<div class='table-wrap'><table><thead><tr><th>Agent</th><th>Queue</th><th class='num'>On call</th><th>Caller</th><th>Listen / barge in</th></tr></thead><tbody>" +
+      (viaRelay() ? "" : "<div class='filters'><label class='tiny muted'>Ring me at <input id='monPhone' class='search' style='min-width:150px' placeholder='(555) 555-0123' value='" + esc(phone.replace(/^\+1/, "")) + "'></label>" +
+      "<button class='btn' data-mon-save>Save</button><span class='tiny muted'>Listen and Barge in work by RingCX calling this number, then connecting you into the call. It's saved only in this browser.</span></div>") +
+      "<div class='table-wrap'><table><thead><tr><th>Agent</th><th>Queue</th><th class='num'>On call</th><th>Caller</th>" + (viaRelay() ? "" : "<th>Listen / barge in</th>") + "</tr></thead><tbody>" +
       (rows.map(function (a) {
         var uii = String(a.callUii), m = monitor[uii];
         var actions = "<button class='btn' data-mon='MONITOR' data-uii='" + esc(uii) + "'>🎧 Listen</button> " +
@@ -2343,7 +2361,7 @@
           "<td>" + esc(+a.gateId > 0 ? gateName(a.gateId) : "Outbound/direct") + "</td>" +
           "<td class='num'><span class='" + (red ? "hot" : "warmn") + "'>" + count(a.stateTime || 0) + "</span></td>" +
           "<td>" + esc(a.callAni || "") + "</td>" +
-          "<td class='wrap'>" + actions + "</td></tr>";
+          (viaRelay() ? "" : "<td class='wrap'>" + actions + "</td>") + "</tr>";
       }).join("") || "<tr><td colspan='5' class='muted'>Nobody has been on a call longer than " + fmtShort(CONFIG.LONG_CALL_SEC) + " right now.</td></tr>") +
       "</tbody></table></div>";
   }
@@ -2659,7 +2677,7 @@
     sups.sort(function (x, y) { return fullName(x).localeCompare(fullName(y)); });
     $("supBody").innerHTML = sups.map(function (a) {
       return "<tr class='" + (String(a.agentId) === me ? "me" : "") + "'>" +
-        "<td>" + esc(fullName(a)) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + (isSupervisor(a) ? "" : " <span class='chip info'>Treated as supervisor</span>") + "</td>" +
+        "<td>" + esc(fullName(a)) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + "</td>" +
         "<td>" + stateHtml(a) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
         "<td class='num'>" + dayStats(a).calls + "</td>" +
