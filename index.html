@@ -308,7 +308,19 @@
           <div><div class="board-h good">Top 5</div><div id="boardTop"></div></div>
           <div><div class="board-h low">Lowest 5</div><div id="boardLow"></div></div>
         </div>
-        <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus up to 10 for the share of time spent Available or Engaged. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
+        <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
+        <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Working, Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
+      </div>
+
+      <div class="panel" id="loginPanel">
+        <div class="section-title">Logins today <span class="sub" id="loginSub"></span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Agent</th><th class="num">Scheduled start</th><th class="num">First login</th><th class="num">Late by</th><th class="num">Logins</th><th class="num">Logged in</th><th>Status</th></tr></thead>
+            <tbody id="loginBody"></tbody>
+          </table>
+        </div>
+        <div class="tiny muted" style="margin-top:6px">First login and session times come from RingCX (Pacific). Scheduled start is the Support Roster "Shift Start". Late = first login more than <span data-cfg="LOGIN_GRACE_MIN"></span> min after the scheduled start (red after <span data-cfg="LOGIN_LATE_CRIT_MIN"></span>). Sessions that started and ended before this browser began watching today can't be seen, so "First login" is the earliest one this browser knows about.</div>
       </div>
 
       <details class="panel">
@@ -344,7 +356,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.8</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.9</footer>
     </main>
   </section>
 </div>
@@ -381,7 +393,9 @@
     STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
     STUCK_CRIT_SEC: 10 * 60,
     MIN_SIGNALS: 2,                                // flag an agent only when this many different signals are true
-    LUNCH_MAX_MIN: 60,                               // lunch longer than this shows red (RingCX's own max lunch is 60)
+    LOGIN_GRACE_MIN: 5,                              // first login this many min after scheduled start = late (yellow)
+    LOGIN_LATE_CRIT_MIN: 15,                         // ...red after this; also "not logged in yet" after this
+    LUNCH_MAX_MIN: 60,                              // lunch longer than this shows red (RingCX's own max lunch is 60)
     LUNCH_LEEWAY_MIN: 30,                            // "Due now" for this long after the scheduled time, then "Overdue"
     LUNCH_LOOKAHEAD_MIN: 120,                        // "Next up" window
     LUNCH_EXCLUDE: ["Sharik Parvaiz", "Danish Manzoor"], // left out of the Lunch panel for now (Fred)
@@ -419,7 +433,8 @@
     return h ? h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0") : m + ":" + String(s).padStart(2, "0");
   }
   function fmtShort(sec) { return sec >= 3600 ? Math.round(sec / 360) / 10 + "h" : Math.round(sec / 60) + " min"; }
-  function fmtClock(ms) { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+  // Every clock time on the page is Pacific, matching RingCX and the roster, whatever the viewer's PC is set to.
+  function fmtClock(ms) { return new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }) + " PT"; }
   function pct(a, b) { return b ? Math.round(100 * a / b) + "%" : "–"; }
   function load(key) { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } }
   function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
@@ -527,7 +542,7 @@
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
       pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = j.schedule || [];
-      renderPto(j); renderLunch(elapsed());
+      renderPto(j); renderLunch(elapsed()); renderLogins(elapsed());
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
       $("ptoSub").textContent = "";
@@ -618,6 +633,67 @@
     }).length;
     $("lunchSub").textContent = "from the Support Roster" + (done ? " · " + done + " done" : "") +
       (unknown ? " · " + unknown + " not seen yet" : "") + (noSched ? " · " + noSched + " logged in with no lunch time" : "");
+  }
+
+  // ---------------- logins today ----------------
+  // RingCX gives each live session's start as loginDts (Pacific, no offset, e.g. "2026-10-14T06:02:20").
+  // The page keeps every session it saw today in hist, so first login, re-logins and total time survive
+  // logouts. Scheduled start is the roster "Shift Start" from the pto function.
+  function dtsMinutes(s) { var m = /T?(\d{1,2}):(\d{2})/.exec(String(s || "").replace(/^\d{4}-\d{2}-\d{2}/, "")); return m ? +m[1] * 60 + +m[2] : null; }
+  function renderLogins(e) {
+    var body = $("loginBody"); if (!body) return;
+    var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5);
+    var sched = {}, out = {};
+    (pto.schedule || []).forEach(function (s) { sched[normName(s.name)] = s; });
+    (pto.rows || []).forEach(function (r) { if (r.start <= pto.today && r.end >= pto.today) out[normName(r.name)] = 1; });
+    var liveById = {};
+    data.agents.forEach(function (a) { liveById[String(a.agentId)] = a; });
+    var rows = [], seenNames = {};
+    Object.keys(hist.agents).forEach(function (id) {
+      var h = hist.agents[id]; if (!h.name || !h.sessions) return;
+      var keys = Object.keys(h.sessions).filter(function (k) { return k !== "session"; }).sort();
+      if (!keys.length) return;
+      var first = dtsMinutes(keys[0]), total = 0, lastSeen = 0;
+      keys.forEach(function (k) { total += h.sessions[k].login || 0; lastSeen = Math.max(lastSeen, h.sessions[k].seen || 0); });
+      lastSeen = Math.max(lastSeen, h.lastSeen || 0);   // last refresh that still had them logged in
+      var live = liveById[id], s = sched[normName(h.name)];
+      var start = s && s.shift !== null && s.days.indexOf(n.day) >= 0 ? s.shift : null;
+      // Supervisors don't always log in to take calls, so they aren't marked late.
+      var late = !h.sup && start !== null && first !== null ? first - start : null;
+      seenNames[normName(h.name)] = 1;
+      rows.push({ name: h.name, sup: h.sup, start: start, first: first, late: late, logins: keys.length,
+        total: live ? Math.max(total, live.loggedInDuration || 0) : total, live: live, lastSeen: lastSeen });
+    });
+    // Scheduled today, not on PTO, past start + grace, never seen logged in.
+    (pto.schedule || []).forEach(function (s) {
+      var k = normName(s.name);
+      if (seenNames[k] || out[k] || s.shift === null || s.days.indexOf(n.day) < 0) return;
+      if (CONFIG.LUNCH_EXCLUDE.some(function (x) { return normName(x) === k; })) return;
+      if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN) return;
+      rows.push({ name: s.name, start: s.shift, first: null, late: nowMin - s.shift, logins: 0, total: 0, missing: true });
+    });
+    rows.sort(function (x, y) { return (y.missing ? 1 : 0) - (x.missing ? 1 : 0) || (y.late || -999) - (x.late || -999) || x.name.localeCompare(y.name); });
+    function lateCell(r) {
+      if (r.late === null) return "<span class='muted'>–</span>";
+      if (r.late <= CONFIG.LOGIN_GRACE_MIN) return "<span class='muted'>on time</span>";
+      return "<span class='" + (r.late >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "'>" + fmtShort(r.late * 60) + "</span>";
+    }
+    body.innerHTML = rows.map(function (r) {
+      var flag = r.missing || (r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN ? "flag-warn" : "");
+      var status = r.missing ? "<span class='chip crit'>Not logged in yet</span>"
+        : (r.live ? "<span class='st st-green' style='font-weight:400'>Logged in</span>"
+          : "<span class='muted'>Logged out" + (r.lastSeen ? " · last seen " + fmtClock(r.lastSeen) : "") + "</span>");
+      return "<tr class='" + flag + "'><td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+        "<td class='num'>" + (r.start !== null ? clockOf(r.start) : "<span class='muted'>–</span>") + "</td>" +
+        "<td class='num'>" + (r.first !== null ? clockOf(r.first) : "<span class='muted'>–</span>") + "</td>" +
+        "<td class='num'>" + lateCell(r) + "</td>" +
+        "<td class='num'>" + (r.logins > 1 ? "<span class='warmn'>" + r.logins + "</span>" : r.logins) + "</td>" +
+        "<td class='num'>" + (r.live ? count(r.total) : fmtDur(r.total)) + "</td>" +
+        "<td>" + status + "</td></tr>";
+    }).join("") || "<tr><td colspan='7' class='muted'>No logins seen yet today.</td></tr>";
+    var lateN = rows.filter(function (r) { return !r.missing && r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN; }).length;
+    var missN = rows.filter(function (r) { return r.missing; }).length;
+    $("loginSub").textContent = rows.length + " people" + (lateN ? " · " + lateN + " late" : "") + (missN ? " · " + missN + " not logged in" : "") + " · tracked by this browser since " + fmtClock(hist.since);
   }
 
   // ---------------- who's viewing (Supabase Realtime presence) ----------------
@@ -780,7 +856,8 @@
       // the day total survives a logout/login.
       var sk = String(a.loginDts || "session");
       h.sessions = h.sessions || {};
-      h.sessions[sk] = { login: a.loggedInDuration || a.loginTime || 0, rna: a.rna || 0 };
+      h.sessions[sk] = { login: a.loggedInDuration || a.loginTime || 0, rna: a.rna || 0, seen: fetchedAt };
+      h.agentId = String(a.agentId);
       h.name = fullName(a); h.sup = isSupervisor(a) || treatedAsSupervisor(a);
       if (b === "LUNCH") h.lunchDay = hist.day;   // seen at lunch today (Lunch panel: "done")
       h.label = label; h.base = b; h.start = start; h.calls = a.callsHandled || 0; h.rna = a.rna || 0;
@@ -934,6 +1011,7 @@
     renderSups(e, sups);
     renderBoard();
     renderLunch(e);
+    renderLogins(e);
     showViewer();
     // Today's call report feeds the leaderboard (and the Abandoned list): refresh every 5 minutes.
     if (!abandons.loading && Date.now() - abandons.at > 5 * 60 * 1000) loadAbandons(true);
