@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.6</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.7</footer>
     </main>
   </section>
 </div>
@@ -366,7 +366,8 @@
     STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
     STUCK_CRIT_SEC: 10 * 60,
     MIN_SIGNALS: 2,                                // flag an agent only when this many different signals are true
-    BOARD_MIN_LOGIN_SEC: 60 * 60,                    // agents with 0 calls are ranked once logged in this long
+    SHORT_CALL_SEC: 60,                              // answered calls shorter than this are listed for review
+    BOARD_MIN_LOGIN_SEC: 60 * 60,                   // agents with 0 calls are ranked once logged in this long
     // Only these RingCX agent IDs may use the viewer (Fred approves each one). The names
     // behind the IDs are kept in the internal README, not here, because this page is public.
     // "Who's viewing" uses Supabase Realtime presence (no database tables). The anon key is a
@@ -880,6 +881,7 @@
       { label: "Presented", value: presented, note: "calls today" },
       { label: "Answered", value: accepted, note: pct(accepted, presented) + " of presented" },
       { label: "Abandoned", value: abandoned, cls: abandoned ? "warn" : "", filter: "abandoned", note: pct(abandoned, presented) + " · click for calls" },
+      { label: "Short calls", value: abandons.all ? shortCalls().length : "–", cls: abandons.all && shortCalls().length ? "warn" : "", filter: "shortcalls", note: "answered, under " + CONFIG.SHORT_CALL_SEC + "s · click to listen" },
       { label: "SLA", value: pct(slaP, slaP + slaF), note: slaP + slaF ? slaP + " of " + (slaP + slaF) + " answered ≤30s" : "no SLA calls yet" }
     ];
     tiles.unshift(tiles.pop());   // SLA (last in the list) goes first, per Fred
@@ -902,7 +904,8 @@
     working: { title: "Working (yellow statuses)", test: function (a) { return stateColor(a) === "st-yellow"; } },
     away: { title: "Break / lunch (grey statuses)", test: function (a) { return stateColor(a) === "st-grey"; } },
     flagged: { title: "Flagged on the avoidance watch", test: null },
-    abandoned: { title: "Abandoned calls today" }       // call list, not an agent list (no test)
+    abandoned: { title: "Abandoned calls today" },      // call list, not an agent list (no test)
+    shortcalls: { title: "Short calls today" }          // call list, not an agent list (no test)
   };
 
   // ---------------- abandoned calls (RingCX call detail report) ----------------
@@ -954,7 +957,7 @@
       abandons.at = Date.now(); abandons.err = null;
     } catch (e) {
       abandons.err = e.status === 403 ? "Your RingCX user can't read call detail reports (HTTP 403)." : "Couldn't load call detail (" + e.message + ").";
-    } finally { abandons.loading = false; renderDrillOnly(); renderBoard(); }
+    } finally { abandons.loading = false; if (data.fetchedAt) render(); }
   }
 
   // ---------------- top / lowest performers today ----------------
@@ -1053,9 +1056,70 @@
       "<div class='tiny muted' style='margin-top:6px'>From RingCX's call detail report, since midnight Pacific. RingCX's live Abandoned counter can also include very short transfer legs that this report doesn't list, so the two numbers can differ.</div>";
   }
 
+  // ---------------- short calls (answered, under SHORT_CALL_SEC) with recordings ----------------
+  // A real question takes about a minute just to log the ticket, so answered queue calls shorter
+  // than that are worth a listen. Recordings are fetched with the viewer's RingCX token and played
+  // in the page.
+  function shortCalls() {
+    var seen = {};
+    return (abandons.all || []).filter(function (r) {
+      if (r.source_type !== "ACD-INBOUND" || !r.connected_name || (+r.connected_duration || 0) >= CONFIG.SHORT_CALL_SEC) return false;
+      if (seen[r.UII]) return false;
+      seen[r.UII] = 1; return true;
+    }).sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
+  }
+  function firstLast(n) { var p = String(n || "").split(","); return p.length > 1 ? (p[1].trim() + " " + p[0].trim()) : n; }
+  var shortRendered = { at: -1 }, recordings = {};   // uii -> blob URL
+  function renderShortDrill(box, force) {
+    // Don't rebuild (and cut off a recording mid-play) unless the call list changed.
+    if (!force && box.getAttribute("data-kind") === "shortcalls" &&
+        (shortRendered.at === abandons.at || [].some.call(box.querySelectorAll("audio"), function (a) { return !a.paused; }))) return;
+    shortRendered.at = abandons.at; box.setAttribute("data-kind", "shortcalls");
+    var rows = shortCalls(), byAgent = {};
+    rows.forEach(function (r) { var n = firstLast(r.connected_name); byAgent[n] = (byAgent[n] || 0) + 1; });
+    var agentsLine = Object.keys(byAgent).sort(function (a, b) { return byAgent[b] - byAgent[a]; }).map(function (n) { return esc(n) + " " + byAgent[n]; }).join(" · ");
+    var status = abandons.loading ? "Loading call detail…" : (abandons.err ? esc(abandons.err) : (abandons.at ? "as of " + fmtClock(abandons.at) + " · calls appear a few minutes after they end" : ""));
+    box.innerHTML = "<div class='section-title'>Short calls today <span class='sub'>answered calls under " + CONFIG.SHORT_CALL_SEC + "s · " + rows.length + " call" + (rows.length === 1 ? "" : "s") + (agentsLine ? " · " + agentsLine : "") + "</span>" +
+      "<span class='sub'>" + status + "</span>" +
+      "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th>Agent</th><th class='num'>Talked</th><th>Caller</th><th>Recording</th></tr></thead><tbody>" +
+      (rows.map(function (r) {
+        var uii = String(r.UII || "").replace(/^'/, ""), d = +r.connected_duration || 0;
+        var rec = recordings[uii] ? "<audio controls src='" + recordings[uii] + "'></audio>"
+          : (r.recording_url ? "<button class='btn' data-play='" + esc(uii) + "' data-url='" + esc(r.recording_url) + "'>▶ Play</button>" : "<span class='muted'>No recording</span>");
+        return "<tr class='" + (d < 30 ? "flag-warn" : "") + "'>" +
+          "<td>" + esc(etToPtClock(r.call_start_dts)) + "</td>" +
+          "<td>" + esc(r.source_name) + "</td>" +
+          "<td>" + esc(firstLast(r.connected_name)) + "</td>" +
+          "<td class='num'><span class='" + (d < 30 ? "warmn" : "") + "'>" + fmtDur(d) + "</span></td>" +
+          "<td>" + esc(r.ANI) + "</td>" +
+          "<td data-rec='" + esc(uii) + "'>" + rec + "</td></tr>";
+      }).join("") || "<tr><td colspan='6' class='muted'>" + (abandons.all ? "No answered calls under " + CONFIG.SHORT_CALL_SEC + "s yet today." : "") + "</td></tr>") +
+      "</tbody></table></div>" +
+      "<div class='tiny muted' style='margin-top:6px'>Answered queue calls whose talk time was under " + CONFIG.SHORT_CALL_SEC + " seconds (rows under 30s are highlighted). Logging a real question takes about a minute, so these are worth a listen. 0:00 usually means the call dropped or was transferred right away.</div>";
+  }
+  async function playRecording(btn) {
+    var uii = btn.getAttribute("data-play"), url = btn.getAttribute("data-url");
+    btn.disabled = true; btn.textContent = "Loading…";
+    try {
+      if (tokenNearExpiry()) await refreshToken();
+      var r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } });
+      if (r.status === 401) { await refreshToken(); r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } }); }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      recordings[uii] = URL.createObjectURL(await r.blob());
+      var cell = btn.closest("td");
+      cell.innerHTML = "<audio controls autoplay src='" + recordings[uii] + "'></audio>";
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "▶ Retry";
+      btn.title = "Couldn't load the recording (" + e.message + ")";
+    }
+  }
+
   function renderDrill(e, agents, watch) {
     var box = $("kpiDrill");
-    if (!drill) { box.hidden = true; return; }
+    if (!drill) { box.hidden = true; box.removeAttribute("data-kind"); return; }
+    if (drill === "shortcalls") { box.hidden = false; loadAbandons(false); renderShortDrill(box); return; }
+    box.removeAttribute("data-kind");
     if (drill === "abandoned") { box.hidden = false; loadAbandons(false); renderAbandonDrill(box); return; }
     var rows;
     if (drill === "flagged") rows = watch.map(function (x) { return { a: x.a, w: x.w }; });
@@ -1209,11 +1273,13 @@
     if (d) {
       var key = d.getAttribute("data-drill");
       drill = drill === key ? null : key;
-      if (drill === "abandoned") loadAbandons(true);
+      if (drill === "abandoned" || drill === "shortcalls") loadAbandons(true);
       // Agent lists also filter the Agents table; the call list leaves it alone.
       setFilter(drill && DRILLS[drill].test !== undefined ? drill : "all", true);
       return;
     }
+    var pb = ev.target.closest("[data-play]");
+    if (pb) { playRecording(pb); return; }
     if (ev.target.closest("[data-drill-close]")) { drill = null; setFilter("all", true); return; }
     var th = ev.target.closest("th[data-key]");
     if (th) {
