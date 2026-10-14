@@ -57,7 +57,9 @@
   .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 12px; align-items: start; }
   .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
   .content { min-width: 0; }
-  @media (max-width: 900px) {
+  /* Below ~1200px the pinned Queues column would squeeze the tables into sideways scrolling,
+     so it moves above the rest instead (normal laptop/desktop widths keep it pinned on the left). */
+  @media (max-width: 1200px) {
     .layout { grid-template-columns: minmax(0, 1fr); }
     .side { position: static; max-height: none; }
   }
@@ -140,6 +142,11 @@
   .queue.crit { border-color: var(--critical); background: var(--critical-soft); }
   .queue.warn { border-color: color-mix(in srgb, var(--warning) 60%, transparent); background: var(--warning-soft); }
   .queue.closed { opacity: .6; }
+  .queue { cursor: pointer; }
+  .queue:hover { border-color: var(--accent); }
+  .queue.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .filter-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); font-size: 12px; font-weight: 600; }
+  .filter-tag button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 0 0 2px; }
   .q-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .q-name { font-weight: 600; }
   .q-state { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; }
@@ -154,6 +161,12 @@
   .pill[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   .search { border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 5px 10px; font-size: 12px; min-width: 160px; }
   .table-wrap { overflow-x: auto; }
+  /* Avoid sideways scrolling: headings may wrap onto two lines, and the watch table is compact. */
+  th { white-space: normal; vertical-align: bottom; }
+  #watchPanel td, #watchPanel th { padding: 5px 6px; }
+  #watchPanel td.wrap .chip { white-space: normal; }
+  #watchPanel .btn { padding: 3px 8px; }
+  #watchPanel input.search { min-width: 140px !important; width: 100%; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { position: sticky; top: 0; background: var(--surface-alt); color: var(--ink-2); text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px; white-space: nowrap; user-select: none; }
   th[data-key] { cursor: pointer; }
@@ -243,7 +256,9 @@
               <option value="60">60s</option>
             </select>
           </label>
+          <span id="filterTag" class="filter-tag" hidden></span>
           <button id="refreshBtn" class="btn" title="Refresh now">Refresh</button>
+          <button id="snapshotBtn" class="btn" title="Download the main numbers as a time-stamped spreadsheet (CSV)">Snapshot</button>
           <button id="themeBtn" class="btn" title="Toggle light/dark">Theme</button>
           <span id="viewerTag" class="snapshot-tag" hidden></span>
           <button id="signoutBtn" class="btn">Sign out</button>
@@ -266,7 +281,7 @@
           <table>
             <thead><tr>
               <th>Agent</th><th>Status now</th><th>Why flagged</th>
-              <th class="num">RNA</th><th class="num">Left Available (60m)</th><th class="num">Status changes (60m)</th><th class="num">Not taking calls</th><th>Review</th>
+              <th class="num">RNA</th><th class="num" title="Times they left Available for a status that doesn't take calls, in the last 60 minutes">Left Avail 60m</th><th class="num" title="Status changes in the last 60 minutes">Changes 60m</th><th class="num" title="Time in a status that doesn't take calls">Not taking</th><th>Review</th>
             </tr></thead>
             <tbody id="watchBody"></tbody>
           </table>
@@ -365,7 +380,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.0</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.2</footer>
     </main>
   </section>
 </div>
@@ -635,6 +650,83 @@
   }
   function lunchLevel(L) { return !L ? null : (L.over >= CONFIG.LUNCH_OVER_CRIT_MIN ? "crit" : (L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? "warn" : null)); }
 
+  // ---------------- status changes for one agent (drill from the watch's 60m columns) ----------------
+  var drillLog = { id: "", name: "" };
+  function statusLogLink(a, n) {
+    return "<a href='#' data-status-log='" + esc(String(a.agentId)) + "' data-status-name='" + esc(fullName(a)) + "' title='Show this agent&#39;s status changes, with times'>" + n + "</a>";
+  }
+  function statusName(label, baseCode) {
+    if (label) return label;
+    return { ONCALL: "On a call", AVAILABLE: "Available", LUNCH: "Lunch", "ON-BREAK": "On-Break", AWAY: "Away", WORKING: "Working (status)", BRIEF: "(brief change between refreshes)" }[baseCode] || baseCode || "?";
+  }
+  function renderStatusLog(box) {
+    box.setAttribute("data-kind", "statuslog");
+    var h = hist.agents[drillLog.id] || {};
+    // Fall back to a name match (e.g. a logged-out entry whose id we only know by name).
+    if (!h.ev) Object.keys(hist.agents).forEach(function (id) { if (normName(hist.agents[id].name) === normName(drillLog.name)) h = hist.agents[id]; });
+    var ev = (h.ev || []).slice().sort(function (x, y) { return y.t - x.t; });
+    var cutoff = Date.now() - 3600 * 1000;
+    var nowRow = h.label ? "<tr><td>" + fmtClock(h.start) + "</td><td class='muted'>…</td><td><b>" + esc(h.label) + "</b> (now)</td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td></tr>" : "";
+    var rows = ev.map(function (x, i) {
+      var nextT = i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t;   // when the status it switched TO ended
+      var lasted = x.hidden ? "brief" : fmtDur(Math.max(0, (nextT - x.t) / 1000));
+      var recent = x.t >= cutoff;
+      return "<tr class='" + (recent ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + esc(statusName(x.fl, x.fb)) + "</td><td>" + esc(statusName(x.tl, x.tb)) + "</td><td class='num'>" + lasted + "</td></tr>";
+    }).join("");
+    var recentN = ev.filter(function (x) { return x.t >= cutoff; }).length;
+    box.innerHTML = "<div class='section-title'>Status changes (last 10 hours): " + esc(drillLog.name) + " <span class='sub'>" + ev.length + " change" + (ev.length === 1 ? "" : "s") + " · " + recentN + " in the last 60 min (highlighted) · " + esc(trackedLabel()) + "</span>" +
+      "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th class='num'>Lasted</th></tr></thead><tbody>" +
+      (nowRow + rows || "<tr><td colspan='4' class='muted'>No status changes recorded in the last 10 hours.</td></tr>") + "</tbody></table></div>" +
+      "<div class='tiny muted' style='margin-top:6px'>\"Lasted\" is how long they stayed in the status they switched to. A \"brief change between refreshes\" means they left a status and came back in under a refresh cycle, without a call explaining it. Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
+  }
+
+  // ---------------- Snapshot: download the main numbers as a time-stamped CSV ----------------
+  // One file, several sections (KPIs, queues, What to Watch, agents, supervisors, watch, performance,
+  // logins, lunch, time off), read from what the page is showing right now, so it respects the queue filter.
+  function csvCell(v) { v = String(v == null ? "" : v).replace(/\s+/g, " ").trim(); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function tableRows(sel) {
+    return [].map.call(document.querySelectorAll(sel + " tr"), function (tr) {
+      return [].map.call(tr.cells, function (c) { return c.innerText.replace(/▲|▼/g, ""); });
+    }).filter(function (r) { return r.length > 1; });
+  }
+  function downloadSnapshot() {
+    var now = new Date(), lines = [];
+    var stamp = now.toLocaleString("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+    function section(title, rows) { lines.push(""); lines.push(csvCell(title)); rows.forEach(function (r) { lines.push(r.map(csvCell).join(",")); }); }
+    lines.push(csvCell("RingCX Live View snapshot") + "," + csvCell(stamp + " PT") + "," + csvCell("by " + viewerName()) + (queueFilter ? "," + csvCell("filtered to " + queueFilter) : ""));
+    section("KPIs", [["Tile", "Value", "Note"]].concat([].map.call(document.querySelectorAll("#kpiGrid .kpi"), function (k) {
+      return [k.querySelector(".label").innerText.replace("▼", ""), k.querySelector(".value").innerText, k.querySelector(".note").innerText];
+    })));
+    section("Queues", [["Queue", "State", "Waiting", "Longest wait", "Available / staffed", "SLA", "Presented", "Answered", "Abandoned"]].concat(
+      viewQueues().map(function (q) {
+        return [q.gateName, queueOpen(q) ? "Open" : "Closed", q.inQueue, q.inQueue ? fmtDur((q.longestInQueue || 0) + elapsed()) : "",
+          (q.available || 0) + "/" + (q.staffed || 0), pct(q.slaPass, (q.slaPass || 0) + (q.slaFail || 0)), q.presented || 0, q.accepted || 0, q.abandoned || 0];
+      })));
+    section("What to Watch", [].map.call(document.querySelectorAll("#alertList .alert"), function (a) { return [a.innerText]; }));
+    section("Agents", tableRows("#agentsPanel table"));
+    section("Supervisors", tableRows("#supBody").length ? [["Supervisor", "Status", "In status", "Calls", "Logged in"]].concat(tableRows("#supBody")) : [["none"]]);
+    section("Call avoidance watch", tableRows("#watchPanel table:first-of-type"));
+    var board = boardRows();
+    section("Performance today (all)", [["#", "Agent", "Score", "Calls", "Calls/hr", "Talk", "RNA", "Ready", "Lunch over (min)", "Late (min)", "Logged in"]].concat(
+      board.map(function (r, i) { return [i + 1, r.name, r.score.toFixed(1), r.answered, r.perHr.toFixed(1), fmtDur(r.talk), r.rna,
+        r.ready == null ? "" : Math.round(r.ready * 100) + "%", r.lunchOver || 0, r.lateMin ? Math.round(r.lateMin) : 0, fmtDur(r.login)]; })));
+    section("Logins today", tableRows("#loginPanel table"));
+    section("Lunch", [].map.call(document.querySelectorAll("#lunchList .pto-h, #lunchList .pto-row"), function (el) {
+      return el.classList.contains("pto-h") ? ["— " + el.innerText + " —"] : [].map.call(el.children, function (c) { return c.innerText; });
+    }));
+    section("Time off", [].map.call(document.querySelectorAll("#ptoList .pto-h, #ptoList .pto-row"), function (el) {
+      return el.classList.contains("pto-h") ? ["— " + el.innerText + " —"] : [].map.call(el.children, function (c) { return c.innerText; });
+    }));
+    var blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    var fileStamp = stamp.replace(/[\/, :]+/g, "-");
+    var link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "RingCX-snapshot_" + fileStamp + "_PT" + (queueFilter ? "_" + queueFilter.replace(/\W+/g, "") : "") + ".csv";
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 5000);
+  }
+
   // ---------------- full-day history from the server (Supabase "tracker" + "history") ----------------
   // The tracker saves a RingCX agent snapshot every minute all day. On open (and when coming back to a
   // hidden tab), the page downloads today's snapshots and replays them through observe(), so every viewer
@@ -717,20 +809,20 @@
     Object.keys(hist.agents).forEach(function (id) { var hh = hist.agents[id]; if (hh.name) histByName[normName(hh.name)] = hh; });
     // At lunch now: on the Lunch status, or logged out inside their lunch period. Timed from when they left.
     data.agents.forEach(function (a) {
-      if (skip[normName(fullName(a))]) return;
+      if (skip[normName(fullName(a))] || !inQueue(a)) return;
       if (String(a.agentBaseState).toUpperCase() !== "LUNCH") return;
       var s = sched[normName(fullName(a))], L = lunchFor(hist.agents[String(a.agentId)], s, true);
       atLunch.push({ name: fullName(a), s: s, from: L ? L.from : Date.now() - (a.stateTime || 0) * 1000, L: L, how: "" });
     });
     pto.schedule.forEach(function (s) {
       var k = normName(s.name);
-      if (live[k] || skip[k] || out[k]) return;
+      if (live[k] || skip[k] || out[k] || !inQueue(s.name)) return;
       var L = lunchFor(histByName[k], s, false);
       if (L && L.active) atLunch.push({ name: s.name, s: s, from: L.from, L: L, how: " · logged out" + (L.unsure ? " (at least; left before this page was watching)" : "") });
     });
     pto.schedule.forEach(function (s) {
       var k = normName(s.name), a = live[k];
-      if (!a || s.lunch === null || out[k] || s.days.indexOf(n.day) < 0) return;
+      if (!a || s.lunch === null || out[k] || s.days.indexOf(n.day) < 0 || !inQueue(s.name)) return;
       if (String(a.agentBaseState).toUpperCase() === "LUNCH") return;               // already listed above
       var h = hist.agents[String(a.agentId)] || {};
       var tookLunch = h.lunchDay === hist.day ||                                     // seen at lunch today, or
@@ -910,6 +1002,7 @@
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN) return;
       rows.push({ name: s.name, start: s.shift, first: null, late: nowMin - s.shift, logins: 0, total: 0, missing: true });
     });
+    rows = rows.filter(function (r) { return inQueue(r.name); });   // queue filter
     rows.sort(function (x, y) { return (y.missing ? 1 : 0) - (x.missing ? 1 : 0) || (y.late || -999) - (x.late || -999) || x.name.localeCompare(y.name); });
     // Only a CONFIRMED first login can be red. "On a call by" is an upper bound (at most that late),
     // and an unseen earlier session means we can't say they were late at all.
@@ -1093,12 +1186,12 @@
       var h = hist.agents[id] || (hist.agents[id] = { ev: [] });
       if (h.label != null) {
         if (label !== h.label) {
-          h.ev.push({ t: start, fb: h.base, tb: b });
+          h.ev.push({ t: start, fb: h.base, tb: b, fl: h.label, tl: label });   // fl/tl = exact status names
         } else if (start - h.start > 20000) {
           // Same status, but its timer restarted: the agent left and came back between refreshes.
           // A handled call or new RNA explains that innocently; otherwise count it as a brief flip.
           var explained = (a.callsHandled || 0) > (h.calls || 0) || (a.rna || 0) > (h.rna || 0);
-          if (!explained) h.ev.push({ t: start, fb: h.base, tb: "BRIEF", hidden: true });
+          if (!explained) h.ev.push({ t: start, fb: h.base, tb: "BRIEF", hidden: true, fl: h.label, tl: label });
         }
       }
       // Time accounting for the leaderboard: credit the gap since the last refresh to the status
@@ -1278,14 +1371,16 @@
 
   function render() {
     var e = elapsed();
-    var agents = data.agents.filter(inAgentSection);
-    var sups = data.agents.filter(function (a) { return !inAgentSection(a); });
+    var agents = data.agents.filter(inAgentSection).filter(inQueue);
+    var sups = data.agents.filter(function (a) { return !inAgentSection(a); }).filter(inQueue);
     var all = agents.map(function (a) { return { a: a, w: watchFor(a, e) }; }).filter(function (x) { return x.w; })
-      .concat(offlineAgents())
+      .concat(offlineAgents().filter(function (x) { return inQueue(fullName(x.a)); }))
       .sort(function (x, y) { return y.w.score - x.w.score; });
     // Reviewed entries are snoozed for an hour (or until a new signal); everything else counts as flagged.
     var watch = [], snoozed = [];
     all.forEach(function (x) { var st = reviewStateOf(x); x.review = st.latest; (st.snoozed ? snoozed : watch).push(x); });
+    $("filterTag").hidden = !queueFilter;
+    if (queueFilter) $("filterTag").innerHTML = "Filtered to " + esc(queueFilter) + (queueMembers ? "" : " (loading members…)") + " <button data-queue-clear title='Clear filter'>×</button>";
     renderQueues(e);
     renderAlerts(e, watch);
     renderKpis(e, agents, sups, watch);
@@ -1319,7 +1414,7 @@
 
   function renderAlerts(e, watch) {
     var items = [];
-    data.queues.forEach(function (q) {
+    viewQueues().forEach(function (q) {
       var open = queueOpen(q);
       if (hoursMismatch(q)) items.push({ lvl: "warn", score: 450, html: "<b>" + esc(q.gateName) + "</b>: RingCX shows it open outside " + esc(CONFIG.QUEUE_HOURS[q.gateName].label) + ". Check the queue schedule." });
       // One rule for every queue (Fred): yellow = open and nobody available;
@@ -1352,7 +1447,7 @@
   function sum(arr, k) { return arr.reduce(function (s, x) { return s + (+x[k] || 0); }, 0); }
 
   function renderKpis(e, agents, sups, watch) {
-    var Q = data.queues;
+    var Q = viewQueues();
     var waiting = sum(Q, "inQueue");
     var longest = Q.reduce(function (m, q) { return q.inQueue > 0 ? Math.max(m, q.longestInQueue || 0) : m; }, 0);
     var presented = sum(Q, "presented"), accepted = sum(Q, "accepted"), abandoned = sum(Q, "abandoned");
@@ -1403,6 +1498,39 @@
 
   // ---------------- KPI drill-down lists ----------------
   var drill = null;   // key of the open agent KPI list, or null
+  var drillAgent = "";   // agent whose calls are shown when drill === "agentcalls"
+
+  // ---------------- queue filter (click a queue card; click again to clear) ----------------
+  // Filters the KPI tiles, What to Watch, the agents/supervisors tables, the call lists, the watch,
+  // Lunch, Logins and Performance to the agents ASSIGNED to that queue in RingCX.
+  var queueFilter = null, queueMembers = null, membersLoading = false;
+  async function loadQueueMembers() {
+    if (queueMembers || membersLoading || !session) return;
+    membersLoading = true;
+    try {
+      var out = {}, groups = await api("gateGroups");
+      for (var i = 0; i < groups.length; i++) {
+        var gates = await api("gateGroups/" + groups[i].gateGroupId + "/gates");
+        for (var j = 0; j < gates.length; j++) {
+          var as = await api("gateGroups/" + groups[i].gateGroupId + "/gates/" + gates[j].gateId + "/assignedAgents");
+          var m = { ids: {}, names: {} };
+          (as || []).forEach(function (x) { m.ids[String(x.agentId)] = 1; m.names[normName((x.firstName || "") + " " + (x.lastName || ""))] = 1; });
+          out[queueLabel(gates[j].gateName)] = m;
+        }
+      }
+      queueMembers = out; if (data.fetchedAt) render();
+    } catch (x) { /* filter just won't narrow agents until this loads */ }
+    finally { membersLoading = false; }
+  }
+  // true if this person (agent object or name) belongs to the selected queue (or no filter is set)
+  function inQueue(aOrName) {
+    if (!queueFilter) return true;
+    var m = queueMembers && queueMembers[queueFilter];
+    if (!m) return true;   // membership not loaded yet: don't hide anyone
+    if (typeof aOrName === "string") return !!m.names[normName(aOrName)];
+    return !!(m.ids[String(aOrName.agentId)] || m.names[normName(fullName(aOrName))]);
+  }
+  function viewQueues() { return queueFilter ? data.queues.filter(function (q) { return q.gateName === queueFilter; }) : data.queues; }
   var DRILLS = {
     all: { title: "Agents logged in", test: function () { return true; } },
     available: { title: "Available", test: isAvailable },
@@ -1412,7 +1540,8 @@
     flagged: { title: "Flagged on the avoidance watch", test: null },
     abandoned: { title: "Abandoned calls today" },      // call list, not an agent list (no test)
     shortcalls: { title: "Short calls today" },         // call list, not an agent list (no test)
-    answered: { title: "Answered calls today" },        // call list, not an agent list (no test)
+    answered: { title: "Answered calls today" },
+    agentcalls: { title: "Calls today for one agent" },   // opened from the Calls number in the Agents table        // call list, not an agent list (no test)
     longcalls: { title: "Long calls right now" }        // live call list with Listen / Barge in (no test)
   };
 
@@ -1553,7 +1682,7 @@
       out.push({ name: n, sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: p.seen >= 1800 ? readyShare : null, login: p.login, score: score,
         lunchOver: L && L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(L.over) : 0, lunchLvl: ll, lateMin: lateMin, lateConf: lg.conf || null });
     });
-    return out.sort(function (a, b) { return b.score - a.score; });
+    return out.filter(function (r) { return inQueue(r.name); }).sort(function (a, b) { return b.score - a.score; });
   }
 
   function renderBoard() {
@@ -1561,7 +1690,7 @@
     var rows = boardRows();
     var top = rows.slice(0, 5), low = rows.length > 5 ? rows.slice(-Math.min(5, rows.length - 5)).reverse() : [];
     function table(list, startRank, dir) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Lunch</th><th class='num'>Start</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr><td class='num'>" + (dir > 0 ? startRank + i : rows.length - i) + "</td>" +
             "<td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
@@ -1571,9 +1700,9 @@
             "<td class='num'>" + fmtDur(r.talk) + "</td>" +
             "<td class='num'>" + (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0") + "</td>" +
             "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
-            "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
             "<td class='num'>" + (r.lateMin ? "<span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "' title='First login " + Math.round(r.lateMin) + " min after scheduled start (confirmed)'>" + fmtShort(r.lateMin * 60) + " late</span>"
               : "<span class='muted' title='" + (r.lateConf && r.lateConf !== "confirmed" ? "First login not confirmed (see Logins today), so not counted" : "On time, or no schedule") + "'>" + (r.lateConf && r.lateConf !== "confirmed" ? "?" : "ok") + "</span>") + "</td>" +
+            "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
             "<td class='num'>" + fmtDur(r.login) + "</td></tr>";
         }).join("") || "<tr><td colspan='11' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
         "</tbody></table></div>";
@@ -1593,7 +1722,7 @@
   }
 
   function renderAbandonDrill(box) {
-    var rows = abandons.rows || [];
+    var rows = (abandons.rows || []).filter(function (r) { return !queueFilter || r.source_name === queueFilter; });
     var waits = rows.map(function (r) { return +r.queue_time || 0; });
     var avg = waits.length ? waits.reduce(function (s, x) { return s + x; }, 0) / waits.length : 0;
     var long = waits.filter(function (w) { return w >= CONFIG.WAIT_FLASH_SEC; }).length;
@@ -1634,6 +1763,7 @@
     var seen = {};
     return (abandons.all || []).filter(function (r) {
       if (r.source_type !== "ACD-INBOUND" || !r.connected_name || seen[r.UII]) return false;
+      if (queueFilter && r.source_name !== queueFilter) return false;   // queue filter (click a queue card)
       seen[r.UII] = 1; return true;
     }).sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
   }
@@ -1646,12 +1776,14 @@
     if (!force && box.getAttribute("data-kind") === kind &&
         (callDrillRendered.at === abandons.at || [].some.call(box.querySelectorAll("audio"), function (a) { return !a.paused; }))) return;
     callDrillRendered.at = abandons.at; box.setAttribute("data-kind", kind);
-    var isShort = kind === "shortcalls";
-    var rows = isShort ? shortCalls() : answeredCalls(), byAgent = {};
+    var isShort = kind === "shortcalls", isAgent = kind.indexOf("agentcalls:") === 0;
+    var agentName = isAgent ? kind.slice("agentcalls:".length) : "";
+    var rows = isShort ? shortCalls() : (isAgent ? answeredCalls().filter(function (r) { return r.connected_name === lastFirst(agentName); }) : answeredCalls()), byAgent = {};
     rows.forEach(function (r) { var n = firstLast(r.connected_name); byAgent[n] = (byAgent[n] || 0) + 1; });
     var agentsLine = Object.keys(byAgent).sort(function (a, b) { return byAgent[b] - byAgent[a]; }).map(function (n) { return esc(n) + " " + byAgent[n]; }).join(" · ");
     var status = abandons.loading ? "Loading call detail…" : (abandons.err ? esc(abandons.err) : (abandons.at ? "as of " + fmtClock(abandons.at) + " · calls appear a few minutes after they end" : ""));
-    var title = isShort ? "Short calls today" : "Answered calls today";
+    var title = isShort ? "Short calls today" : (isAgent ? "Calls today: " + esc(agentName) : "Answered calls today");
+    if (queueFilter) title += " · " + esc(queueFilter);
     var what = isShort ? "answered calls under " + CONFIG.SHORT_CALL_SEC + "s · " : "";
     box.innerHTML = "<div class='section-title'>" + title + " <span class='sub'>" + what + rows.length + " call" + (rows.length === 1 ? "" : "s") + (agentsLine ? " · " + agentsLine : "") + "</span>" +
       "<span class='sub'>" + status + "</span>" +
@@ -1763,6 +1895,8 @@
     var box = $("kpiDrill");
     if (!drill) { box.hidden = true; box.removeAttribute("data-kind"); return; }
     if (drill === "longcalls") { box.hidden = false; renderLongDrill(box, e, agents); return; }
+    if (drill === "statuslog") { box.hidden = false; renderStatusLog(box); return; }
+    if (drill === "agentcalls") { box.hidden = false; loadAbandons(false); renderCallDrill(box, "agentcalls:" + drillAgent); return; }
     if (drill === "shortcalls" || drill === "answered") { box.hidden = false; loadAbandons(false); renderCallDrill(box, drill); return; }
     box.removeAttribute("data-kind");
     if (drill === "abandoned") { box.hidden = false; loadAbandons(false); renderAbandonDrill(box); return; }
@@ -1803,7 +1937,9 @@
       var cls = noOne ? (q.inQueue > 0 ? "crit" : "warn") : (q.inQueue > 0 ? "warn" : "");
       if (!open) cls += " closed";
       var availNames = String(q.availableAgentsList || "").split(",").filter(Boolean).map(agentFirst).filter(Boolean);
-      return "<div class='queue " + cls + "'" + (q.inQueue > 0 ? " data-flash-base='" + Math.floor(q.longestInQueue || 0) + "'" : "") + ">" +
+      if (queueFilter === q.gateName) cls += " selected";
+      return "<div class='queue " + cls + "' data-queue='" + esc(q.gateName) + "' title='" + (queueFilter === q.gateName ? "Click to clear the filter" : "Click to filter the whole page to this queue") + "'" +
+        (q.inQueue > 0 ? " data-flash-base='" + Math.floor(q.longestInQueue || 0) + "'" : "") + ">" +
         "<div class='q-head'><span class='q-name'>" + esc(q.gateName) + "</span><span class='q-state'>" + (open ? "Open" : "Closed") + "</span></div>" +
         (hrs ? "<div class='tiny muted'>Hours " + esc(hrs.label) + (hoursMismatch(q) ? " · <span class='warmn'>RingCX says open</span>" : "") + "</div>" : "") +
         "<div class='q-stats'>" +
@@ -1889,8 +2025,8 @@
           "<td>" + stateHtml(a) + "</td>" +
           "<td class='wrap'>" + w.reasons.map(function (r) { return "<span class='chip " + r.lvl + "'>" + esc(r.text) + "</span>"; }).join("") + prior + "</td>" +
           "<td class='num'>" + rnaCell(dayStats(a).rna) + "</td>" +
-          "<td class='num'>" + w.cs.exits + "</td>" +
-          "<td class='num'>" + w.cs.changes + "</td>" +
+          "<td class='num'>" + statusLogLink(a, w.cs.exits) + "</td>" +
+          "<td class='num'>" + statusLogLink(a, w.cs.changes) + "</td>" +
           "<td class='num'>" + (nr != null ? count(nr) : "–") + "</td>" +
           "<td class='wrap'>" + reviewCell + "</td>" +
           "</tr>";
@@ -1945,7 +2081,7 @@
         "<td>" + stateHtml(a) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
         "<td>" + esc(r.queue) + "</td>" +
-        "<td class='num'>" + r.calls + "</td>" +
+        "<td class='num'>" + (r.calls ? "<a href='#' data-agent-calls='" + esc(r.name) + "' title='Show this agent&#39;s calls today, with recordings'>" + r.calls + "</a>" : "0") + "</td>" +
         "<td class='num'>" + fmtDur(r.talk) + "</td>" +
         "<td class='num'>" + (r.calls ? fmtDur(r.aht) : "–") + "</td>" +
         "<td class='num'>" + (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0") + "</td>" +
@@ -1993,6 +2129,16 @@
       return;
     }
     // Long calls: Listen / Barge in / Stop, and saving the "ring me at" number.
+    // Left Avail / Changes numbers in the watch: that agent's status changes today, with times.
+    var sl = ev.target.closest("[data-status-log]");
+    if (sl) { ev.preventDefault(); drillLog = { id: sl.getAttribute("data-status-log"), name: sl.getAttribute("data-status-name") }; drill = "statuslog"; render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    // Calls number in the Agents table: that agent's calls today, with recordings.
+    var ac = ev.target.closest("[data-agent-calls]");
+    if (ac) { ev.preventDefault(); drillAgent = ac.getAttribute("data-agent-calls"); drill = "agentcalls"; loadAbandons(true); render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    // Queue card: toggle the queue filter.
+    var qc = ev.target.closest("[data-queue]");
+    if (qc && !ev.target.closest("input,button,a")) { var qn = qc.getAttribute("data-queue"); queueFilter = queueFilter === qn ? null : qn; loadQueueMembers(); render(); return; }
+    if (ev.target.closest("[data-queue-clear]")) { queueFilter = null; render(); return; }
     // Watch reviews: open / cancel / save / undo.
     var ro = ev.target.closest("[data-review-open]");
     if (ro) { var rk = ro.getAttribute("data-review-open"); drafts[rk] = ""; render(); var inp = document.querySelector("[data-review-input='" + rk.replace(/'/g, "\\'") + "']"); if (inp) inp.focus(); return; }
@@ -2027,6 +2173,7 @@
   $("agentSearch").addEventListener("input", function () { agentSearch = this.value.trim().toLowerCase(); render(); });
   $("showClosed").addEventListener("change", function () { render(); });
   $("boardAllBtn").addEventListener("click", function () { ui.boardAll = !ui.boardAll; save(UI_KEY, ui); renderBoard(); });
+  $("snapshotBtn").addEventListener("click", function () { downloadSnapshot(); });
 
   // ---------------- views ----------------
   function showSignin(msg) {
@@ -2047,6 +2194,7 @@
     loadReviews(); setInterval(loadReviews, 2 * 60 * 1000);
     // Full-day history from the server's every-minute snapshots (replaces this browser's partial view).
     loadHistory();
+    loadQueueMembers();   // who's assigned to which queue, for the queue filter
   }
 
   // ---------------- auto-update ----------------
