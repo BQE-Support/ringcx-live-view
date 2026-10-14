@@ -259,6 +259,8 @@
         <ul>
           <li>Data comes from RingCX's real-time supervisor API (<code>realTimeData/agent</code> and <code>realTimeData/inbound</code>), the same source as the RingCX wallboards. It is read with your own RingCentral sign-in, so you only see what your RingCX permissions allow.</li>
           <li>Status colors follow the RingCX agent app. Green means the status takes calls (Available, Payroll Support). Grey is On-Break, Away and Lunch. Yellow is every Working-type status (Training, Testing, Meeting, ticket and escalation work, ePayment, Yodlee and similar). Red means on a call or in wrap-up.</li>
+          <li><b>SLA</b> is RingCX's own service-level count for each queue, from its real-time data (<code>slaPass</code> / <code>slaFail</code>). A call passes if it is answered within the queue's SLA time, which is 30 seconds on every BQE queue. Calls answered later, or abandoned after 30 seconds, fail. The top tile adds up all queues. The counts are today's running totals.</li>
+          <li><b>Queue hours:</b> the viewer shows a queue as Open only if RingCX says it's open and, for queues with configured hours, the current time is inside them. Payroll Specialist is open M–F 6am–4pm Pacific, which matches its RingCX schedule. Outside those hours it shows Closed and raises no staffing alerts. If RingCX ever reports it open outside those hours, the page flags it as a schedule problem.</li>
           <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up.</li>
           <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, only while they are taking queue calls (Available, or on a call from a queue). Some agents also count as supervisors while in a specific status: Connor Lenhart while in Escalation Support. Those rules are set in the page's settings (SUPERVISOR_DUTY).</li>
           <li>The avoidance watch flags an agent for any of the following:
@@ -275,7 +277,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 1.2</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 1.3</footer>
     </main>
   </section>
 </div>
@@ -304,6 +306,12 @@
     EXIT_CRIT: 5,
     CHANGE_WARN: 6,                                  // any status changes N+ times in 60 min
     CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
+    // Business hours enforced by the viewer, on top of RingCX's own open/closed flag.
+    // Outside these hours the queue shows Closed and raises no staffing alerts.
+    // days: 0=Sun..6=Sat. Payroll matches its RingCX gate schedule (M-F 06:00-16:00 Pacific).
+    QUEUE_HOURS: {
+      "Payroll Specialist": { days: [1, 2, 3, 4, 5], open: "06:00", close: "16:00", tz: "America/Los_Angeles", label: "M–F 6am–4pm PT" }
+    },
     // Agents who act as supervisors while in certain statuses: listed in the
     // Supervisors section (and kept off the avoidance watch) while in one of them.
     SUPERVISOR_DUTY: [
@@ -534,6 +542,29 @@
     return reasons.length ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
   }
 
+  // ---------------- queue hours ----------------
+  function nowIn(tz) {
+    var parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+    var get = function (t) { return (parts.filter(function (p) { return p.type === t; })[0] || {}).value; };
+    return { day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday")), hm: get("hour") + ":" + get("minute") };
+  }
+  function withinHours(name) {
+    var h = CONFIG.QUEUE_HOURS[name];
+    if (!h) return null;                              // no viewer-side schedule for this queue
+    var n = nowIn(h.tz);
+    return h.days.indexOf(n.day) >= 0 && n.hm >= h.open && n.hm < h.close;
+  }
+  // Open only if RingCX says Open AND (when configured) we're inside business hours.
+  function queueOpen(q) {
+    var rcxOpen = String(q.state).toLowerCase() === "open";
+    var inHours = withinHours(q.gateName);
+    return inHours === null ? rcxOpen : (rcxOpen && inHours);
+  }
+  function hoursMismatch(q) {
+    var inHours = withinHours(q.gateName);
+    return inHours === false && String(q.state).toLowerCase() === "open";
+  }
+
   // ---------------- polling ----------------
   var data = { agents: [], queues: [], fetchedAt: 0 };
   var pollTimer = null, tickTimer = null, lastError = null, backoff = 1;
@@ -622,7 +653,8 @@
   function renderAlerts(e, watch) {
     var items = [];
     data.queues.forEach(function (q) {
-      var open = String(q.state).toLowerCase() === "open";
+      var open = queueOpen(q);
+      if (hoursMismatch(q)) items.push({ lvl: "warn", score: 450, html: "<b>" + esc(q.gateName) + "</b>: RingCX shows it open outside " + esc(CONFIG.QUEUE_HOURS[q.gateName].label) + ". Check the queue schedule." });
       if (q.inQueue > 0) {
         var w = (q.longestInQueue || 0) + e;
         items.push({ lvl: w > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn", score: 1000 + w,
@@ -663,7 +695,7 @@
       { label: "Presented", value: presented, note: "calls today" },
       { label: "Answered", value: accepted, note: pct(accepted, presented) + " of presented" },
       { label: "Abandoned", value: abandoned, cls: abandoned ? "warn" : "", note: pct(abandoned, presented) + " incl. short legs" },
-      { label: "SLA", value: pct(slaP, slaP + slaF), note: slaP + slaF ? slaP + " of " + (slaP + slaF) + " in target" : "no SLA calls yet" }
+      { label: "SLA", value: pct(slaP, slaP + slaF), note: slaP + slaF ? slaP + " of " + (slaP + slaF) + " answered ≤30s" : "no SLA calls yet" }
     ];
     $("kpiGrid").innerHTML = tiles.map(function (t) {
       var active = t.filter && t.filter === agentFilter && t.filter !== "all";
@@ -677,7 +709,8 @@
     var qs = data.queues.slice().sort(function (a, b) { return (b.inQueue - a.inQueue) || (b.presented - a.presented) || String(a.gateName).localeCompare(b.gateName); });
     var hidden = 0;
     var html = qs.map(function (q) {
-      var open = String(q.state).toLowerCase() === "open";
+      var open = queueOpen(q);
+      var hrs = CONFIG.QUEUE_HOURS[q.gateName];
       var idle = !open && !q.presented && !q.inQueue;
       if (idle && !showClosed) { hidden++; return ""; }
       var cls = q.inQueue > 0 ? ((q.longestInQueue || 0) + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn")
@@ -685,7 +718,8 @@
       if (!open) cls += " closed";
       var availNames = String(q.availableAgentsList || "").split(",").filter(Boolean).map(agentFirst).filter(Boolean);
       return "<div class='queue " + cls + "'>" +
-        "<div class='q-head'><span class='q-name'>" + esc(q.gateName) + "</span><span class='q-state'>" + esc(q.state) + "</span></div>" +
+        "<div class='q-head'><span class='q-name'>" + esc(q.gateName) + "</span><span class='q-state'>" + (open ? "Open" : "Closed") + "</span></div>" +
+        (hrs ? "<div class='tiny muted'>Hours " + esc(hrs.label) + (hoursMismatch(q) ? " · <span class='warmn'>RingCX says open</span>" : "") + "</div>" : "") +
         "<div class='q-stats'>" +
           "<div class='q-stat'><div class='n'>" + q.inQueue + "</div><div class='l'>Waiting</div></div>" +
           "<div class='q-stat'><div class='n'>" + (q.inQueue ? count(q.longestInQueue || 0) : "–") + "</div><div class='l'>Longest</div></div>" +
