@@ -97,6 +97,23 @@
   .kpi .note { font-size: 11px; color: var(--ink-3); }
   .kpi.crit .value { color: var(--critical); }
   .kpi.warn .value { color: var(--warning); }
+  .kpi .caret { float: right; color: var(--ink-3); font-size: 10px; transition: transform .15s; }
+  .kpi.active .caret { transform: rotate(180deg); color: var(--accent); }
+
+  /* Flashing red: a caller has waited past the flash threshold, until that call is answered */
+  @keyframes flashRed {
+    0%, 100% { background: var(--critical); border-color: var(--critical); color: #fff; }
+    50% { background: var(--critical-soft); border-color: var(--critical); color: var(--critical); }
+  }
+  .flash { animation: flashRed 1.1s ease-in-out infinite; }
+  .flash .label, .flash .value, .flash .note, .flash .q-state, .flash .q-stat .l, .flash .q-foot { color: inherit !important; }
+  @media (prefers-reduced-motion: reduce) {
+    .flash { animation: none; background: var(--critical); border-color: var(--critical); color: #fff; }
+  }
+
+  /* KPI drill-down list */
+  .drill { border-color: var(--accent); }
+  .drill .close { float: right; }
 
   /* Queue cards (left column) */
   .queue { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; background: var(--surface); }
@@ -212,6 +229,7 @@
       </div>
 
       <div id="kpiGrid" class="kpi-grid"></div>
+      <div id="kpiDrill" class="panel drill" hidden></div>
 
       <div class="panel" id="watchPanel">
         <div class="section-title">Call avoidance watch <span class="sub" id="watchSub"></span></div>
@@ -233,7 +251,7 @@
           <button class="pill" data-filter="available" aria-pressed="false">Available</button>
           <button class="pill" data-filter="oncall" aria-pressed="false">On a call</button>
           <button class="pill" data-filter="working" aria-pressed="false"><span class="st st-yellow">Working</span></button>
-          <button class="pill" data-filter="away" aria-pressed="false"><span class="st st-grey">Break / away</span></button>
+          <button class="pill" data-filter="away" aria-pressed="false"><span class="st st-grey">Break / lunch</span></button>
           <button class="pill" data-filter="flagged" aria-pressed="false">Flagged</button>
           <input id="agentSearch" class="search" type="search" placeholder="Search agent…">
         </div>
@@ -262,15 +280,17 @@
           <li>Status colors follow the RingCX agent app. Green means the status takes calls (Available, Payroll Support). Grey is On-Break, Away and Lunch. Yellow is every Working-type status (Training, Testing, Meeting, ticket and escalation work, ePayment, Yodlee and similar). Red means on a call or in wrap-up.</li>
           <li><b>SLA</b> is RingCX's own service-level count for each queue, from its real-time data (<code>slaPass</code> / <code>slaFail</code>). A call passes if it is answered within the queue's SLA time, which is 30 seconds on every BQE queue. Calls answered later, or abandoned after 30 seconds, fail. The top tile adds up all queues. The counts are today's running totals.</li>
           <li><b>Queue hours:</b> the viewer shows a queue as Open only if RingCX says it's open and, for queues with configured hours, the current time is inside them. Payroll Specialist is open M–F 6am–4pm Pacific, which matches its RingCX schedule. Outside those hours it shows Closed and raises no staffing alerts. If RingCX ever reports it open outside those hours, the page flags it as a schedule problem.</li>
-          <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up. The tiles split this into <b>Working</b> (yellow statuses) and <b>Break / away</b> (grey: On-Break, Away, Lunch).</li>
+          <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up. The tiles split this into <b>Working</b> (yellow statuses) and <b>Break / lunch</b> (grey: On-Break, Away, Lunch).</li>
           <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, only while they are taking queue calls (Available, or on a call from a queue). Some agents also count as supervisors while in a specific status: Connor Lenhart while in Escalation Support. Those rules are set in the page's settings (SUPERVISOR_DUTY).</li>
-          <li>The avoidance watch flags an agent for any of the following:
+          <li>The avoidance watch flags an agent only when at least <b><span data-cfg="MIN_SIGNALS"></span> of these signals</b> are true at the same time. One signal alone is not flagged.
             <ul>
               <li>Any RNA (ring, no answer) this login session. Two or more is critical.</li>
               <li>Leaving Available for a status that doesn't take calls <span data-cfg="EXIT_WARN"></span>+ times in the last 60 minutes, or <span data-cfg="CHANGE_WARN"></span>+ status changes in 60 minutes.</li>
               <li>Being in a status that doesn't take calls for longer than <span data-cfgdur="NOTREADY_WARN_SEC"></span>. Longer than <span data-cfgdur="NOTREADY_CRIT_SEC"></span> is critical.</li>
+              <li>Wrap-up longer than <span data-cfgdur="WRAP_WARN_SEC"></span>.</li>
             </ul>
           </li>
+          <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
           <li>RNA, calls and talk time are RingCX's own counters for the agent's current login session. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
           <li>The page makes two requests per refresh and pauses while the window is hidden. RingCX allows about 120 real-time requests per minute in total.</li>
@@ -278,7 +298,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 1.5</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 1.6</footer>
     </main>
   </section>
 </div>
@@ -299,6 +319,7 @@
     ACCOUNT_ID: "38000001",                          // SUB-BQE Software, Inc.
     REDIRECT_URI: location.origin + location.pathname,
     WAIT_CRIT_SEC: 120,                              // caller waiting longer than this = critical
+    WAIT_FLASH_SEC: 5 * 60,                          // longest wait past this = flashing red until answered
     WRAP_WARN_SEC: 180,                              // wrap-up longer than this
     LONG_CALL_SEC: 30 * 60,                          // single call longer than this
     NOTREADY_WARN_SEC: 20 * 60,                      // in a no-calls status longer than this
@@ -306,6 +327,7 @@
     EXIT_WARN: 3,                                    // left Available for a no-calls status N+ times in 60 min
     EXIT_CRIT: 5,
     CHANGE_WARN: 6,                                  // any status changes N+ times in 60 min
+    MIN_SIGNALS: 2,                                  // flag an agent only when this many different signals are true
     CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
     // Business hours enforced by the viewer, on top of RingCX's own open/closed flag.
     // Outside these hours the queue shows Closed and raises no staffing alerts.
@@ -431,13 +453,20 @@
     return c.exp ? (c.exp * 1000 - Date.now() < 60 * 1000) : (Date.now() - session.obtained > 4 * 60 * 1000);
   }
 
-  async function api(path) {
+  // GET returns parsed JSON; with a body it POSTs JSON and returns the raw text (reports come back as CSV).
+  async function api(path, body) {
     if (tokenNearExpiry()) await refreshToken();
     var url = CONFIG.RCX_SERVER + "/voice/api/v1/admin/accounts/" + CONFIG.ACCOUNT_ID + "/" + path;
-    var r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } });
-    if (r.status === 401) { await refreshToken(); r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } }); }
+    function go() {
+      var opts = { headers: { Authorization: "Bearer " + session.rcxAccess } };
+      if (body) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+      return fetch(url, opts);
+    }
+    var r = await go();
+    if (r.status === 401) { await refreshToken(); r = await go(); }
     if (!r.ok) { var e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
     var txt = await r.text();
+    if (body) return txt;
     return txt ? JSON.parse(txt) : [];
   }
 
@@ -523,6 +552,8 @@
   }
 
   // Avoidance watch: returns { lvl, score, reasons[] } or null
+  // Each reason is one signal type (RNA, status flipping, too long not taking calls, long wrap-up).
+  // An agent is only flagged once MIN_SIGNALS different signals are true at the same time.
   function watchFor(a, e) {
     var reasons = [], score = 0, lvl = null;
     function add(l, text, s) { reasons.push({ lvl: l, text: text }); score += s; if (l === "crit" || !lvl) lvl = l === "crit" ? "crit" : (lvl || l); }
@@ -539,8 +570,7 @@
       else if (st > CONFIG.NOTREADY_WARN_SEC) add("warn", "Not taking calls " + fmtShort(st), 100 + st / 60);
     }
     if (a.pendingDisposition && (a.pendingDispositionTime || 0) + e > CONFIG.WRAP_WARN_SEC) add("warn", "Wrap-up " + fmtDur((a.pendingDispositionTime || 0) + e), 80);
-    if (isOnCall(a) && !a.pendingDisposition && (a.stateTime || 0) + e > CONFIG.LONG_CALL_SEC) add("warn", "Call " + fmtShort((a.stateTime || 0) + e), 40);
-    return reasons.length ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
+    return reasons.length >= CONFIG.MIN_SIGNALS ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
   }
 
   // ---------------- queue hours ----------------
@@ -638,6 +668,7 @@
     renderQueues(e);
     renderAlerts(e, watch);
     renderKpis(e, agents, sups, watch);
+    renderDrill(e, agents, watch);
     renderWatch(e, watch);
     renderAgents(e, agents);
     renderSups(e, sups);
@@ -649,6 +680,14 @@
     if (lastError) setStatus("err", "Problem refreshing · retry in " + next + "s");
     else setStatus("live", "Live · updated " + Math.round(e) + "s ago · next in " + next + "s");
     document.querySelectorAll("[data-count]").forEach(function (el) { el.textContent = fmtDur(+el.getAttribute("data-count") + e); });
+    applyFlash(e);
+  }
+  // Anything marked data-flash-base (seconds waited at last refresh) flashes once
+  // that wait passes WAIT_FLASH_SEC; it stops when the next refresh no longer has such a caller.
+  function applyFlash(e) {
+    document.querySelectorAll("[data-flash-base]").forEach(function (el) {
+      el.classList.toggle("flash", +el.getAttribute("data-flash-base") + e >= CONFIG.WAIT_FLASH_SEC);
+    });
   }
 
   function renderAlerts(e, watch) {
@@ -689,24 +728,155 @@
     var waitingIn = Q.filter(function (q) { return q.inQueue > 0; })
       .sort(function (a, b) { return (b.longestInQueue || 0) - (a.longestInQueue || 0); })
       .map(function (q) { return "<b>" + esc(q.gateName) + "</b> " + q.inQueue + " (" + count(q.longestInQueue || 0) + ")"; });
+    var longestQ = Q.filter(function (q) { return q.inQueue > 0; })
+      .sort(function (a, b) { return (b.longestInQueue || 0) - (a.longestInQueue || 0); })[0];
     var tiles = [
       { label: "Waiting now", value: waiting, cls: waiting ? (longest + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn") : "", note: waiting ? waitingIn.join("<br>") : "no callers in queue" },
+      { label: "Longest wait", value: longestQ ? count(longestQ.longestInQueue || 0) : "–",
+        cls: longestQ ? (longest + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn") : "",
+        flashBase: longestQ ? (longestQ.longestInQueue || 0) : null,
+        note: longestQ ? esc(longestQ.gateName) + " · flashes after " + fmtShort(CONFIG.WAIT_FLASH_SEC) : "nobody waiting" },
       { label: "Agents logged in", value: agents.length, filter: "all", note: "excl. supervisors off the queue" },
       { label: "Available", value: agents.filter(isAvailable).length, filter: "available", note: "ready for a call" },
       { label: "On a call", value: agents.filter(isOnCall).length, filter: "oncall", note: "incl. wrap-up" },
-      { label: "<span class='st st-yellow'>Working</span>", value: agents.filter(function (a) { return stateColor(a) === "st-yellow"; }).length, filter: "working", note: "yellow statuses, no calls" },
-      { label: "<span class='st st-grey'>Break / away</span>", value: agents.filter(function (a) { return stateColor(a) === "st-grey"; }).length, filter: "away", note: "grey statuses, no calls" },
+      { label: "<span class='st st-yellow'>Working</span>", value: agents.filter(DRILLS.working.test).length, filter: "working", note: "yellow statuses, no calls" },
+      { label: "<span class='st st-grey'>Break / lunch</span>", value: agents.filter(DRILLS.away.test).length, filter: "away", note: "grey statuses, no calls" },
       { label: "Flagged", value: watch.length, filter: "flagged", cls: watch.length ? "warn" : "", note: "avoidance watch" },
       { label: "Presented", value: presented, note: "calls today" },
       { label: "Answered", value: accepted, note: pct(accepted, presented) + " of presented" },
-      { label: "Abandoned", value: abandoned, cls: abandoned ? "warn" : "", note: pct(abandoned, presented) + " incl. short legs" },
+      { label: "Abandoned", value: abandoned, cls: abandoned ? "warn" : "", filter: "abandoned", note: pct(abandoned, presented) + " · click for calls" },
       { label: "SLA", value: pct(slaP, slaP + slaF), note: slaP + slaF ? slaP + " of " + (slaP + slaF) + " answered ≤30s" : "no SLA calls yet" }
     ];
     $("kpiGrid").innerHTML = tiles.map(function (t) {
-      var active = t.filter && t.filter === agentFilter && t.filter !== "all";
-      return "<button class='kpi " + (t.cls || "") + (t.filter ? "" : " static") + (active ? " active" : "") + "'" + (t.filter ? " data-filter='" + t.filter + "'" : "") + ">" +
-        "<div class='label'>" + t.label + "</div><div class='value'>" + t.value + "</div><div class='note'>" + t.note + "</div></button>";
+      var active = t.filter && t.filter === drill;
+      return "<button class='kpi " + (t.cls || "") + (t.filter ? "" : " static") + (active ? " active" : "") + "'" +
+        (t.filter ? " data-drill='" + t.filter + "' title='Show the list'" : "") +
+        (t.flashBase != null ? " data-flash-base='" + Math.floor(t.flashBase) + "'" : "") + ">" +
+        "<div class='label'>" + t.label + (t.filter ? "<span class='caret'>▼</span>" : "") + "</div><div class='value'>" + t.value + "</div><div class='note'>" + t.note + "</div></button>";
     }).join("");
+    applyFlash(e);
+  }
+
+  // ---------------- KPI drill-down lists ----------------
+  var drill = null;   // key of the open agent KPI list, or null
+  var DRILLS = {
+    all: { title: "Agents logged in", test: function () { return true; } },
+    available: { title: "Available", test: isAvailable },
+    oncall: { title: "On a call", test: isOnCall },
+    working: { title: "Working (yellow statuses)", test: function (a) { return stateColor(a) === "st-yellow"; } },
+    away: { title: "Break / lunch (grey statuses)", test: function (a) { return stateColor(a) === "st-grey"; } },
+    flagged: { title: "Flagged on the avoidance watch", test: null },
+    abandoned: { title: "Abandoned calls today" }       // call list, not an agent list (no test)
+  };
+
+  // ---------------- abandoned calls (RingCX call detail report) ----------------
+  // The real-time feed only has counts, so the list comes from the Global Call Type
+  // Detail report (reportsStreaming, CSV). Its timestamps are US/Eastern.
+  var abandons = { rows: null, at: 0, err: null, loading: false };
+
+  function ptMidnightIso() {
+    var p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", timeZoneName: "shortOffset" }).formatToParts(new Date());
+    var g = function (t) { return (p.filter(function (x) { return x.type === t; })[0] || {}).value; };
+    var m = /GMT([+-])(\d+)/.exec(g("timeZoneName") || "GMT-8");
+    var off = (m ? m[1] : "-") + String(m ? m[2] : 8).padStart(2, "0") + "00";
+    return g("year") + "-" + g("month") + "-" + g("day") + "T00:00:00.000" + off;
+  }
+  function parseCsv(text) {
+    var rows = [], row = [], cur = "", q = false;
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true;
+      else if (c === ",") { row.push(cur); cur = ""; }
+      else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cur); rows.push(row); row = []; cur = ""; }
+      else cur += c;
+    }
+    if (cur || row.length) { row.push(cur); rows.push(row); }
+    var head = rows.shift() || [];
+    return rows.filter(function (r) { return r.length > 1; }).map(function (r) { var o = {}; head.forEach(function (h, j) { o[h] = r[j]; }); return o; });
+  }
+  // "2026-10-14 10:43:51" US/Eastern -> "7:43 AM" Pacific (always 3 hours behind).
+  function etToPtClock(s) {
+    var m = /(\d+)-(\d+)-(\d+) (\d+):(\d+):(\d+)/.exec(s || "");
+    if (!m) return s || "";
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 3, +m[5], +m[6]));
+    var h = d.getUTCHours(), ap = h >= 12 ? "PM" : "AM";
+    return ((h % 12) || 12) + ":" + String(d.getUTCMinutes()).padStart(2, "0") + " " + ap;
+  }
+  async function loadAbandons(force) {
+    if (abandons.loading) return;
+    if (!force && abandons.rows && Date.now() - abandons.at < 2 * 60 * 1000) return;
+    abandons.loading = true; renderDrillOnly();
+    try {
+      var csv = await api("reportsStreaming", {
+        reportType: "GLOBAL_CALL_TYPE_DELIMITED",
+        reportCriteria: { criteriaType: "GLOBAL_CALL_TYPE_CRITERIA", startDate: ptMidnightIso(), containGates: true, containAgents: true, includeNoAnswers: true }
+      });
+      abandons.rows = parseCsv(csv).filter(function (r) { return r.call_result === "ABANDON" && r.source_type === "ACD-INBOUND"; })
+        .sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
+      abandons.at = Date.now(); abandons.err = null;
+    } catch (e) {
+      abandons.err = e.status === 403 ? "Your RingCX user can't read call detail reports (HTTP 403)." : "Couldn't load call detail (" + e.message + ").";
+    } finally { abandons.loading = false; renderDrillOnly(); }
+  }
+  function renderDrillOnly() {
+    if (!data.fetchedAt) return;
+    var e = elapsed(), agents = data.agents.filter(inAgentSection);
+    renderDrill(e, agents, agents.map(function (a) { return { a: a, w: watchFor(a, e) }; }).filter(function (x) { return x.w; }));
+  }
+
+  function renderAbandonDrill(box) {
+    var rows = abandons.rows || [];
+    var waits = rows.map(function (r) { return +r.queue_time || 0; });
+    var avg = waits.length ? waits.reduce(function (s, x) { return s + x; }, 0) / waits.length : 0;
+    var long = waits.filter(function (w) { return w >= CONFIG.WAIT_FLASH_SEC; }).length;
+    var sub = abandons.rows ? rows.length + " call" + (rows.length === 1 ? "" : "s") + (rows.length ? " · avg wait " + fmtDur(avg) + " · " + long + " waited " + fmtShort(CONFIG.WAIT_FLASH_SEC) + "+" : "") : "";
+    var status = abandons.loading ? "Loading call detail…" : (abandons.err ? esc(abandons.err) : (abandons.at ? "as of " + fmtClock(abandons.at) + " · calls appear a few minutes after they end" : ""));
+    box.innerHTML = "<div class='section-title'>Abandoned calls today <span class='sub'>" + sub + "</span>" +
+      "<span class='sub'>" + status + "</span>" +
+      "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th class='num'>Waited before hanging up</th><th>Caller</th><th>Note</th></tr></thead><tbody>" +
+      (rows.map(function (r) {
+        var w = +r.queue_time || 0;
+        var note = w <= 5 ? "<span class='chip info'>≤5s: likely misdial or transfer leg</span>" : (w >= CONFIG.WAIT_FLASH_SEC ? "<span class='chip crit'>Waited " + fmtShort(CONFIG.WAIT_FLASH_SEC) + "+</span>" : "");
+        return "<tr class='" + (w >= CONFIG.WAIT_FLASH_SEC ? "flag-crit" : "") + "'>" +
+          "<td>" + esc(etToPtClock(r.call_start_dts)) + "</td>" +
+          "<td>" + esc(r.source_name) + "</td>" +
+          "<td class='num'><span class='" + (w >= CONFIG.WAIT_FLASH_SEC ? "hot" : (w > CONFIG.WAIT_CRIT_SEC ? "warmn" : "")) + "'>" + fmtDur(w) + "</span></td>" +
+          "<td>" + esc(r.ANI) + "</td>" +
+          "<td>" + note + "</td>" +
+          "</tr>";
+      }).join("") || "<tr><td colspan='5' class='muted'>" + (abandons.rows ? "No abandoned calls in the call detail report yet today." : "") + "</td></tr>") +
+      "</tbody></table></div>" +
+      "<div class='tiny muted' style='margin-top:6px'>From RingCX's call detail report, since midnight Pacific. RingCX's live Abandoned counter can also include very short transfer legs that this report doesn't list, so the two numbers can differ.</div>";
+  }
+
+  function renderDrill(e, agents, watch) {
+    var box = $("kpiDrill");
+    if (!drill) { box.hidden = true; return; }
+    if (drill === "abandoned") { box.hidden = false; loadAbandons(false); renderAbandonDrill(box); return; }
+    var rows;
+    if (drill === "flagged") rows = watch.map(function (x) { return { a: x.a, w: x.w }; });
+    else rows = agents.filter(DRILLS[drill].test).map(function (a) { return { a: a, w: watchFor(a, e) }; })
+      .sort(function (x, y) { return (STATE_ORDER[stateColor(x.a)] - STATE_ORDER[stateColor(y.a)]) || ((y.a.stateTime || 0) - (x.a.stateTime || 0)); });
+    var me = myAgentId();
+    box.hidden = false;
+    box.innerHTML = "<div class='section-title'>" + esc(DRILLS[drill].title) + " <span class='sub'>" + rows.length + " agent" + (rows.length === 1 ? "" : "s") + "</span>" +
+      "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Agent</th><th>Status</th><th class='num'>In status</th><th>Call queue</th><th class='num'>Calls</th><th class='num'>RNA</th><th>Flags</th></tr></thead><tbody>" +
+      (rows.map(function (r) {
+        var a = r.a;
+        return "<tr class='" + (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "") + "'>" +
+          "<td>" + esc(fullName(a)) + (isSupervisor(a) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+          "<td>" + stateHtml(a) + "</td>" +
+          "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
+          "<td>" + esc(isOnCall(a) ? (+a.gateId > 0 ? gateName(a.gateId) : "Outbound/direct") : "") + "</td>" +
+          "<td class='num'>" + (a.callsHandled || 0) + "</td>" +
+          "<td class='num'>" + (a.rna ? "<span class='" + (a.rna >= 2 ? "hot" : "warmn") + "'>" + a.rna + "</span>" : "0") + "</td>" +
+          "<td class='wrap'>" + (r.w ? r.w.reasons.map(function (x) { return "<span class='chip " + x.lvl + "'>" + esc(x.text) + "</span>"; }).join("") : "") + "</td>" +
+          "</tr>";
+      }).join("") || "<tr><td colspan='7' class='muted'>Nobody right now.</td></tr>") +
+      "</tbody></table></div>";
   }
 
   function renderQueues(e) {
@@ -722,7 +892,7 @@
         : (open && q.staffed > 0 && !q.available ? (CONFIG.CRITICAL_QUEUES.indexOf(q.gateName) >= 0 ? "crit" : "warn") : "");
       if (!open) cls += " closed";
       var availNames = String(q.availableAgentsList || "").split(",").filter(Boolean).map(agentFirst).filter(Boolean);
-      return "<div class='queue " + cls + "'>" +
+      return "<div class='queue " + cls + "'" + (q.inQueue > 0 ? " data-flash-base='" + Math.floor(q.longestInQueue || 0) + "'" : "") + ">" +
         "<div class='q-head'><span class='q-name'>" + esc(q.gateName) + "</span><span class='q-state'>" + (open ? "Open" : "Closed") + "</span></div>" +
         (hrs ? "<div class='tiny muted'>Hours " + esc(hrs.label) + (hoursMismatch(q) ? " · <span class='warmn'>RingCX says open</span>" : "") + "</div>" : "") +
         "<div class='q-stats'>" +
@@ -736,6 +906,7 @@
         "</div>";
     }).join("");
     $("queueList").innerHTML = html + (hidden ? "<div class='tiny muted' style='margin-bottom:6px'>" + hidden + " closed queue" + (hidden > 1 ? "s" : "") + " hidden</div>" : "");
+    applyFlash(e);
   }
 
   function renderWatch(e, watch) {
@@ -820,14 +991,27 @@
   }
 
   // KPI tiles and pills share one filter state
-  function setFilter(f) {
-    agentFilter = (agentFilter === f && f !== "all") ? "all" : f;
+  // exact=true sets the filter as given (used by KPI drill-downs); otherwise a pill click toggles.
+  function setFilter(f, exact) {
+    agentFilter = exact ? f : ((agentFilter === f && f !== "all") ? "all" : f);
+    if (!exact && drill && drill !== agentFilter) drill = null;
     document.querySelectorAll(".pill[data-filter]").forEach(function (p) { p.setAttribute("aria-pressed", String(p.getAttribute("data-filter") === agentFilter)); });
     render();
   }
   document.addEventListener("click", function (ev) {
     var f = ev.target.closest("[data-filter]");
-    if (f) { setFilter(f.getAttribute("data-filter")); if (f.classList.contains("kpi")) $("agentsPanel").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (f) { setFilter(f.getAttribute("data-filter")); return; }
+    // Agent KPI tiles open/close their drill-down list, and keep the Agents table filter in step.
+    var d = ev.target.closest("[data-drill]");
+    if (d) {
+      var key = d.getAttribute("data-drill");
+      drill = drill === key ? null : key;
+      if (drill === "abandoned") loadAbandons(true);
+      // Agent lists also filter the Agents table; the call list leaves it alone.
+      setFilter(drill && DRILLS[drill].test !== undefined ? drill : "all", true);
+      return;
+    }
+    if (ev.target.closest("[data-drill-close]")) { drill = null; setFilter("all", true); return; }
     var th = ev.target.closest("th[data-key]");
     if (th) {
       var k = th.getAttribute("data-key");
