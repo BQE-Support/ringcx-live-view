@@ -6,6 +6,7 @@
 <title>RingCX Live View</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3454D1">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
   :root {
     --bg: #F5F6F9; --surface: #FFFFFF; --surface-alt: #ECEFF5; --border: #DDE1EA;
@@ -110,6 +111,11 @@
   @media (prefers-reduced-motion: reduce) {
     .flash { animation: none; background: var(--critical); border-color: var(--critical); color: #fff; }
   }
+
+  /* Who's viewing: initials avatars in the top-right tag */
+  .avatar { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; margin-left: 4px;
+    background: var(--accent-soft); color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .02em; border: 1px solid var(--accent); cursor: default; }
+  .avatar.me { background: var(--accent); color: #fff; }
 
   /* Performance today */
   .board-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; }
@@ -315,6 +321,7 @@
               <li>Plus up to 10 for the share of time spent Available or Engaged. Until 30 minutes of someone's time has been observed, this part counts as half.</li>
             </ul>
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
+          <li><b>Plain "WORKING"</b> (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets a "Blocks calls" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they also appear in Where to Focus, which turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
           <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
           <li>RNA, calls and talk time are RingCX's own counters for the agent's current login session. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
@@ -323,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 2.2</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 2.3</footer>
     </main>
   </section>
 </div>
@@ -353,10 +360,19 @@
     EXIT_WARN: 3,                                    // left Available for a no-calls status N+ times in 60 min
     EXIT_CRIT: 5,
     CHANGE_WARN: 6,                                  // any status changes N+ times in 60 min
-    MIN_SIGNALS: 2,                                  // flag an agent only when this many different signals are true
+    // Plain "WORKING" is not selectable by agents in RingCX (auxStates isAgentSelectable=false):
+    // it's the state RingCX drops people into, e.g. after a disconnect, and it blocks calls.
+    STUCK_STATE: "WORKING",
+    STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
+    STUCK_CRIT_SEC: 10 * 60,
+    MIN_SIGNALS: 2,                                // flag an agent only when this many different signals are true
     BOARD_MIN_LOGIN_SEC: 60 * 60,                    // agents with 0 calls are ranked once logged in this long
     // Only these RingCX agent IDs may use the viewer (Fred approves each one). The names
     // behind the IDs are kept in the internal README, not here, because this page is public.
+    // "Who's viewing" uses Supabase Realtime presence (no database tables). The anon key is a
+    // public client key by design. Empty values = presence off; the page shows only your own name.
+    SUPABASE_URL: "",
+    SUPABASE_ANON_KEY: "",
     ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144", "3301145", "3301139"],
     HIDDEN_QUEUES: ["Test Queue"],                   // never shown anywhere on the page
     CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
@@ -470,11 +486,49 @@
     var a = data.agents.filter(function (x) { return String(x.agentId) === id; })[0];
     return a ? fullName(a) : "";
   }
+  function initialsOf(n) { return String(n || "").split(/\s+/).filter(Boolean).map(function (p) { return p[0]; }).slice(0, 2).join("").toUpperCase(); }
   function showViewer() {
     var el = $("viewerTag"); if (!el) return;
     var n = viewerName();
+    if (presence.channel) { if (n && n !== presence.trackedName) trackPresence(); renderPresence(); return; }
     el.hidden = !n;
     el.innerHTML = "<span class='dot live'></span>Viewing: <b>" + esc(n) + "</b>";
+  }
+
+  // ---------------- who's viewing (Supabase Realtime presence) ----------------
+  // Each open copy joins one shared channel and announces its viewer's initials and name.
+  // Nothing is stored: when a window closes, it drops off the list within a few seconds.
+  var presence = { client: null, channel: null, trackedName: "" };
+  function startPresence() {
+    if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_ANON_KEY || !window.supabase || presence.channel) return;
+    try {
+      presence.client = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+      var key = String(jwtClaims(session.rcxAccess).agnt || Math.random());
+      presence.channel = presence.client.channel("ringcx-live-view", { config: { presence: { key: key } } });
+      presence.channel.on("presence", { event: "sync" }, renderPresence)
+        .subscribe(function (status) { if (status === "SUBSCRIBED") trackPresence(); });
+    } catch (e) { presence.channel = null; }
+  }
+  function trackPresence() {
+    var n = viewerName();
+    if (!presence.channel || !n) return;
+    presence.trackedName = n;
+    presence.channel.track({ name: n, initials: initialsOf(n), since: Date.now() });
+  }
+  function stopPresence() {
+    try { if (presence.channel) { presence.channel.untrack(); presence.client.removeChannel(presence.channel); } } catch (e) {}
+    presence.channel = null; presence.client = null; presence.trackedName = "";
+  }
+  function renderPresence() {
+    var el = $("viewerTag"); if (!el || !presence.channel) return;
+    var state = presence.channel.presenceState(), me = String(jwtClaims(session ? session.rcxAccess : "").agnt || "");
+    var people = Object.keys(state).map(function (k) { var m = state[k][0] || {}; return { key: k, name: m.name || "", initials: m.initials || "?" }; })
+      .filter(function (p) { return p.name; })
+      .sort(function (a, b) { return (a.key === me ? -1 : b.key === me ? 1 : a.name.localeCompare(b.name)); });
+    el.hidden = !people.length;
+    el.innerHTML = "<span class='dot live'></span>Viewing now" + people.map(function (p) {
+      return "<span class='avatar" + (p.key === me ? " me" : "") + "' title='" + esc(p.name + (p.key === me ? " (you)" : "")) + "'>" + esc(p.initials) + "</span>";
+    }).join("");
   }
 
   var refreshing = null;
@@ -519,7 +573,7 @@
 
   function signOut() {
     try { localStorage.removeItem(STORE_KEY); } catch (e) {}
-    session = null; stopPolling(); showSignin();
+    stopPresence(); session = null; stopPolling(); showSignin();
   }
 
   // ---------------- state model ----------------
@@ -540,7 +594,18 @@
     return "st-yellow";
   }
   function stateLabel(a) { return a.pendingDisposition ? "Wrap-up" : (a.agentState || ""); }
-  function stateHtml(a) { return "<span class='st " + stateColor(a) + "'>" + esc(stateLabel(a)) + "</span>" + (a.onHoldDts ? " <span class='chip info'>On hold</span>" : ""); }
+  function isStuck(a) { return !isOnCall(a) && String(a.agentState || "").toUpperCase() === CONFIG.STUCK_STATE; }
+  function stuckLevel(a) {
+    if (!isStuck(a)) return null;
+    var t = (a.stateTime || 0) + elapsed();
+    return t >= CONFIG.STUCK_CRIT_SEC ? "crit" : (t >= CONFIG.STUCK_WARN_SEC ? "warn" : "info");
+  }
+  function stateHtml(a) {
+    var s = stuckLevel(a);
+    return "<span class='st " + stateColor(a) + "'>" + esc(stateLabel(a)) + "</span>" +
+      (s ? " <span class='chip " + s + "' title='System default status (not agent-selectable); blocks calls. Ask the agent to update their status.'>Blocks calls</span>" : "") +
+      (a.onHoldDts ? " <span class='chip info'>On hold</span>" : "");
+  }
   function isSupervisor(a) { return String(a.agentType || "").toUpperCase() === "SUPERVISOR"; }
   // Supervisors only count as call-takers while Available or on a call that came from a queue.
   function fullName(a) { return (a.firstName || "") + " " + (a.lastName || ""); }
@@ -772,6 +837,11 @@
         items.push({ lvl: crit ? "crit" : "warn", score: crit ? 900 : 500, html: "<b>" + esc(q.gateName) + "</b>: open, nobody available (" + q.staffed + " staffed)" });
       }
       if (open && !q.staffed) items.push({ lvl: "crit", score: 950, html: "<b>" + esc(q.gateName) + "</b>: open with no agents staffed" });
+    });
+    data.agents.filter(function (a) { return inAgentSection(a) && isStuck(a) && (a.stateTime || 0) + e >= CONFIG.STUCK_WARN_SEC; }).forEach(function (a) {
+      var t = (a.stateTime || 0) + e, crit = t >= CONFIG.STUCK_CRIT_SEC;
+      items.push({ lvl: crit ? "crit" : "warn", score: (crit ? 850 : 600) + t / 60,
+        html: "<b>" + esc(fullName(a)) + "</b>: in plain WORKING for " + count(a.stateTime || 0) + " (blocks calls, likely after a disconnect). Ask them to update their status." });
     });
     if (watch.length) {
       var crit = watch.filter(function (x) { return x.w.lvl === "crit"; }).length;
@@ -1168,7 +1238,7 @@
       $("configWarning").textContent = IS_LOCAL_DEV ? "Local test mode: signs in with the dev server's credential." : "Not yet connected to a RingCentral app (CLIENT_ID is empty).";
     }
   }
-  function showLive() { $("signinView").hidden = true; $("liveView").hidden = false; startPolling(); }
+  function showLive() { $("signinView").hidden = true; $("liveView").hidden = false; startPolling(); startPresence(); }
 
   // ---------------- auto-update ----------------
   // Every few minutes, re-fetch this page from the server (bypassing caches) and
