@@ -315,7 +315,7 @@
           <div><div class="board-h good">Top 5</div><div id="boardTop"></div></div>
           <div><div class="board-h low">Lowest 5</div><div id="boardLow"></div></div>
         </div>
-        <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
+        <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10, minus 5 if lunch ran 5+ min over the hour (minus 10 if 15+ min over; timed from when they actually went to lunch). Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
         <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Working, Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
       </div>
 
@@ -363,7 +363,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 4.2</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 4.3</footer>
     </main>
   </section>
 </div>
@@ -400,7 +400,13 @@
     STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
     STUCK_CRIT_SEC: 10 * 60,
     MIN_SIGNALS: 2,                                // flag an agent only when this many different signals are true
-    REVIEW_SNOOZE_MIN: 60,                           // a supervisor review hides a watch entry this long (Fred)
+    LUNCH_EARLY_MIN: 30,                             // a logout this long before scheduled lunch still counts as lunch
+    LUNCH_LATE_START_MIN: 60,                        // ...and up to this long after (late lunch is fine)
+    LUNCH_OVER_WARN_MIN: 5,                          // lunch longer than LUNCH_MAX_MIN by this = yellow (Fred)
+    LUNCH_OVER_CRIT_MIN: 15,                         // ...by this = red
+    LUNCH_PENALTY_WARN: 5,                           // Performance score points lost for a yellow lunch overrun
+    LUNCH_PENALTY_CRIT: 10,                          // ...for a red one
+    REVIEW_SNOOZE_MIN: 60,                          // a supervisor review hides a watch entry this long (Fred)
     // People whose hours don't follow daylight saving: roster times + 1h while Pacific is on PDT (Fred).
     NO_DST: ["Andrea Lopez"],
     SHIFT_HOURS: 9,                                 // roster has no shift end: assume 8h work + 1h lunch
@@ -578,6 +584,49 @@
       (j.hidden ? " · " + j.hidden + " hidden (not an active RingCX user)" : "");
   }
 
+  // ---------------- lunch timing: from when they actually went (Fred) ----------------
+  // Lunch starts when an agent switches to Lunch, or logs out inside their lunch period
+  // (scheduled lunch - LUNCH_EARLY_MIN .. + LUNCH_LATE_START_MIN, so a late lunch still counts).
+  // They get LUNCH_MAX_MIN; LUNCH_OVER_WARN_MIN over = yellow, LUNCH_OVER_CRIT_MIN over = red.
+  function ptMinOf(ms) {
+    var f = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms));
+    var g = function (t) { return +(f.filter(function (x) { return x.type === t; })[0] || {}).value; };
+    return g("hour") * 60 + g("minute");
+  }
+  function schedFor(name) {
+    var k = normName(name);
+    return (pto.schedule || []).filter(function (s) { return normName(s.name) === k; })[0] || null;
+  }
+  // Returns today's lunch for this person { from, to (null = still out), active, dur (min), over (min) } or null.
+  function lunchFor(h, s, isLiveNow) {
+    if (!h) return null;
+    var now = Date.now(), runs = [], open = null;
+    (h.ev || []).slice().sort(function (x, y) { return x.t - y.t; }).forEach(function (x) {
+      if (x.tb === "LUNCH") open = x.t;
+      else if (x.fb === "LUNCH" && open !== null) { runs.push({ from: open, to: x.t }); open = null; }
+    });
+    if (open !== null) runs.push({ from: open, to: isLiveNow && h.base === "LUNCH" ? null : (h.lastSeen || null) });
+    else if (isLiveNow && h.base === "LUNCH" && h.start) runs.push({ from: h.start, to: null });   // went before we started watching
+    if (s && s.lunch !== null) {
+      var inPeriod = function (t) { var m = ptMinOf(t); return m >= s.lunch - CONFIG.LUNCH_EARLY_MIN && m <= s.lunch + CONFIG.LUNCH_LATE_START_MIN; };
+      (h.gaps || []).forEach(function (g) { if (inPeriod(g.from)) runs.push({ from: g.from, to: g.to }); });
+      // If this page wasn't watching when they disappeared, we only know they've been out since it came back.
+      if (!isLiveNow && h.lastSeen && inPeriod(h.lastSeen)) runs.push({ from: Math.max(h.lastSeen, hist.watchStart || 0), to: null, unsure: h.lastSeen < (hist.watchStart || 0) - 60000 });
+    }
+    if (!runs.length) return null;
+    runs.sort(function (x, y) { return x.from - y.from; });
+    // Lunch on the Lunch status followed straight by a logout (or the reverse) is one lunch.
+    var r = { from: runs[0].from, to: runs[0].to, unsure: !!runs[0].unsure };
+    for (var i = 1; i < runs.length; i++) {
+      var end = r.to === null ? now : r.to;
+      if (runs[i].from - end <= 3 * 60000) r.to = runs[i].to === null || r.to === null ? null : Math.max(r.to, runs[i].to);
+      else break;
+    }
+    var dur = ((r.to === null ? now : r.to) - r.from) / 60000;
+    return { from: r.from, to: r.to, active: r.to === null, dur: dur, over: dur - CONFIG.LUNCH_MAX_MIN, unsure: r.unsure };
+  }
+  function lunchLevel(L) { return !L ? null : (L.over >= CONFIG.LUNCH_OVER_CRIT_MIN ? "crit" : (L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? "warn" : null)); }
+
   // ---------------- people whose hours don't follow daylight saving ----------------
   // Their roster times are their standard-time Pacific hours (e.g. a fixed schedule in a zone with no
   // DST). While Pacific is on daylight time (PDT), those same hours land one hour later on Pacific clocks.
@@ -618,11 +667,20 @@
     var skip = {};
     CONFIG.LUNCH_EXCLUDE.forEach(function (x) { skip[normName(x)] = 1; });
     var atLunch = [], due = [], overdue = [], next = [], done = 0, unknown = 0;
+    var histByName = {};
+    Object.keys(hist.agents).forEach(function (id) { var hh = hist.agents[id]; if (hh.name) histByName[normName(hh.name)] = hh; });
+    // At lunch now: on the Lunch status, or logged out inside their lunch period. Timed from when they left.
     data.agents.forEach(function (a) {
       if (skip[normName(fullName(a))]) return;
       if (String(a.agentBaseState).toUpperCase() !== "LUNCH") return;
-      var s = sched[normName(fullName(a))];
-      atLunch.push({ a: a, s: s, t: (a.stateTime || 0) + e });
+      var s = sched[normName(fullName(a))], L = lunchFor(hist.agents[String(a.agentId)], s, true);
+      atLunch.push({ name: fullName(a), s: s, from: L ? L.from : Date.now() - (a.stateTime || 0) * 1000, L: L, how: "" });
+    });
+    pto.schedule.forEach(function (s) {
+      var k = normName(s.name);
+      if (live[k] || skip[k] || out[k]) return;
+      var L = lunchFor(histByName[k], s, false);
+      if (L && L.active) atLunch.push({ name: s.name, s: s, from: L.from, L: L, how: " · logged out" + (L.unsure ? " (at least; left before this page was watching)" : "") });
     });
     pto.schedule.forEach(function (s) {
       var k = normName(s.name), a = live[k];
@@ -630,7 +688,8 @@
       if (String(a.agentBaseState).toUpperCase() === "LUNCH") return;               // already listed above
       var h = hist.agents[String(a.agentId)] || {};
       var tookLunch = h.lunchDay === hist.day ||                                     // seen at lunch today, or
-        (h.ev || []).some(function (x) { return x.fb === "LUNCH" || x.tb === "LUNCH"; }); // a status change into/out of Lunch
+        (h.ev || []).some(function (x) { return x.fb === "LUNCH" || x.tb === "LUNCH"; }) || // a status change into/out of Lunch, or
+        !!lunchFor(h, s, true);                                                      // logged out for lunch and came back
       if (tookLunch) { done++; return; }
       if (s.lunch > nowMin && s.lunch <= nowMin + CONFIG.LUNCH_LOOKAHEAD_MIN) { next.push({ a: a, s: s }); return; }
       if (s.lunch <= nowMin && nowMin < s.lunch + CONFIG.LUNCH_LEEWAY_MIN) { due.push({ a: a, s: s }); return; }
@@ -643,9 +702,9 @@
     function item(name, right, cls) { return "<div class='pto-row'><span>" + esc(name) + "</span><span class='when " + (cls || "") + "'>" + right + "</span></div>"; }
     var html =
       "<div class='pto-h'>At lunch now</div>" +
-      (atLunch.sort(function (x, y) { return y.t - x.t; }).map(function (x) {
-        var over = x.t >= CONFIG.LUNCH_MAX_MIN * 60;
-        return item(fullName(x.a), "<span class='" + (over ? "hot" : "") + "'>" + count(x.a.stateTime || 0) + "</span>" +
+      (atLunch.sort(function (x, y) { return x.from - y.from; }).map(function (x) {
+        var lvl = lunchLevel(x.L), cls = lvl === "crit" ? "hot" : (lvl === "warn" ? "warmn" : "");
+        return item(x.name, "<span class='" + cls + "'>" + count((Date.now() - x.from) / 1000 - elapsed()) + "</span>" + esc(x.how) +
           (x.s && x.s.lunch !== null ? " · sched " + clockOf(x.s.lunch) : " · no sched"));
       }).join("") || "<div class='muted tiny'>Nobody.</div>") +
       (overdue.length ? "<div class='pto-h'>Overdue</div>" + overdue.sort(function (x, y) { return y.late - x.late; }).map(function (x) {
@@ -681,14 +740,28 @@
       if (live[k] || out[k] || s.shift === null || s.days.indexOf(n.day) < 0) return;
       if (isSupervisorName(s.name, false) || CONFIG.LUNCH_EXCLUDE.some(function (x) { return normName(x) === k; })) return;
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN || nowMin >= s.shift + CONFIG.SHIFT_HOURS * 60) return;
-      // Logged out during their normal lunch hour = assumed at lunch (Fred). Only work hours count.
-      if (s.lunch !== null && nowMin >= s.lunch && nowMin < s.lunch + CONFIG.LUNCH_MAX_MIN) return;
       var seen = byName[k], offSec, reason;
       if (seen && seen.h.sup) return;
+      // Logged out in their lunch period = at lunch (Fred). The 60 minutes run from when they left;
+      // only flag once they're 5+ min over (red at 15+).
+      var L = seen ? lunchFor(seen.h, s, false) : null;
+      if (L && L.active) {
+        var ll = lunchLevel(L);
+        if (!ll) return;
+        var pa = s.name.split(" ");
+        var la = { agentId: seen.id, firstName: pa[0], lastName: pa.slice(1).join(" "), agentState: "LOGGED OUT (LUNCH)", agentBaseState: "OFFLINE",
+          stateTime: Math.max(0, (Date.now() - L.from) / 1000 - elapsed()), offline: true };
+        list.push({ a: la, w: { lvl: ll, score: 380 + L.over, cs: changeStats(la),
+          reasons: [{ lvl: ll, text: "Lunch over by " + (L.unsure ? "at least " : "") + Math.round(L.over) + " min (logged out since " + (L.unsure ? "at least " : "") + fmtClock(L.from) + ")", kind: "lunch@" + Math.round(L.from / 60000) }] } });
+        return;
+      }
+      if (!seen && s.lunch !== null && nowMin >= s.lunch && nowMin < s.lunch + CONFIG.LUNCH_MAX_MIN) return;
       if (seen && seen.h.lastSeen) {
-        offSec = (Date.now() - seen.h.lastSeen) / 1000;
+        // If the page wasn't watching when they left, count only from when it came back ("at least").
+        var unsure = seen.h.lastSeen < (hist.watchStart || 0) - 60000, since = Math.max(seen.h.lastSeen, hist.watchStart || 0);
+        offSec = (Date.now() - since) / 1000;
         if (offSec < CONFIG.OFFLINE_MIN * 60) return;
-        reason = "Logged out since " + fmtClock(seen.h.lastSeen) + ", not on lunch or PTO";
+        reason = "Logged out since " + (unsure ? "at least " : "") + fmtClock(since) + ", not on lunch or PTO";
       } else {
         offSec = (nowMin - s.shift) * 60;
         reason = "Not logged in yet, shift started " + clockOf(s.shift);
@@ -934,6 +1007,10 @@
   function observe(agents, fetchedAt) {
     if (hist.day !== todayKey()) hist = { day: todayKey(), since: fetchedAt, agents: {} };
     var keepAfter = fetchedAt - 10 * 3600 * 1000;
+    // Was this page watching without a break? (Closed/hidden pages leave gaps that aren't real logouts.)
+    var contiguous = hist.lastPoll && fetchedAt - hist.lastPoll <= 3 * intervalSec * 1000 + 60000;
+    if (!contiguous) hist.watchStart = fetchedAt;
+    hist.lastPoll = fetchedAt;
     agents.forEach(function (a) {
       var id = String(a.agentId);
       var asOf = Date.parse(a.lastUpdate) || fetchedAt;
@@ -953,6 +1030,10 @@
       }
       // Time accounting for the leaderboard: credit the gap since the last refresh to the status
       // the agent was in (capped, so a sleeping laptop doesn't credit hours).
+      // A real logout: gone for OFFLINE_MIN+ while this page kept watching the whole time.
+      if (h.lastSeen && fetchedAt - h.lastSeen > CONFIG.OFFLINE_MIN * 60000 && h.lastSeen >= (hist.watchStart || 0) - 60000) {
+        h.gaps = (h.gaps || []).concat([{ from: h.lastSeen, to: fetchedAt }]);
+      }
       if (h.lastSeen) {
         var gap = Math.min((fetchedAt - h.lastSeen) / 1000, 3 * intervalSec);
         h.seenSec = (h.seenSec || 0) + gap;
@@ -1002,7 +1083,7 @@
     if (cs.exits >= CONFIG.EXIT_CRIT) add("crit", "Left Available " + cs.exits + "x in 60m", 250 + cs.exits * 20, "exits" + cs.exits);
     else if (cs.exits >= CONFIG.EXIT_WARN) add("warn", "Left Available " + cs.exits + "x in 60m", 150 + cs.exits * 20, "exits" + cs.exits);
     else if (cs.changes >= CONFIG.CHANGE_WARN) add("warn", cs.changes + " status changes in 60m", 100 + cs.changes * 10, "chg" + cs.changes);
-    if (isNotReady(a)) {
+    if (isNotReady(a) && base(a) !== "LUNCH") {   // lunch has its own rule below
       var st = (a.stateTime || 0) + e;
       if (st > CONFIG.NOTREADY_CRIT_SEC) add("crit", "Not taking calls " + fmtShort(st), 200 + st / 60, "nr@" + stateStartMin);
       else if (st > CONFIG.NOTREADY_WARN_SEC) add("warn", "Not taking calls " + fmtShort(st), 100 + st / 60, "nr@" + stateStartMin);
@@ -1015,7 +1096,13 @@
       stuck = true;
       add(stt >= CONFIG.STUCK_CRIT_SEC ? "crit" : "warn", "In plain WORKING " + fmtShort(stt) + ": blocks calls, ask them to update status", 400 + stt / 60, "stuck@" + stateStartMin);
     }
-    return (stuck || reasons.length >= CONFIG.MIN_SIGNALS) ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
+    // Lunch over by 5+ min (from when they actually went) is a single-signal flag too.
+    var lunchOver = false;
+    if (base(a) === "LUNCH") {
+      var L = lunchFor(hist.agents[String(a.agentId)], schedFor(fullName(a)), true), ll = lunchLevel(L);
+      if (ll) { lunchOver = true; add(ll, "Lunch over by " + Math.round(L.over) + " min (out since " + fmtClock(L.from) + ")", 380 + L.over, "lunch@" + Math.round(L.from / 60000)); }
+    }
+    return (stuck || lunchOver || reasons.length >= CONFIG.MIN_SIGNALS) ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
   }
 
   // ---------------- queue hours ----------------
@@ -1363,8 +1450,12 @@
       if (!eligible || p.login < 60) return;
       var perHr = answered / (p.login / 3600);
       var readyShare = p.seen >= 1800 ? p.ready / p.seen : 0.5;
-      var score = perHr * 10 - p.rna * 5 + readyShare * 10;
-      out.push({ name: n, sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: p.seen >= 1800 ? readyShare : null, login: p.login, score: score });
+      // Lunch overrun today (timed from when they actually went): -5 at 5+ min over, -10 at 15+.
+      var L = lunchFor(hist.agents[p.id], schedFor(n), !!live), ll = lunchLevel(L);
+      var lunchPenalty = ll === "crit" ? CONFIG.LUNCH_PENALTY_CRIT : (ll === "warn" ? CONFIG.LUNCH_PENALTY_WARN : 0);
+      var score = perHr * 10 - p.rna * 5 + readyShare * 10 - lunchPenalty;
+      out.push({ name: n, sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: p.seen >= 1800 ? readyShare : null, login: p.login, score: score,
+        lunchOver: L && L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(L.over) : 0, lunchLvl: ll });
     });
     return out.sort(function (a, b) { return b.score - a.score; });
   }
@@ -1374,7 +1465,7 @@
     var rows = boardRows();
     var top = rows.slice(0, 5), low = rows.length > 5 ? rows.slice(-Math.min(5, rows.length - 5)).reverse() : [];
     function table(list, startRank, dir) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Lunch</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr><td class='num'>" + (dir > 0 ? startRank + i : rows.length - i) + "</td>" +
             "<td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
@@ -1384,8 +1475,9 @@
             "<td class='num'>" + fmtDur(r.talk) + "</td>" +
             "<td class='num'>" + (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0") + "</td>" +
             "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
+            "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
             "<td class='num'>" + fmtDur(r.login) + "</td></tr>";
-        }).join("") || "<tr><td colspan='9' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
+        }).join("") || "<tr><td colspan='10' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
         "</tbody></table></div>";
     }
     $("boardTop").innerHTML = table(top, 1, 1);
