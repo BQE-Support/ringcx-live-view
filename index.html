@@ -126,7 +126,7 @@
   .avatar.me { background: var(--accent); color: #fff; }
 
   /* Performance today */
-  /* Top 5 and Lowest 5 stacked (one above the other) so each table gets the full width: no sideways scroll. */
+  /* Top 5 and Bottom 5 stacked (one above the other) so each table gets the full width: no sideways scroll. */
   .board-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .board-grid > div { min-width: 0; }
   .board-h { font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
@@ -333,7 +333,7 @@
           <button class="btn" id="boardAllBtn" style="margin-left:auto">Show all</button></div>
         <div class="board-grid" id="boardSplit">
           <div><div class="board-h good">Top 5</div><div id="boardTop"></div></div>
-          <div><div class="board-h low">Lowest 5</div><div id="boardLow"></div></div>
+          <div><div class="board-h low">Bottom 5</div><div id="boardLow"></div></div>
         </div>
         <div id="boardAll" hidden><div class="board-h">Everyone, ranked</div><div id="boardAllList"></div></div>
         <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10, minus 5 if lunch ran 5+ min over the hour (minus 10 if 15+ min over; timed from when they actually went to lunch), minus 5 for a confirmed late first login of 5+ min (minus 10 if 15+; see Logins today, unconfirmed times don't count). Calls per hour uses RingCX's logged-in total for the whole day. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
@@ -374,8 +374,10 @@
               <li>Minus 5 for each RNA today.</li>
               <li>Plus up to 10 for the share of time spent Available or Engaged. Until 30 minutes of someone's time has been observed, this part counts as half.</li>
             </ul>
+            Top 5 and Bottom 5 rank agents only. Supervisors (including Connor Lenhart and Victor Guadarrama) are scored too, but they appear only in "Show all", with a Supervisor tag.
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
           <li><b>Plain "WORKING"</b> (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets an "Only use for RNA" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
+          <li><b>Vendor status</b> in What to Watch comes from each vendor's public status page, checked every 2 minutes: <b>Gusto</b> (the API component only), <b>GlobalPay</b> (Worldpay, plus Payrix US), and <b>BQE CORE</b> (both regions). It shows a degraded or down component, an open incident, or maintenance in progress. Red = major outage or a major/critical incident; yellow = anything else. Click it to open the status page. Global Payments has no public developer status page we could find, so GlobalPay covers Worldpay and Payrix.</li>
           <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
           <li>Calls, talk time, RNA and logged-in time are <b>today's totals</b> everywhere on the page, so the Agents table and Performance always agree. RingCX's live counters reset each time someone logs in again, so this page adds up every login session it saw today, and also uses the day's call report for calls and talk. Login sessions from before the page started tracking can't be counted. Queue counters (presented, answered, abandoned) are RingCX's daily running totals. Abandoned includes very short transfer legs (≤5s), so it overstates real lost callers.</li>
@@ -384,7 +386,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.9</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.10</footer>
     </main>
   </section>
 </div>
@@ -453,6 +455,20 @@
     ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144", "3301145", "3301139"],
     // Queue names are shown with the word CORE always in capitals, in every part of the page (Fred).
     HIDDEN_QUEUES: ["Test Queue"],                  // never shown anywhere on the page
+    // Vendor status pages shown in What to Watch (Fred, 2026-10-14). All are Atlassian Statuspage
+    // sites with an open, CORS-enabled summary.json. "only" limits a page to the components that
+    // matter (component or group names); incidents/maintenance count only if they touch those.
+    // Global Payments' own developer status page wasn't found; Worldpay and Payrix ("Worldpay for
+    // Platforms") are Global Payments companies, so they're grouped under GlobalPay.
+    STATUS_POLL_SEC: 120,
+    STATUS_PAGES: [
+      { title: "Gusto", pages: [{ name: "Gusto", url: "https://status.gusto.com", only: ["API"] }] },
+      { title: "GlobalPay", pages: [
+        { name: "Worldpay", url: "https://status.worldpay.com" },
+        { name: "Payrix", url: "https://status.payrix.com", only: ["United States"] }
+      ] },
+      { title: "BQE CORE", pages: [{ name: "BQE CORE", url: "https://status.bqe.com", only: ["BQECORE - US, CAN & UK", "BQECORE - AUS & UAE"] }] }
+    ],
     // Business hours enforced by the viewer, on top of RingCX's own open/closed flag.
     // Outside these hours the queue shows Closed and raises no staffing alerts.
     // days: 0=Sun..6=Sat. Payroll matches its RingCX gate schedule (M-F 06:00-16:00 Pacific).
@@ -1444,8 +1460,55 @@
     });
   }
 
+  // ---------------- vendor status (Gusto API, GlobalPay, BQE CORE) ----------------
+  var vendor = { at: 0, loading: false, groups: [] };   // groups: [{ title, lvl, parts: [{ page, url, text }] }]
+  var VSTAT = { degraded_performance: "degraded", partial_outage: "partial outage", major_outage: "major outage", under_maintenance: "maintenance" };
+  async function loadVendorStatus() {
+    if (vendor.loading || Date.now() - vendor.at < CONFIG.STATUS_POLL_SEC * 1000) return;
+    vendor.loading = true;
+    try {
+      vendor.groups = await Promise.all(CONFIG.STATUS_PAGES.map(async function (g) {
+        var out = { title: g.title, lvl: null, parts: [], errors: 0 };
+        await Promise.all(g.pages.map(async function (p) {
+          try {
+            var r = await fetch(p.url + "/api/v2/summary.json", { cache: "no-store" });
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            var j = await r.json(), comps = j.components || [];
+            // Components in scope: the named ones plus their children (groups), or everything.
+            var groupIds = {}, inScope = {};
+            comps.forEach(function (c) { if (c.group && (!p.only || p.only.indexOf(c.name) >= 0)) groupIds[c.id] = c.name; });
+            comps.forEach(function (c) { if (!p.only || p.only.indexOf(c.name) >= 0 || groupIds[c.group_id]) inScope[c.id] = c; });
+            function touches(ev) { var cs = ev.components || []; return !p.only || !cs.length || cs.some(function (c) { return inScope[c.id]; }); }
+            var bad = Object.keys(inScope).map(function (k) { return inScope[k]; })
+              .filter(function (c) { return !c.group && c.status !== "operational"; });
+            var major = bad.some(function (c) { return c.status === "major_outage"; });
+            var incidents = (j.incidents || []).filter(function (i) { return i.status !== "resolved" && i.status !== "postmortem" && touches(i); });
+            var maint = (j.scheduled_maintenances || []).filter(function (m) { return m.status === "in_progress" && touches(m); });
+            if (incidents.some(function (i) { return i.impact === "major" || i.impact === "critical"; })) major = true;
+            if (!bad.length && !incidents.length && !maint.length) return;
+            var bits = [];
+            if (bad.length) bits.push(bad.slice(0, 4).map(function (c) { return c.name + " " + (VSTAT[c.status] || c.status); }).join(", ") + (bad.length > 4 ? " +" + (bad.length - 4) + " more" : ""));
+            incidents.slice(0, 2).forEach(function (i) { bits.push(i.name); });
+            maint.slice(0, 1).forEach(function (m) { bits.push("Maintenance: " + m.name); });
+            out.parts.push({ page: p.name, url: p.url, text: bits.join(" · ") });
+            out.lvl = major || out.lvl === "crit" ? "crit" : "warn";
+          } catch (x) { out.errors++; }
+        }));
+        return out;
+      }));
+      vendor.at = Date.now();
+    } finally { vendor.loading = false; if (data.fetchedAt) render(); }
+  }
+  function vendorAlerts() {
+    loadVendorStatus();
+    return vendor.groups.filter(function (g) { return g.lvl; }).map(function (g) {
+      return { lvl: g.lvl, score: g.lvl === "crit" ? 1200 : 350, ext: g.parts[0].url,
+        html: "<b>" + esc(g.title) + "</b>: " + g.parts.map(function (p) { return (g.parts.length > 1 || p.page !== g.title ? esc(p.page) + " " : "") + esc(p.text); }).join(" | ") };
+    });
+  }
+
   function renderAlerts(e, watch) {
-    var items = [];
+    var items = vendorAlerts();
     viewQueues().forEach(function (q) {
       var open = queueOpen(q);
       if (hoursMismatch(q)) items.push({ lvl: "warn", score: 450, html: "<b>" + esc(q.gateName) + "</b>: RingCX shows it open outside " + esc(CONFIG.QUEUE_HOURS[q.gateName].label) + ". Check the queue schedule." });
@@ -1472,8 +1535,11 @@
     }
     items.sort(function (x, y) { return y.score - x.score; });
     $("alertList").innerHTML = items.length
-      ? items.map(function (i) { return i.link ? "<a class='alert " + i.lvl + "' href='" + i.link + "'>" + i.html + "</a>" : "<span class='alert " + i.lvl + "'>" + i.html + "</span>"; }).join("")
-      : "<span class='alert ok'>All clear: no callers waiting, every open queue has someone available, nobody flagged.</span>";
+      ? items.map(function (i) {
+          if (i.ext) return "<a class='alert " + i.lvl + "' href='" + esc(i.ext) + "' target='_blank' rel='noopener' title='Open the status page'>" + i.html + " ↗</a>";
+          return i.link ? "<a class='alert " + i.lvl + "' href='" + i.link + "'>" + i.html + "</a>" : "<span class='alert " + i.lvl + "'>" + i.html + "</span>";
+        }).join("")
+      : "<span class='alert ok'>All clear: no callers waiting, every open queue has someone available, nobody flagged" + (vendor.at && !vendor.groups.some(function (g) { return g.errors; }) ? ", and Gusto API, GlobalPay and BQE CORE are operational" : "") + ".</span>";
   }
 
   function sum(arr, k) { return arr.reduce(function (s, x) { return s + (+x[k] || 0); }, 0); }
@@ -1640,12 +1706,12 @@
     } finally { abandons.loading = false; if (data.fetchedAt) render(); }
   }
 
-  // ---------------- top / lowest performers today ----------------
+  // ---------------- top / bottom performers today ----------------
   // Composite score (Fred's choice, 2026-10-14):
   //   calls answered per logged-in hour x 10
   //   - 5 per RNA today
   //   + 10 x share of observed time spent Available or Engaged (neutral 0.5 until 30 min observed)
-  // Everyone who answered queue calls today is ranked (supervisors included), plus anyone in the
+  // Everyone who answered queue calls today is scored (supervisors only in "Show all", never in Top/Bottom 5), plus anyone in the
   // Agents section logged in at least BOARD_MIN_LOGIN_SEC.
   // ---------------- today's totals per person (one source for every table) ----------------
   // RingCX's live counters (calls, talk, RNA, logged in) reset at each login, so a re-login made the
@@ -1718,6 +1784,7 @@
       if (live) { var ds = dayStats(live); answered = ds.calls; c = { uiis: c.uiis, talk: ds.talk }; p.rna = ds.rna; p.login = ds.login; }
       // Logged-in time: RingCX's own total for the whole day (every session), when it's higher than what this page saw.
       p.login = Math.max(p.login, (hist.agents[p.id] || {}).dayLogin || 0);
+      p.sup = isSupervisorName(n, p.sup);   // by name too: a history entry can miss the flag (Connor showed untagged)
       var eligible = answered > 0 || (p.onDuty !== false && !p.sup && p.login >= CONFIG.BOARD_MIN_LOGIN_SEC);
       if (!eligible || p.login < 60) return;
       var perHr = answered / (p.login / 3600);
@@ -1739,11 +1806,13 @@
   function renderBoard() {
     if (!$("boardTop")) return;
     var rows = boardRows();
-    var top = rows.slice(0, 5), low = rows.length > 5 ? rows.slice(-Math.min(5, rows.length - 5)).reverse() : [];
-    function table(list, startRank, dir) {
+    // Top 5 / Bottom 5 rank agents only (Fred, 2026-10-14); supervisors still appear in "Show all".
+    var ranked = rows.filter(function (r) { return !r.sup; });
+    var top = ranked.slice(0, 5), low = ranked.length > 5 ? ranked.slice(-Math.min(5, ranked.length - 5)).reverse() : [];
+    function table(list, startRank, dir, total) {
       return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
-          return "<tr><td class='num'>" + (dir > 0 ? startRank + i : rows.length - i) + "</td>" +
+          return "<tr><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
             "<td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
             "<td class='num'><b>" + r.score.toFixed(1) + "</b></td>" +
             "<td class='num'>" + r.answered + "</td>" +
@@ -1758,12 +1827,12 @@
         }).join("") || "<tr><td colspan='11' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
         "</tbody></table></div>";
     }
-    // "Show all" swaps Top 5 / Lowest 5 for one full ranked list (choice remembered in this browser).
+    // "Show all" swaps Top 5 / Bottom 5 for one full ranked list (choice remembered in this browser).
     var showAll = !!ui.boardAll;
     $("boardSplit").hidden = showAll; $("boardAll").hidden = !showAll;
-    $("boardAllBtn").textContent = showAll ? "Top 5 / Lowest 5" : "Show all (" + rows.length + ")";
+    $("boardAllBtn").textContent = showAll ? "Top 5 / Bottom 5" : "Show all (" + rows.length + ")";
     if (showAll) $("boardAllList").innerHTML = table(rows, 1, 1);
-    else { $("boardTop").innerHTML = table(top, 1, 1); $("boardLow").innerHTML = table(low, 0, -1); }
+    else { $("boardTop").innerHTML = table(top, 1, 1); $("boardLow").innerHTML = table(low, 0, -1, ranked.length); }
     $("boardSub").textContent = rows.length + " ranked" + (abandons.at ? " · calls as of " + fmtClock(abandons.at) : "") + " · logged-in time and RNA " + trackedLabel();
   }
   function renderDrillOnly() {
