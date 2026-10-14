@@ -365,7 +365,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 4.9</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.0</footer>
     </main>
   </section>
 </div>
@@ -634,6 +634,44 @@
     return { from: r.from, to: r.to, active: r.to === null, dur: dur, over: dur - CONFIG.LUNCH_MAX_MIN, unsure: r.unsure };
   }
   function lunchLevel(L) { return !L ? null : (L.over >= CONFIG.LUNCH_OVER_CRIT_MIN ? "crit" : (L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? "warn" : null)); }
+
+  // ---------------- full-day history from the server (Supabase "tracker" + "history") ----------------
+  // The tracker saves a RingCX agent snapshot every minute all day. On open (and when coming back to a
+  // hidden tab), the page downloads today's snapshots and replays them through observe(), so every viewer
+  // has the same history from midnight, as if the page had been open all day. If the server has less
+  // than this browser already saw (e.g. the tracker started late), the browser's own history is kept.
+  var serverHist = { loading: false, at: 0, ok: false, err: null };
+  async function loadHistory(force) {
+    if (serverHist.loading || !session || !CONFIG.SUPABASE_URL) return;
+    serverHist.loading = true;
+    try {
+      if (tokenNearExpiry()) await refreshToken();
+      var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/history", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      var polls = j.polls || [], fields = j.fields || [];
+      if (!polls.length) { serverHist.err = "no server snapshots yet"; return; }
+      var firstTs = Date.parse(polls[0].ts);
+      // Only replace this browser's history if the server's goes back further.
+      // force = coming back after a gap: the server's minute-by-minute record fills it.
+      if (!force && hist.day === todayKey() && hist.since && hist.since <= firstTs) { serverHist.err = "browser history is older"; return; }
+      var keepInterval = intervalSec;
+      intervalSec = 60;   // the server's cadence, so gaps between snapshots aren't mistaken for missed refreshes
+      hist = { day: todayKey(), since: firstTs, agents: {}, source: "server" };
+      polls.forEach(function (p) {
+        var agents = (p.a || []).map(function (row) { var o = {}; fields.forEach(function (f, i) { o[f] = row[i]; }); return o; });
+        observe(agents, Date.parse(p.ts), true);
+      });
+      save(HIST_KEY, hist);
+      intervalSec = keepInterval;
+      serverHist.ok = true; serverHist.at = Date.now(); serverHist.err = null;
+      if (data.fetchedAt) render();
+    } catch (x) { serverHist.err = x.message; }
+    finally { serverHist.loading = false; }
+  }
+  function trackedLabel() {
+    return (hist.source === "server" ? "tracked by the server since " : "tracked by this browser since ") + fmtClock(hist.since);
+  }
 
   // ---------------- people whose hours don't follow daylight saving ----------------
   // Their roster times are their standard-time Pacific hours (e.g. a fixed schedule in a zone with no
@@ -907,7 +945,7 @@
     }).join("") || "<tr><td colspan='7' class='muted'>No logins seen yet today.</td></tr>";
     var lateN = rows.filter(function (r) { return !r.missing && isLate(r); }).length;
     var missN = rows.filter(function (r) { return r.missing; }).length;
-    $("loginSub").textContent = rows.length + " people" + (lateN ? " · " + lateN + " late" : "") + (missN ? " · " + missN + " not logged in" : "") + " · tracked by this browser since " + fmtClock(hist.since);
+    $("loginSub").textContent = rows.length + " people" + (lateN ? " · " + lateN + " late" : "") + (missN ? " · " + missN + " not logged in" : "") + " · " + trackedLabel();
   }
 
   // ---------------- who's viewing (Supabase Realtime presence) ----------------
@@ -1039,7 +1077,7 @@
   var hist = load(HIST_KEY);
   if (!hist || hist.day !== todayKey()) hist = { day: todayKey(), since: Date.now(), agents: {} };
 
-  function observe(agents, fetchedAt) {
+  function observe(agents, fetchedAt, noSave) {
     if (hist.day !== todayKey()) hist = { day: todayKey(), since: fetchedAt, agents: {} };
     var keepAfter = fetchedAt - 10 * 3600 * 1000;
     // Was this page watching without a break? (Closed/hidden pages leave gaps that aren't real logouts.)
@@ -1090,7 +1128,7 @@
       h.label = label; h.base = b; h.start = start; h.calls = a.callsHandled || 0; h.rna = a.rna || 0;
       h.ev = h.ev.filter(function (e) { return e.t > keepAfter; });
     });
-    save(HIST_KEY, hist);
+    if (!noSave) save(HIST_KEY, hist);
   }
 
   function changeStats(a) {
@@ -1197,7 +1235,12 @@
   }
   function stopPolling() { clearTimeout(pollTimer); clearInterval(tickTimer); pollTimer = tickTimer = null; }
   function startPolling() { stopPolling(); poll(); tickTimer = setInterval(tick, 1000); }
-  document.addEventListener("visibilitychange", function () { if (!document.hidden && session) poll(); });
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden || !session) return;
+    // Back after a while (minimized, laptop asleep): refill the gap from the server's snapshots first.
+    if (hist.lastPoll && Date.now() - hist.lastPoll > 3 * 60 * 1000) loadHistory(true).then(poll);
+    else poll();
+  });
   $("refreshBtn").addEventListener("click", function () { poll(); });
   $("intervalSel").addEventListener("change", function () { intervalSec = +this.value; ui.interval = intervalSec; save(UI_KEY, ui); poll(); });
   $("signoutBtn").addEventListener("click", signOut);
@@ -1541,7 +1584,7 @@
     $("boardAllBtn").textContent = showAll ? "Top 5 / Lowest 5" : "Show all (" + rows.length + ")";
     if (showAll) $("boardAllList").innerHTML = table(rows, 1, 1);
     else { $("boardTop").innerHTML = table(top, 1, 1); $("boardLow").innerHTML = table(low, 0, -1); }
-    $("boardSub").textContent = rows.length + " ranked" + (abandons.at ? " · calls as of " + fmtClock(abandons.at) : "") + " · logged-in time and RNA tracked by this browser since " + fmtClock(hist.since);
+    $("boardSub").textContent = rows.length + " ranked" + (abandons.at ? " · calls as of " + fmtClock(abandons.at) : "") + " · logged-in time and RNA " + trackedLabel();
   }
   function renderDrillOnly() {
     if (!data.fetchedAt) return;
@@ -1829,7 +1872,7 @@
     // Keep a half-typed review intact: skip redrawing while someone is typing in the watch.
     var typing = document.activeElement && document.activeElement.hasAttribute && document.activeElement.hasAttribute("data-review-input");
     $("watchPanel").hidden = !watch.length && !snoozed.length;   // only shown when someone is flagged
-    $("watchSub").textContent = "status changes counted by this browser since " + fmtClock(hist.since) +
+    $("watchSub").textContent = "status changes " + trackedLabel() +
       (snoozed.length ? " · " + snoozed.length + " reviewed (snoozed)" : "");
     window.__watchByKey = {};
     watch.concat(snoozed).forEach(function (x) { window.__watchByKey[agentKeyOf(x.a)] = x; });
@@ -2002,6 +2045,8 @@
     loadPto(); clearInterval(ptoTimer); ptoTimer = setInterval(loadPto, 30 * 60 * 1000);
     // Reviews: on start, every 2 minutes as a backstop, and instantly when another viewer changes one.
     loadReviews(); setInterval(loadReviews, 2 * 60 * 1000);
+    // Full-day history from the server's every-minute snapshots (replaces this browser's partial view).
+    loadHistory();
   }
 
   // ---------------- auto-update ----------------
