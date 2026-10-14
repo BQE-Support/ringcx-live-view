@@ -377,7 +377,7 @@
             </ul>
             Top 5 and Bottom 5 rank agents only. Supervisors (including Connor Lenhart and Victor Guadarrama) are scored too, but they appear only in "Show all", with a Supervisor tag.
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
-          <li><b>Plain "WORKING"</b> (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets an "Only use for RNA" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
+          <li><b>"WORKING"</b> on its own (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets an "Only use for RNA" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
           <li><b>Vendor status</b> in What to Watch comes from each vendor's public status page, checked every 2 minutes: <b>Gusto</b> (the API component only), <b>GlobalPay</b> (Worldpay, plus Payrix US), and <b>BQE CORE</b> (both regions). It shows a degraded or down component, an open incident, or maintenance in progress. Red = major outage or a major/critical incident; yellow = anything else. Click it to open the status page. Global Payments has no public developer status page we could find, so GlobalPay covers Worldpay and Payrix.</li>
           <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
@@ -387,7 +387,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.16</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.17</footer>
     </main>
   </section>
 </div>
@@ -1324,7 +1324,7 @@
     if (isStuck(a) && (a.stateTime || 0) + e >= CONFIG.STUCK_WARN_SEC) {
       var stt = (a.stateTime || 0) + e;
       stuck = true;
-      add(stt >= CONFIG.STUCK_CRIT_SEC ? "crit" : "warn", "In plain WORKING " + fmtShort(stt) + ": blocks calls, ask them to update status", 400 + stt / 60, "stuck@" + stateStartMin);
+      add(stt >= CONFIG.STUCK_CRIT_SEC ? "crit" : "warn", "In WORKING " + fmtShort(stt) + ": blocks calls, ask them to update status", 400 + stt / 60, "stuck@" + stateStartMin);
     }
     // Lunch over by 5+ min (from when they actually went) is a single-signal flag too.
     var lunchOver = false;
