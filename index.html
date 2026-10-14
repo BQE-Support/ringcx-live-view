@@ -386,7 +386,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.10</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.11</footer>
     </main>
   </section>
 </div>
@@ -659,12 +659,16 @@
     if (!runs.length) return null;
     runs.sort(function (x, y) { return x.from - y.from; });
     // Lunch on the Lunch status followed straight by a logout (or the reverse) is one lunch.
-    var r = { from: runs[0].from, to: runs[0].to, unsure: !!runs[0].unsure };
-    for (var i = 1; i < runs.length; i++) {
-      var end = r.to === null ? now : r.to;
-      if (runs[i].from - end <= 3 * 60000) r.to = runs[i].to === null || r.to === null ? null : Math.max(r.to, runs[i].to);
-      else break;
-    }
+    // Group touching runs into blocks, then use the block still going now, else the longest one
+    // (an earlier brief Lunch status must not hide a logout during the lunch window).
+    var blocks = [], b = null;
+    runs.forEach(function (x) {
+      var end = b ? (b.to === null ? now : b.to) : 0;
+      if (b && x.from - end <= 3 * 60000) b.to = x.to === null || b.to === null ? null : Math.max(b.to, x.to);
+      else { b = { from: x.from, to: x.to, unsure: !!x.unsure }; blocks.push(b); }
+    });
+    var r = blocks.filter(function (x) { return x.to === null; })[0] ||
+      blocks.slice().sort(function (x, y) { return (y.to - y.from) - (x.to - x.from); })[0];
     var dur = ((r.to === null ? now : r.to) - r.from) / 60000;
     return { from: r.from, to: r.to, active: r.to === null, dur: dur, over: dur - CONFIG.LUNCH_MAX_MIN, unsure: r.unsure };
   }
