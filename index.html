@@ -344,11 +344,11 @@
         <div class="section-title">Logins today <span class="sub" id="loginSub"></span></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Agent</th><th class="num">Scheduled start</th><th class="num">First login</th><th class="num">Late by</th><th class="num">Logins</th><th class="num">Logged in</th><th>Status</th></tr></thead>
+            <thead><tr><th>Agent</th><th class="num">Scheduled start</th><th class="num">First login</th><th class="num">Late by</th><th class="num">Logins</th><th class="num">Logged in</th><th>Status</th><th>Notes</th></tr></thead>
             <tbody id="loginBody"></tbody>
           </table>
         </div>
-        <div class="tiny muted" style="margin-top:6px">First login and session times come from RingCX (Pacific). Scheduled start is the Support Roster "Shift Start". Late = first login more than <span data-cfg="LOGIN_GRACE_MIN"></span> min after the scheduled start (red after <span data-cfg="LOGIN_LATE_CRIT_MIN"></span>). How sure each first login is: <b>confirmed</b> = when this page first saw their earliest session, RingCX had no other login time for them today. <b>from login time</b> = RingCX had earlier login time this page did not see. Those sessions all came before, so the first login was no later than the earliest session we saw minus that time (for example, a 6:05 session with 59 min logged earlier means 5:06 at the latest). <b>on a call by</b> = same, but their earliest queue call pins it even earlier. <b>earlier session not seen</b> = nothing to pin it down. Only confirmed times count as late (yellow or red, and in the Performance score); the others show "at most" and are not counted. "2+" logins = RingCX counted more logged-in time than the sessions this page saw.</div>
+        <div class="tiny muted" style="margin-top:6px">First login and session times come from RingCX (Pacific). Scheduled start is the Support Roster "Shift Start". Late = first login more than <span data-cfg="LOGIN_GRACE_MIN"></span> min after the scheduled start (red after <span data-cfg="LOGIN_LATE_CRIT_MIN"></span>). How sure each first login is: <b>confirmed</b> = when this page first saw their earliest session, RingCX had no other login time for them today. <b>from login time</b> = RingCX had earlier login time this page did not see. Those sessions all came before, so the first login was no later than the earliest session we saw minus that time (for example, a 6:05 session with 59 min logged earlier means 5:06 at the latest). <b>on a call by</b> = same, but their earliest queue call pins it even earlier. <b>earlier session not seen</b> = nothing to pin it down. Only confirmed times count as late (yellow or red, and in the Performance score); the others show "at most" and are not counted. "2+" logins = RingCX counted more logged-in time than the sessions this page saw. <b>Notes</b> = any approved viewer can add a note to a row (Enter or Save); everyone sees it with who wrote it and when, and × deletes it.</div>
       </div>
 
       <details class="panel">
@@ -386,7 +386,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.11</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.12</footer>
     </main>
   </section>
 </div>
@@ -991,6 +991,8 @@
   var loginByName = {};   // normName -> { late (min), conf } for Performance
   function renderLogins(e) {
     var body = $("loginBody"); if (!body) return;
+    // Keep a half-typed note intact: skip redrawing while someone is typing one.
+    if (document.activeElement && document.activeElement.hasAttribute && document.activeElement.hasAttribute("data-lnote-input")) return;
     loginByName = {};
     loadSupervisors();
     var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5);
@@ -1080,8 +1082,9 @@
         "<td class='num'>" + (r.moreLogins ? "<span class='warmn' title='RingCX shows more logged-in time today than the sessions this page saw'>" + (r.logins + 1) + "+</span>"
           : (r.logins > 1 ? "<span class='warmn'>" + r.logins + "</span>" : r.logins)) + "</td>" +
         "<td class='num'>" + (r.live ? count(r.total) : fmtDur(r.total)) + "</td>" +
-        "<td>" + status + "</td></tr>";
-    }).join("") || "<tr><td colspan='7' class='muted'>No logins seen yet today.</td></tr>";
+        "<td>" + status + "</td>" +
+        "<td class='wrap'>" + loginNoteCell(r.name) + "</td></tr>";
+    }).join("") || "<tr><td colspan='8' class='muted'>No logins seen yet today.</td></tr>";
     var lateN = rows.filter(function (r) { return !r.missing && isLate(r); }).length;
     var missN = rows.filter(function (r) { return r.missing; }).length;
     $("loginSub").textContent = rows.length + " people" + (lateN ? " · " + lateN + " late" : "") + (missN ? " · " + missN + " not logged in" : "") + " · " + trackedLabel();
@@ -2191,7 +2194,7 @@
   function sigOf(x) { return x.w.reasons.map(function (r) { return r.kind || "x"; }).sort().join("|"); }
   function reviewStateOf(x) {
     var key = agentKeyOf(x.a), sig = sigOf(x), now = Date.now();
-    var mine = reviews.list.filter(function (r) { return r.agent_key === key; });
+    var mine = watchReviews().filter(function (r) { return r.agent_key === key; });
     var snooze = mine.filter(function (r) { return r.signature === sig && now - Date.parse(r.created_at) < CONFIG.REVIEW_SNOOZE_MIN * 60000; })[0];
     return { snoozed: !!snooze, until: snooze ? Date.parse(snooze.created_at) + CONFIG.REVIEW_SNOOZE_MIN * 60000 : 0, latest: mine[0] || null };
   }
@@ -2223,6 +2226,31 @@
       await reviewsApi("POST", { action: "add", agentKey: key, agentName: fullName(x.a), signature: sigOf(x), reason: text });
       delete drafts[key]; await loadReviews(); tellOthersReviewsChanged();
     } catch (err) { alert("Couldn't save the review: " + err.message); }
+  }
+  // Logins today notes: same reviews table/function, signature "login" keeps them apart from watch reviews.
+  // Shared with every viewer, stamped with who wrote them and when; no snooze, just notes.
+  var LOGIN_SIG = "login";
+  function watchReviews() { return reviews.list.filter(function (r) { return r.signature !== LOGIN_SIG; }); }
+  function loginNotes(name) { var k = normName(name); return reviews.list.filter(function (r) { return r.signature === LOGIN_SIG && r.agent_key === k; }); }
+  function loginNoteCell(name) {
+    var k = normName(name), dk = "login:" + k;
+    var notes = loginNotes(name).slice().reverse().map(function (r) {
+      return "<div class='tiny'><span class='muted'>" + fmtClock(Date.parse(r.created_at)) + " · " + esc(r.reviewer_name) + ":</span> " + esc(r.reason) +
+        " <a href='#' class='muted' data-review-undo='" + r.id + "' title='Delete this note'>×</a></div>";
+    }).join("");
+    var edit = drafts[dk] !== undefined
+      ? "<div style='margin-top:3px'><input class='search' data-lnote-input='" + esc(k) + "' maxlength='500' placeholder='Note…' value='" + esc(drafts[dk]) + "' style='min-width:160px'> " +
+        "<button class='btn' data-lnote-save='" + esc(k) + "' data-lnote-name='" + esc(name) + "'>Save</button> <button class='btn' data-lnote-cancel='" + esc(k) + "'>Cancel</button></div>"
+      : "<button class='btn' data-lnote-open='" + esc(k) + "'>" + (notes ? "Add note" : "Note") + "</button>";
+    return notes + edit;
+  }
+  async function saveLoginNote(k, name) {
+    var dk = "login:" + k, text = String(drafts[dk] || "").trim();
+    if (text.length < 3) { alert("Please write a short note (at least 3 characters)."); return; }
+    try {
+      await reviewsApi("POST", { action: "add", agentKey: k, agentName: name, signature: LOGIN_SIG, reason: text });
+      delete drafts[dk]; await loadReviews(); tellOthersReviewsChanged();
+    } catch (err) { alert("Couldn't save the note: " + err.message); }
   }
   async function undoReview(id) {
     try { await reviewsApi("POST", { action: "undo", id: id }); await loadReviews(); tellOthersReviewsChanged(); }
@@ -2259,8 +2287,8 @@
       }).join("") || "<tr><td colspan='8' class='muted'>Nobody needs attention right now. " + snoozed.length + " reviewed.</td></tr>";
     }
     // Reviewed today
-    $("reviewedSum").textContent = "Reviewed today (" + reviews.list.length + ")" + (reviews.err ? " · couldn't load reviews: " + reviews.err : "");
-    $("reviewedBody").innerHTML = reviews.list.map(function (r) {
+    $("reviewedSum").textContent = "Reviewed today (" + watchReviews().length + ")" + (reviews.err ? " · couldn't load reviews: " + reviews.err : "");
+    $("reviewedBody").innerHTML = watchReviews().map(function (r) {
       var t = Date.parse(r.created_at), end = t + CONFIG.REVIEW_SNOOZE_MIN * 60000;
       var status = Date.now() < end ? "Snoozed until " + fmtClock(end) + " (sooner if a new signal appears)" : "Snooze over";
       return "<tr><td>" + fmtClock(t) + "</td><td>" + esc(r.agent_name) + "</td><td class='wrap'>" + esc(r.reason) + "</td><td>" + esc(r.reviewer_name) + "</td>" +
@@ -2414,8 +2442,14 @@
     if (rc) { delete drafts[rc.getAttribute("data-review-cancel")]; if (document.activeElement) document.activeElement.blur(); render(); return; }
     var rs = ev.target.closest("[data-review-save]");
     if (rs) { var sk2 = rs.getAttribute("data-review-save"); var inp2 = document.querySelector("[data-review-input='" + sk2.replace(/'/g, "\\'") + "']"); if (inp2) drafts[sk2] = inp2.value; if (document.activeElement) document.activeElement.blur(); saveReview(sk2); return; }
+    var lo = ev.target.closest("[data-lnote-open]");
+    if (lo) { var lk = lo.getAttribute("data-lnote-open"); drafts["login:" + lk] = ""; render(); var li = document.querySelector("[data-lnote-input='" + lk.replace(/'/g, "\'") + "']"); if (li) li.focus(); return; }
+    var lc = ev.target.closest("[data-lnote-cancel]");
+    if (lc) { delete drafts["login:" + lc.getAttribute("data-lnote-cancel")]; if (document.activeElement) document.activeElement.blur(); render(); return; }
+    var ls = ev.target.closest("[data-lnote-save]");
+    if (ls) { var lk2 = ls.getAttribute("data-lnote-save"); var li2 = document.querySelector("[data-lnote-input='" + lk2.replace(/'/g, "\'") + "']"); if (li2) drafts["login:" + lk2] = li2.value; if (document.activeElement) document.activeElement.blur(); saveLoginNote(lk2, ls.getAttribute("data-lnote-name")); return; }
     var ru = ev.target.closest("[data-review-undo]");
-    if (ru) { undoReview(+ru.getAttribute("data-review-undo")); return; }
+    if (ru) { ev.preventDefault(); undoReview(+ru.getAttribute("data-review-undo")); return; }
     var mb = ev.target.closest("[data-mon]");
     if (mb) { startMonitor(mb.getAttribute("data-uii"), mb.getAttribute("data-mon")); return; }
     var ms = ev.target.closest("[data-mon-stop]");
@@ -2439,6 +2473,20 @@
     }
   });
   $("agentSearch").addEventListener("input", function () { agentSearch = this.value.trim().toLowerCase(); render(); });
+  // Review / login-note boxes: keep typed text if the table redraws after focus leaves; Enter saves.
+  document.addEventListener("input", function (ev) {
+    var t = ev.target;
+    if (t.hasAttribute("data-review-input")) drafts[t.getAttribute("data-review-input")] = t.value;
+    else if (t.hasAttribute("data-lnote-input")) drafts["login:" + t.getAttribute("data-lnote-input")] = t.value;
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Enter") return;
+    var t = ev.target, sel = null;
+    if (t.hasAttribute && t.hasAttribute("data-review-input")) sel = "[data-review-save='" + t.getAttribute("data-review-input").replace(/'/g, "\\'") + "']";
+    else if (t.hasAttribute && t.hasAttribute("data-lnote-input")) sel = "[data-lnote-save='" + t.getAttribute("data-lnote-input").replace(/'/g, "\\'") + "']";
+    var b = sel && document.querySelector(sel);
+    if (b) { ev.preventDefault(); b.click(); }
+  });
   $("showClosed").addEventListener("change", function () { render(); });
   $("boardAllBtn").addEventListener("click", function () { ui.boardAll = !ui.boardAll; save(UI_KEY, ui); renderBoard(); });
   $("snapshotBtn").addEventListener("click", function () { downloadSnapshot(); });
