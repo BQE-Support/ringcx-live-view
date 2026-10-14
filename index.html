@@ -277,7 +277,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 1.3</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 1.4</footer>
     </main>
   </section>
 </div>
@@ -685,9 +685,12 @@
     var longest = Q.reduce(function (m, q) { return q.inQueue > 0 ? Math.max(m, q.longestInQueue || 0) : m; }, 0);
     var presented = sum(Q, "presented"), accepted = sum(Q, "accepted"), abandoned = sum(Q, "abandoned");
     var slaP = sum(Q, "slaPass"), slaF = sum(Q, "slaFail");
+    var waitingIn = Q.filter(function (q) { return q.inQueue > 0; })
+      .sort(function (a, b) { return (b.longestInQueue || 0) - (a.longestInQueue || 0); })
+      .map(function (q) { return "<b>" + esc(q.gateName) + "</b> " + q.inQueue + " (" + count(q.longestInQueue || 0) + ")"; });
     var tiles = [
-      { label: "Waiting now", value: waiting, cls: waiting ? (longest + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn") : "", note: waiting ? "longest " + count(longest) : "no callers in queue" },
-      { label: "Agents on", value: agents.length, filter: "all", note: "taking or able to take calls" },
+      { label: "Waiting now", value: waiting, cls: waiting ? (longest + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn") : "", note: waiting ? waitingIn.join("<br>") : "no callers in queue" },
+      { label: "Agents logged in", value: agents.length, filter: "all", note: "excl. supervisors off the queue" },
       { label: "Available", value: agents.filter(isAvailable).length, filter: "available", note: "ready for a call" },
       { label: "On a call", value: agents.filter(isOnCall).length, filter: "oncall", note: "incl. wrap-up" },
       { label: "Not taking calls", value: agents.filter(isNotReady).length, filter: "notready", note: "grey or yellow status" },
