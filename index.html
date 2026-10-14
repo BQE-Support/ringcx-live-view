@@ -310,11 +310,13 @@
       </div>
 
       <div class="panel">
-        <div class="section-title">Performance today <span class="sub" id="boardSub"></span></div>
-        <div class="board-grid">
+        <div class="section-title">Performance today <span class="sub" id="boardSub"></span>
+          <button class="btn" id="boardAllBtn" style="margin-left:auto">Show all</button></div>
+        <div class="board-grid" id="boardSplit">
           <div><div class="board-h good">Top 5</div><div id="boardTop"></div></div>
           <div><div class="board-h low">Lowest 5</div><div id="boardLow"></div></div>
         </div>
+        <div id="boardAll" hidden><div class="board-h">Everyone, ranked</div><div id="boardAllList"></div></div>
         <div class="tiny muted" style="margin-top:6px">Score = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10, minus 5 if lunch ran 5+ min over the hour (minus 10 if 15+ min over; timed from when they actually went to lunch). Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
         <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Working, Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
       </div>
@@ -363,7 +365,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 4.5</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 4.6</footer>
     </main>
   </section>
 </div>
@@ -1485,8 +1487,12 @@
         }).join("") || "<tr><td colspan='10' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
         "</tbody></table></div>";
     }
-    $("boardTop").innerHTML = table(top, 1, 1);
-    $("boardLow").innerHTML = table(low, 0, -1);
+    // "Show all" swaps Top 5 / Lowest 5 for one full ranked list (choice remembered in this browser).
+    var showAll = !!ui.boardAll;
+    $("boardSplit").hidden = showAll; $("boardAll").hidden = !showAll;
+    $("boardAllBtn").textContent = showAll ? "Top 5 / Lowest 5" : "Show all (" + rows.length + ")";
+    if (showAll) $("boardAllList").innerHTML = table(rows, 1, 1);
+    else { $("boardTop").innerHTML = table(top, 1, 1); $("boardLow").innerHTML = table(low, 0, -1); }
     $("boardSub").textContent = rows.length + " ranked" + (abandons.at ? " · calls as of " + fmtClock(abandons.at) : "") + " · logged-in time and RNA tracked by this browser since " + fmtClock(hist.since);
   }
   function renderDrillOnly() {
@@ -1929,6 +1935,7 @@
   });
   $("agentSearch").addEventListener("input", function () { agentSearch = this.value.trim().toLowerCase(); render(); });
   $("showClosed").addEventListener("change", function () { render(); });
+  $("boardAllBtn").addEventListener("click", function () { ui.boardAll = !ui.boardAll; save(UI_KEY, ui); renderBoard(); });
 
   // ---------------- views ----------------
   function showSignin(msg) {
