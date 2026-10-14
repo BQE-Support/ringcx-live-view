@@ -330,7 +330,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 3.0</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 3.1</footer>
     </main>
   </section>
 </div>
@@ -376,7 +376,6 @@
     SUPABASE_ANON_KEY: "sb_publishable_dvaKYnU6ab7qzSTWMUl00Q_hEVNOVDk",
     ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144", "3301145", "3301139"],
     HIDDEN_QUEUES: ["Test Queue"],                   // never shown anywhere on the page
-    CRITICAL_QUEUES: ["Payroll Specialist"],         // open + nobody available = critical, not just a warning
     // Business hours enforced by the viewer, on top of RingCX's own open/closed flag.
     // Outside these hours the queue shows Closed and raises no staffing alerts.
     // days: 0=Sun..6=Sat. Payroll matches its RingCX gate schedule (M-F 06:00-16:00 Pacific).
@@ -831,16 +830,17 @@
     data.queues.forEach(function (q) {
       var open = queueOpen(q);
       if (hoursMismatch(q)) items.push({ lvl: "warn", score: 450, html: "<b>" + esc(q.gateName) + "</b>: RingCX shows it open outside " + esc(CONFIG.QUEUE_HOURS[q.gateName].label) + ". Check the queue schedule." });
-      if (q.inQueue > 0) {
-        var w = (q.longestInQueue || 0) + e;
-        items.push({ lvl: w > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn", score: 1000 + w,
-          html: "<b>" + esc(q.gateName) + "</b>: " + q.inQueue + " waiting, longest " + count(q.longestInQueue || 0) });
+      // One rule for every queue (Fred): yellow = open and nobody available;
+      // red = nobody available AND callers waiting. Callers waiting with someone available = yellow.
+      var nobody = open && !q.available, waiting = q.inQueue > 0;
+      var waitTxt = waiting ? q.inQueue + " waiting, longest " + count(q.longestInQueue || 0) : "";
+      if (nobody) {
+        var why = q.staffed ? "nobody available (" + q.staffed + " staffed)" : "no agents staffed";
+        items.push({ lvl: waiting ? "crit" : "warn", score: (waiting ? 1500 : 500) + (q.longestInQueue || 0),
+          html: "<b>" + esc(q.gateName) + "</b>: open, " + why + (waiting ? ", " + waitTxt : "") });
+      } else if (waiting) {
+        items.push({ lvl: "warn", score: 1000 + (q.longestInQueue || 0), html: "<b>" + esc(q.gateName) + "</b>: " + waitTxt });
       }
-      if (open && q.staffed > 0 && !q.available) {
-        var crit = CONFIG.CRITICAL_QUEUES.indexOf(q.gateName) >= 0;
-        items.push({ lvl: crit ? "crit" : "warn", score: crit ? 900 : 500, html: "<b>" + esc(q.gateName) + "</b>: open, nobody available (" + q.staffed + " staffed)" });
-      }
-      if (open && !q.staffed) items.push({ lvl: "crit", score: 950, html: "<b>" + esc(q.gateName) + "</b>: open with no agents staffed" });
     });
     if (watch.length) {
       var crit = watch.filter(function (x) { return x.w.lvl === "crit"; }).length;
@@ -1171,8 +1171,8 @@
       var hrs = CONFIG.QUEUE_HOURS[q.gateName];
       var idle = !open && !q.presented && !q.inQueue;
       if (idle && !showClosed) { hidden++; return ""; }
-      var cls = q.inQueue > 0 ? ((q.longestInQueue || 0) + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn")
-        : (open && q.staffed > 0 && !q.available ? (CONFIG.CRITICAL_QUEUES.indexOf(q.gateName) >= 0 ? "crit" : "warn") : "");
+      var noOne = open && !q.available;
+      var cls = noOne ? (q.inQueue > 0 ? "crit" : "warn") : (q.inQueue > 0 ? "warn" : "");
       if (!open) cls += " closed";
       var availNames = String(q.availableAgentsList || "").split(",").filter(Boolean).map(agentFirst).filter(Boolean);
       return "<div class='queue " + cls + "'" + (q.inQueue > 0 ? " data-flash-base='" + Math.floor(q.longestInQueue || 0) + "'" : "") + ">" +
