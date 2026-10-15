@@ -1825,6 +1825,40 @@
     } catch (x) { es.err = x.message; }
     finally { es.at = Date.now(); es.loading = false; if (data.fetchedAt) render(); }
   }
+  // Copy ES links grouped by agent (Fred, 2026-10-15): rich HTML (clickable in Teams/Outlook) plus a
+  // plain-text version with full URLs for anywhere else.
+  var esGroups = [];
+  function esHours(h) { return isNaN(h) ? "" : (h < 1 ? Math.round(h * 60) + "m" : (h < 48 ? h.toFixed(1) + "h" : (h / 24).toFixed(1) + "d")); }
+  async function esCopy(btn, who) {
+    var groups = esGroups.filter(function (g) { return !who || g.name === who; });
+    if (!groups.length) return;
+    var html = "", text = "";
+    groups.forEach(function (g) {
+      html += "<p><b>" + esc(g.name) + "</b>: " + g.list.length + " ES ticket" + (g.list.length === 1 ? "" : "s") + " waiting on you</p><ul>";
+      text += g.name + ": " + g.list.length + " ES ticket" + (g.list.length === 1 ? "" : "s") + " waiting on you\n";
+      g.list.forEach(function (t) {
+        var url = es.site + "/browse/" + t.key, wait = esHours(t.hours);
+        html += "<li><a href='" + esc(url) + "'>" + esc(t.key) + "</a> " + esc(t.summary) + " (" + esc(t.status) + (wait ? ", " + wait : "") + ")</li>";
+        text += "  " + t.key + " " + t.summary + " (" + t.status + (wait ? ", " + wait : "") + ") " + url + "\n";
+      });
+      html += "</ul>"; text += "\n";
+    });
+    var ok = false;
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([text], { type: "text/plain" }) })]);
+      ok = true;
+    } catch (x) {
+      // Older browsers: copy a hidden rich-text block the old way.
+      try {
+        var d = document.createElement("div"); d.contentEditable = "true"; d.innerHTML = html;
+        d.style.cssText = "position:fixed;left:-9999px;top:0"; document.body.appendChild(d);
+        var r = document.createRange(); r.selectNodeContents(d); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        ok = document.execCommand("copy"); sel.removeAllRanges(); d.remove();
+      } catch (y) {}
+    }
+    var old = btn.textContent; btn.textContent = ok ? "Copied ✓" : "Copy failed"; btn.disabled = true;
+    setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1800);
+  }
   function esWaiting() {
     var now = Date.now(), over = 0, crit = 0;
     (es.rows || []).filter(function (t) { return inQueue(t.agent || "Unassigned"); }).forEach(function (t) {
@@ -1854,16 +1888,19 @@
       var list = byAgent[a].sort(function (x, y) { return y.hours - x.hours; });
       return { name: a, list: list, over: list.filter(function (t) { return t.hours > ES_WARN_HOURS; }).length };
     }).sort(function (x, y) { return y.over - x.over || y.list.length - x.list.length || x.name.localeCompare(y.name); });
+    esGroups = agents;
     var total = es.rows.length, over = agents.reduce(function (m, a) { return m + a.over; }, 0);
     $("esSub").textContent = total + " ticket" + (total === 1 ? "" : "s") + " · " + over + " over " + ES_WARN_HOURS + "h · " + agents.length + " agent" + (agents.length === 1 ? "" : "s") + " · as of " + fmtClock(es.at);
     body.className = "";
-    body.innerHTML = agents.length ? "<div class='table-wrap'><table><thead><tr><th>Agent</th><th>Ticket</th><th>Status</th><th class='num'>In status</th><th>Since (PT)</th><th>L3 engineer</th><th>Company</th><th>Priority</th></tr></thead><tbody>" +
+    body.innerHTML = agents.length ? "<div class='filters' style='margin-bottom:6px'><button class='btn' data-es-copy='' title='Copy every agent&#39;s ES links, grouped by agent, to paste into Teams or email'>Copy links</button></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Agent</th><th>Ticket</th><th>Status</th><th class='num'>In status</th><th>Since (PT)</th><th>L3 engineer</th><th>Company</th><th>Priority</th></tr></thead><tbody>" +
       agents.map(function (a) {
         return a.list.map(function (t, i) {
           var lvl = t.hours > ES_CRIT_HOURS ? "crit" : (t.hours > ES_WARN_HOURS ? "warn" : "");
           var h = isNaN(t.hours) ? "–" : (t.hours < 1 ? Math.round(t.hours * 60) + "m" : (t.hours < 48 ? t.hours.toFixed(1) + "h" : (t.hours / 24).toFixed(1) + "d"));
           return "<tr class='" + (lvl ? "flag-" + lvl : "") + (i ? " leg-next" : "") + "'>" +
-            "<td>" + (i ? "" : "<b>" + esc(a.name) + "</b> <span class='tiny muted'>" + a.list.length + (a.over ? " · <span class='warmn'>" + a.over + " over " + ES_WARN_HOURS + "h</span>" : "") + "</span>") + "</td>" +
+            "<td>" + (i ? "" : "<b>" + esc(a.name) + "</b> <span class='tiny muted'>" + a.list.length + (a.over ? " · <span class='warmn'>" + a.over + " over " + ES_WARN_HOURS + "h</span>" : "") + "</span>" +
+              "<div><button class='btn' style='margin-top:4px;padding:2px 8px;font-size:11px' data-es-copy='" + esc(a.name) + "' title='Copy " + esc(a.name) + "&#39;s ES links to send to them'>Copy links</button></div>") + "</td>" +
             "<td class='wrap'><a href='" + esc(es.site) + "/browse/" + esc(t.key) + "' target='_blank' rel='noopener'>" + esc(t.key) + "</a> " + esc(t.summary) + "</td>" +
             "<td>" + esc(t.status) + "</td>" +
             "<td class='num'>" + (lvl ? "<span class='chip " + lvl + "' title='In this status more than " + (lvl === "crit" ? ES_CRIT_HOURS : ES_WARN_HOURS) + " hours'>" + h + "</span>" : h) + "</td>" +
@@ -2817,6 +2854,8 @@
       return;
     }
     if (ev.target.closest("a.alert[href='#esPanel']")) $("esPanel").open = true;   // jump to the ES section, unfolded
+    var esb = ev.target.closest("[data-es-copy]");
+    if (esb) { ev.preventDefault(); esCopy(esb, esb.getAttribute("data-es-copy")); return; }
     if (ev.target.closest("[data-inline-close]")) { ev.preventDefault(); inline = null; render(); return; }
     var sl = ev.target.closest("[data-status-log]");
     if (sl) { ev.preventDefault(); drillLog = { id: sl.getAttribute("data-status-log"), name: sl.getAttribute("data-status-name"), mode: sl.getAttribute("data-status-mode") || "changes" }; drill = "statuslog"; render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
