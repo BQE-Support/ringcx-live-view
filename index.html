@@ -416,7 +416,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.31</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.32</footer>
     </main>
   </section>
 </div>
@@ -1621,6 +1621,10 @@
       items.push({ lvl: crit ? "crit" : "warn", score: 400, link: "#watchPanel",
         html: "<b>" + watch.length + " agent" + (watch.length > 1 ? "s" : "") + "</b> on the call avoidance watch" + (crit ? " (" + crit + " critical)" : "") });
     }
+    // ES tickets waiting on L1 (Fred): one flag, yellow past ES_WARN_HOURS, red if any past ES_CRIT_HOURS.
+    var esw = esWaiting();
+    if (esw.over) items.push({ lvl: esw.crit ? "crit" : "warn", score: esw.crit ? 700 : 350, link: "#esPanel",
+      html: "<b>ES tickets awaiting input</b>: " + esw.over + " waiting on L1 over " + ES_WARN_HOURS + "h" + (esw.crit ? " (" + esw.crit + " over " + ES_CRIT_HOURS + "h)" : "") });
     items.sort(function (x, y) { return y.score - x.score; });
     $("alertList").innerHTML = items.length
       ? items.map(function (i) {
@@ -1820,6 +1824,15 @@
       es.err = null;
     } catch (x) { es.err = x.message; }
     finally { es.at = Date.now(); es.loading = false; if (data.fetchedAt) render(); }
+  }
+  function esWaiting() {
+    var now = Date.now(), over = 0, crit = 0;
+    (es.rows || []).filter(function (t) { return inQueue(t.agent || "Unassigned"); }).forEach(function (t) {
+      var h = (now - esSinceMs(t)) / 3600000;
+      if (h > ES_WARN_HOURS) over++;
+      if (h > ES_CRIT_HOURS) crit++;
+    });
+    return { over: over, crit: crit };
   }
   function esSinceMs(t) { return t.since ? Date.parse(String(t.since).replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : NaN; }
   function renderEs() {
@@ -2773,6 +2786,7 @@
       toggleInline("calls", ckey.indexOf("id:") === 0 ? ckey.slice(3) : "", inc.getAttribute("data-agent-calls"));
       return;
     }
+    if (ev.target.closest("a.alert[href='#esPanel']")) $("esPanel").open = true;   // jump to the ES section, unfolded
     if (ev.target.closest("[data-inline-close]")) { ev.preventDefault(); inline = null; render(); return; }
     var sl = ev.target.closest("[data-status-log]");
     if (sl) { ev.preventDefault(); drillLog = { id: sl.getAttribute("data-status-log"), name: sl.getAttribute("data-status-name"), mode: sl.getAttribute("data-status-mode") || "changes" }; drill = "statuslog"; render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
