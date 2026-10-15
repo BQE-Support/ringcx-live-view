@@ -416,7 +416,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.38</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.39</footer>
     </main>
   </section>
 </div>
@@ -1091,7 +1091,7 @@
       var late = start !== null && first !== null ? first - start : null;
       seenNames[normName(h.name)] = 1;
       loginByName[normName(h.name)] = { late: late, conf: conf };
-      rows.push({ name: h.name, sup: isSup, start: start, noDst: !!(s && s.noDst), first: first, late: late, conf: conf,
+      rows.push({ id: id, name: h.name, sup: isSup, start: start, noDst: !!(s && s.noDst), first: first, late: late, conf: conf,
         logins: keys.length, moreLogins: hidden,
         total: Math.max(total, h.dayLogin || 0, live ? live.loggedInDuration || 0 : 0), live: live, lastSeen: lastSeen });
     });
@@ -1133,7 +1133,7 @@
         : (r.live ? "<span class='st st-green' style='font-weight:400'>Logged in</span>" +
             (pastEnd ? " <span class='chip warn'>Past shift end (" + clockOf(r.start + CONFIG.SHIFT_HOURS * 60) + ") by " + fmtShort((nowMin - r.start - CONFIG.SHIFT_HOURS * 60) * 60) + "</span> " + rcxLogoutLink(r.name) : "")
           : "<span class='muted'>Logged out" + (r.lastSeen ? " · last seen " + fmtClock(r.lastSeen) : "") + "</span>");
-      return group + "<tr class='" + flag + "'><td>" + esc(r.name) + "</td>" +
+      return group + "<tr class='" + flag + "' data-lrow='" + esc(rowKey(r.id || "", r.name)) + "'><td>" + nameLink(r.id || "", r.name) + "</td>" +
         "<td class='num'>" + (r.start !== null ? clockOf(r.start) + (r.noDst ? " <span class='chip info' title='Hours do not follow daylight saving; roster time +1h while Pacific is on daylight time'>no DST</span>" : "") : "<span class='muted'>–</span>") + "</td>" +
         "<td class='num'>" + firstCell(r) + "</td>" +
         "<td class='num'>" + lateCell(r) + "</td>" +
@@ -1143,6 +1143,7 @@
         "<td>" + status + "</td>" +
         "<td class='wrap'>" + loginNoteCell(r.name) + "</td></tr>";
     }).join("") || "<tr><td colspan='8' class='muted'>No logins seen yet today.</td></tr>";
+    placeLoginInline();
     var lateN = rows.filter(function (r) { return !r.missing && isLate(r); }).length;
     var missN = rows.filter(function (r) { return r.missing; }).length;
     var supN = rows.filter(function (r) { return r.sup; }).length;
@@ -2735,6 +2736,26 @@
   inlineTr.innerHTML = "<td><div class='inline-box'></div></td>";
   var inlineBox = inlineTr.querySelector(".inline-box");
   function rowKey(id, name) { return id ? "id:" + id : "name:" + normName(name); }
+  // Logins today: a name opens that person's status changes right under their row (Fred, 2026-10-15).
+  var loginInline = null;   // { id, name }
+  var loginTr = document.createElement("tr"); loginTr.className = "inline-drill";
+  loginTr.innerHTML = "<td><div class='inline-box'></div></td>";
+  var loginBox = loginTr.querySelector(".inline-box");
+  function placeLoginInline() {
+    var body = $("loginBody");
+    if (!loginInline || !body) { if (loginTr.parentNode) loginTr.parentNode.removeChild(loginTr); return; }
+    var row = [].filter.call(body.querySelectorAll("tr[data-lrow]"), function (tr) {
+      return tr.getAttribute("data-lrow") === rowKey(loginInline.id, loginInline.name) || tr.getAttribute("data-lrow") === rowKey("", loginInline.name);
+    })[0];
+    if (!row) { if (loginTr.parentNode) loginTr.parentNode.removeChild(loginTr); return; }
+    loginTr.firstChild.colSpan = 8;
+    var wrapEl = body.closest(".table-wrap");
+    if (wrapEl) loginBox.style.width = Math.max(320, wrapEl.clientWidth - 14) + "px";
+    row.parentNode.insertBefore(loginTr, row.nextSibling);
+    renderStatusLog(loginBox, { id: loginInline.id, name: loginInline.name, mode: "changes" });
+    var c = loginBox.querySelector("[data-drill-close]");
+    if (c) { c.removeAttribute("data-drill-close"); c.setAttribute("data-login-inline-close", ""); }
+  }
   function placeInline() {
     if (!inline) { if (inlineTr.parentNode) inlineTr.parentNode.removeChild(inlineTr); return; }
     var row = [].filter.call($("agentBody").querySelectorAll("tr[data-arow]"), function (tr) {
@@ -2898,6 +2919,14 @@
     }
     // Long calls: Listen / Barge in / Stop, and saving the "ring me at" number.
     // Left Avail / Changes numbers in the watch: that agent's status changes today, with times.
+    var lns = ev.target.closest("#loginBody [data-status-log]");
+    if (lns && !lns.closest(".inline-drill")) {
+      ev.preventDefault();
+      var lid2 = lns.getAttribute("data-status-log"), lname2 = lns.getAttribute("data-status-name");
+      loginInline = loginInline && rowKey(loginInline.id, loginInline.name) === rowKey(lid2, lname2) ? null : { id: lid2, name: lname2 };
+      render(); return;
+    }
+    if (ev.target.closest("[data-login-inline-close]")) { ev.preventDefault(); loginInline = null; render(); return; }
     var ins = ev.target.closest("#agentBody [data-status-log]");
     if (ins && !ins.closest(".inline-drill")) { ev.preventDefault(); toggleInline("status", ins.getAttribute("data-status-log"), ins.getAttribute("data-status-name")); return; }
     var inc = ev.target.closest("#agentBody [data-agent-calls]");
