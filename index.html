@@ -51,6 +51,9 @@
   html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; }
   .wrap { max-width: 1700px; margin: 0 auto; padding: 12px 16px 24px; }
   a { color: var(--accent); }
+  tr.inline-drill > td { padding: 4px 0 10px; background: var(--surface-alt); }
+  .inline-box { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin: 0 6px; background: var(--surface); }
+  .inline-box .section-title { font-size: 15px; }
   a.name-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--ink-3); }
   a.name-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
   button { font-family: var(--sans); }
@@ -410,7 +413,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.29</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.30</footer>
     </main>
   </section>
 </div>
@@ -712,13 +715,14 @@
   }
   // Same rules as changeStats(): which events feed "Changes 60m" and "Left Avail 60m".
   function isExit(e) { return e.fb === "AVAILABLE" && e.tb !== "ONCALL" && e.tb !== "AVAILABLE"; }
-  function renderStatusLog(box) {
+  function renderStatusLog(box, log) {
+    log = log || drillLog;
     box.setAttribute("data-kind", "statuslog");
-    var h = hist.agents[drillLog.id] || {};
+    var h = hist.agents[log.id] || {};
     // Fall back to a name match (e.g. a logged-out entry whose id we only know by name).
-    if (!h.ev) Object.keys(hist.agents).forEach(function (id) { if (normName(hist.agents[id].name) === normName(drillLog.name)) h = hist.agents[id]; });
+    if (!h.ev) Object.keys(hist.agents).forEach(function (id) { if (normName(hist.agents[id].name) === normName(log.name)) h = hist.agents[id]; });
     var ev = (h.ev || []).slice().sort(function (x, y) { return y.t - x.t; });
-    var cutoff = Date.now() - 3600 * 1000, exitsMode = drillLog.mode === "exits";
+    var cutoff = Date.now() - 3600 * 1000, exitsMode = log.mode === "exits";
     var nChanges = 0, nExits = 0;
     ev.forEach(function (x) { if (x.t >= cutoff) { nChanges += x.hidden ? 2 : 1; if (isExit(x)) nExits++; } });
     // The newest change normally IS the current status; show it live instead of a separate "now" row.
@@ -736,7 +740,7 @@
     }).join("");
     var what = exitsMode ? nExits + " time" + (nExits === 1 ? "" : "s") + " left Available in the last 60 min (highlighted)"
       : nChanges + " change" + (nChanges === 1 ? "" : "s") + " in the last 60 min (highlighted)";
-    box.innerHTML = "<div class='section-title'>Status changes (last 10 hours): " + esc(drillLog.name) + " <span class='sub'>" + what + " · " + ev.length + " in all · " + esc(trackedLabel()) + "</span>" +
+    box.innerHTML = "<div class='section-title'>Status changes (last 10 hours): " + esc(log.name) + " <span class='sub'>" + what + " · " + ev.length + " in all · " + esc(trackedLabel()) + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
       "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th>Counted in</th><th class='num'>Lasted</th></tr></thead><tbody>" +
       (nowRow + rows || "<tr><td colspan='5' class='muted'>No status changes recorded in the last 10 hours.</td></tr>") + "</tbody></table></div>" +
@@ -2231,8 +2235,8 @@
   function renderCallDrill(box, kind, force) {
     // Don't rebuild (and cut off a recording mid-play) unless the call list changed.
     if (!force && box.getAttribute("data-kind") === kind &&
-        (callDrillRendered.at === abandons.at || [].some.call(box.querySelectorAll("audio"), function (a) { return !a.paused; }))) return;
-    callDrillRendered.at = abandons.at; box.setAttribute("data-kind", kind);
+        (box.getAttribute("data-at") === abandons.at + ":" + rsLegsVer || [].some.call(box.querySelectorAll("audio"), function (a) { return !a.paused; }))) return;
+    callDrillRendered.at = abandons.at; box.setAttribute("data-kind", kind); box.setAttribute("data-at", abandons.at + ":" + rsLegsVer);
     var isShort = kind === "shortcalls", isAgent = kind.indexOf("agentcalls:") === 0;
     var agentName = isAgent ? kind.slice("agentcalls:".length) : "";
     function agentsOf(r) { var l = transferLegs(r); return l ? l.map(function (x) { return normName(x.name); }) : [normName(firstLast(r.connected_name))]; }
@@ -2613,6 +2617,34 @@
   }
 
   // Agent name opens their status changes today (same list as the watch's 60m numbers).
+  // Status changes and calls opened from the Agents table show right under that agent (Fred, 2026-10-15).
+  // One persistent row is moved into place after every table redraw (the table redraws each second),
+  // so a recording playing inside it is not cut off.
+  var inline = null;   // { kind: "status" | "calls", id, name, fresh }
+  var inlineTr = document.createElement("tr"); inlineTr.className = "inline-drill";
+  inlineTr.innerHTML = "<td><div class='inline-box'></div></td>";
+  var inlineBox = inlineTr.querySelector(".inline-box");
+  function rowKey(id, name) { return id ? "id:" + id : "name:" + normName(name); }
+  function placeInline() {
+    if (!inline) { if (inlineTr.parentNode) inlineTr.parentNode.removeChild(inlineTr); return; }
+    var row = [].filter.call($("agentBody").querySelectorAll("tr[data-arow]"), function (tr) {
+      return tr.getAttribute("data-arow") === rowKey(inline.id, inline.name) || tr.getAttribute("data-arow") === rowKey("", inline.name);
+    })[0];
+    if (!row) { if (inlineTr.parentNode) inlineTr.parentNode.removeChild(inlineTr); return; }   // filtered out of view: keep it, show again when back
+    inlineTr.firstChild.colSpan = COLS.length;
+    row.parentNode.insertBefore(inlineTr, row.nextSibling);
+    if (inline.kind === "status") renderStatusLog(inlineBox, { id: inline.id, name: inline.name, mode: "changes" });
+    else { renderCallDrill(inlineBox, "agentcalls:" + inline.name, inline.fresh); inline.fresh = false; }
+    var c = inlineBox.querySelector("[data-drill-close]");
+    if (c) { c.removeAttribute("data-drill-close"); c.setAttribute("data-inline-close", ""); }
+  }
+  function toggleInline(kind, id, name) {
+    var same = inline && inline.kind === kind && rowKey(inline.id, inline.name) === rowKey(id, name);
+    inline = same ? null : { kind: kind, id: id, name: name, fresh: true };
+    if (inline) inlineBox.removeAttribute("data-kind");
+    if (inline && kind === "calls") loadAbandons(true);
+    render();
+  }
   function nameLink(id, name) {
     return "<a href='#' class='name-link' data-status-log='" + esc(id) + "' data-status-name='" + esc(name) + "' data-status-mode='changes' title='Show this agent&#39;s status changes today'>" + esc(name) + "</a>";
   }
@@ -2655,7 +2687,7 @@
     $("agentBody").innerHTML = rows.map(function (r) {
       if (r.off) {
         var o = r.off;
-        return "<tr class='off'>" +
+        return "<tr class='off' data-arow='" + esc(rowKey(o.id, r.name)) + "'>" +
           "<td>" + nameLink(o.id || "", r.name) + "</td>" +
           "<td><span class='st st-off'>Logged out</span></td>" +
           "<td class='num'>" + (o.lastSeen ? "since " + fmtClock(o.lastSeen).replace(" PT", "") : "–") + "</td>" +
@@ -2670,7 +2702,7 @@
           "</tr>";
       }
       var a = r.a, cls = (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "");
-      return "<tr class='" + cls + "'>" +
+      return "<tr class='" + cls + "' data-arow='" + esc(rowKey(String(a.agentId), r.name)) + "'>" +
         "<td>" + nameLink(String(a.agentId), r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + ((isSupervisor(a) || treatedAsSupervisor(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td>" + stateHtml(a) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
@@ -2684,6 +2716,7 @@
         "<td class='num'>" + count(r.loginBase) + "</td>" +
         "</tr>";
     }).join("") || "<tr><td colspan='" + COLS.length + "' class='muted'>No agents match.</td></tr>";
+    placeInline();
     $("agentSub").textContent = rows.length + " shown · " + agents.length + " logged in" + (off.length ? " · " + off.length + " logged out (were on today)" : "");
   }
 
@@ -2725,6 +2758,16 @@
     }
     // Long calls: Listen / Barge in / Stop, and saving the "ring me at" number.
     // Left Avail / Changes numbers in the watch: that agent's status changes today, with times.
+    var ins = ev.target.closest("#agentBody [data-status-log]");
+    if (ins && !ins.closest(".inline-drill")) { ev.preventDefault(); toggleInline("status", ins.getAttribute("data-status-log"), ins.getAttribute("data-status-name")); return; }
+    var inc = ev.target.closest("#agentBody [data-agent-calls]");
+    if (inc && !inc.closest(".inline-drill")) {
+      ev.preventDefault();
+      var crow = inc.closest("tr[data-arow]"), ckey = crow ? crow.getAttribute("data-arow") : "";
+      toggleInline("calls", ckey.indexOf("id:") === 0 ? ckey.slice(3) : "", inc.getAttribute("data-agent-calls"));
+      return;
+    }
+    if (ev.target.closest("[data-inline-close]")) { ev.preventDefault(); inline = null; render(); return; }
     var sl = ev.target.closest("[data-status-log]");
     if (sl) { ev.preventDefault(); drillLog = { id: sl.getAttribute("data-status-log"), name: sl.getAttribute("data-status-name"), mode: sl.getAttribute("data-status-mode") || "changes" }; drill = "statuslog"; render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     // Top modules tile: that module's tickets today ("" = all tickets); click again to close.
