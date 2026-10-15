@@ -416,7 +416,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.32</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.33</footer>
     </main>
   </section>
 </div>
@@ -1894,8 +1894,11 @@
         var gates = await api("gateGroups/" + groups[i].gateGroupId + "/gates");
         for (var j = 0; j < gates.length; j++) {
           var as = await api("gateGroups/" + groups[i].gateGroupId + "/gates/" + gates[j].gateId + "/assignedAgents");
-          var m = { ids: {}, names: {} };
-          (as || []).forEach(function (x) { m.ids[String(x.agentId)] = 1; m.names[normName((x.firstName || "") + " " + (x.lastName || ""))] = 1; });
+          var m = { ids: {}, names: {}, ranks: {} };
+          (as || []).forEach(function (x) {
+            m.ids[String(x.agentId)] = 1; m.names[normName((x.firstName || "") + " " + (x.lastName || ""))] = 1;
+            m.ranks[String(x.agentId)] = x.agentGateAccess && x.agentGateAccess.agentRank != null ? +x.agentGateAccess.agentRank : 0;
+          });
           out[queueLabel(gates[j].gateName)] = m;
         }
       }
@@ -2667,8 +2670,31 @@
   function nameLink(id, name) {
     return "<a href='#' class='name-link' data-status-log='" + esc(id) + "' data-status-name='" + esc(name) + "' data-status-mode='changes' title='Show this agent&#39;s status changes today'>" + esc(name) + "</a>";
   }
+  // Next in line for the filtered queue (Fred, 2026-10-15). RingCX offers a queue's call to the agents
+  // in that queue's available list (agents logged into that queue and Available): highest rank first, then
+  // whoever has been Available longest without a break (2026-10-14 call analysis: 97% of Core offers).
+  function queueLineup() {
+    if (!queueFilter) return null;
+    var q = data.queues.filter(function (x) { return x.gateName === queueFilter; })[0];
+    if (!q) return null;
+    var m = queueMembers && queueMembers[queueFilter], live = {};
+    data.agents.forEach(function (a) { live[String(a.agentId)] = a; });
+    var list = String(q.availableAgentsList || "").split(",").filter(function (id) { return id && live[id]; }).map(function (id) {
+      return { id: id, rank: m && m.ranks && m.ranks[id] != null ? m.ranks[id] : 0, wait: live[id].stateTime || 0 };
+    }).sort(function (x, y) { return (y.rank - x.rank) || (y.wait - x.wait); });
+    var pos = {}; list.forEach(function (x, i) { pos[x.id] = i + 1; });
+    return { pos: pos, queue: q.gateName, ranked: !!(m && m.ranks) };
+  }
+  function lineupChip(a, lu) {
+    if (!lu) return "";
+    var n = lu.pos[String(a.agentId)];
+    if (n === 1) return " <span class='chip ok' title='RingCX offers the next " + esc(lu.queue) + " call to this agent'>Next in line</span>";
+    if (n) return " <span class='chip info' title='Position for the next " + esc(lu.queue) + " call (rank first, then longest Available)'>#" + n + " in line</span>";
+    if (isAvailable(a)) return " <span class='chip info' title='Available, but not in " + esc(lu.queue) + "'s available list (not logged into that queue in RingCX), so it won't send them its calls'>Not taking " + esc(lu.queue) + "</span>";
+    return "";
+  }
   function renderAgents(e, agents) {
-    var me = myAgentId();
+    var me = myAgentId(), lineup = queueLineup();
     var off = loggedOutAgents();
     var rows = agents.map(function (a) {
       var d = dayStats(a), w = watchFor(a, e);
@@ -2694,6 +2720,10 @@
     });
     rows.sort(function (x, y) {
       var v;
+      if (lineup) {   // queue filter on: next-in-line order first, everyone else below in the normal order
+        var px = x.a ? lineup.pos[String(x.a.agentId)] : 0, py = y.a ? lineup.pos[String(y.a.agentId)] : 0;
+        if (px || py) return (px || 9999) - (py || 9999);
+      }
       if (sortKey === "state") v = (STATE_ORDER[x.off ? "st-off" : stateColor(x.a)] - STATE_ORDER[y.off ? "st-off" : stateColor(y.a)]) || (x.off ? x.name.localeCompare(y.name) : y.stateTime - x.stateTime);
       else if (sortKey === "name" || sortKey === "queue") v = String(x[sortKey]).localeCompare(String(y[sortKey]));
       else v = x[sortKey] - y[sortKey];
@@ -2723,7 +2753,7 @@
       var a = r.a, cls = (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "");
       return "<tr class='" + cls + "' data-arow='" + esc(rowKey(String(a.agentId), r.name)) + "'>" +
         "<td>" + nameLink(String(a.agentId), r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + ((isSupervisor(a) || treatedAsSupervisor(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
-        "<td>" + stateHtml(a) + "</td>" +
+        "<td>" + stateHtml(a) + lineupChip(a, lineup) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
         "<td>" + esc(r.queue) + "</td>" +
         "<td class='num'>" + (r.calls ? "<a href='#' data-agent-calls='" + esc(r.name) + "' title='Show this agent&#39;s calls today, with recordings'>" + r.calls + "</a>" : "0") + "</td>" +
