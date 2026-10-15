@@ -422,7 +422,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.46</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.47</footer>
     </main>
   </section>
 </div>
@@ -811,6 +811,14 @@
     var cutoff = Date.now() - 3600 * 1000, exitsMode = log.mode === "exits";
     var nChanges = 0, nExits = 0;
     ev.forEach(function (x) { if (x.t >= cutoff) { nChanges += x.hidden ? 2 : 1; if (isExit(x)) nExits++; } });
+    // Logouts as their own rows (Fred, 2026-10-15: Armando showed 1:17 in ePayment Support when he had logged out
+    // at 10:01 for lunch). They don't count as status changes.
+    var nReal = ev.length;
+    (h.gaps || []).forEach(function (g) {
+      var before = ev.filter(function (x) { return x.t <= g.from; })[0];
+      ev.push({ t: g.from, gap: true, back: g.to, fl: before ? statusName(before.tl, before.tb) : "…", tl: "Logged out" });
+    });
+    ev.sort(function (x, y) { return y.t - x.t; });
     // The newest change normally IS the current status; show it live instead of a separate "now" row.
     var newestIsNow = h.label && ev.length && Math.abs(h.start - ev[0].t) < 60000;
     var nowMs = Date.now();
@@ -820,6 +828,10 @@
       var lasted;
       // The window this status covered: until the next change (or now / the current status's start).
       var live = i === 0 && (newestIsNow || !h.label), until = i === 0 ? (live ? nowMs : h.start) : ev[i - 1].t;
+      if (x.gap) {
+        return "<tr class='muted'><td>" + fmtClock(x.t) + "</td><td>" + esc(x.fl) + "</td><td><i>Logged out</i></td><td></td><td class='num' title='Back at " + fmtClock(x.back) + "'>" + fmtDur(Math.max(0, (x.back - x.t) / 1000)) + "</td><td>" + actCell(log.name, x.t, x.back, false) + "</td></tr>" +
+          actRow(log.name, x.t, x.back, false);
+      }
       if (x.hidden) lasted = "brief";
       else if (i === 0 && newestIsNow) lasted = count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>";
       else lasted = fmtDur(Math.max(0, ((i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t) - x.t) / 1000));
@@ -831,11 +843,11 @@
     }).join("");
     var what = exitsMode ? nExits + " time" + (nExits === 1 ? "" : "s") + " left Available in the last 60 min (highlighted)"
       : nChanges + " change" + (nChanges === 1 ? "" : "s") + " in the last 60 min (highlighted)";
-    box.innerHTML = "<div class='section-title'>Status changes (last 10 hours): " + esc(log.name) + " <span class='sub'>" + what + " · " + ev.length + " in all · " + esc(trackedLabel()) + "</span>" +
+    box.innerHTML = "<div class='section-title'>Status changes (last 10 hours): " + esc(log.name) + " <span class='sub'>" + what + " · " + nReal + " in all · " + esc(trackedLabel()) + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
       "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th>Counted in</th><th class='num'>Lasted</th><th>Zendesk / Jira</th></tr></thead><tbody>" +
       (nowRow + rows || "<tr><td colspan='6' class='muted'>No status changes recorded in the last 10 hours.</td></tr>") + "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>Highlighted rows are the ones behind the number you clicked. \"Changes\" counts every status change in the last 60 minutes (a brief change between refreshes counts twice: out and back). \"Left Avail\" counts moves from Available to anything except a call. \"Lasted\" is how long they stayed in the status they switched to. Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
+      "<div class='tiny muted' style='margin-top:6px'>Highlighted rows are the ones behind the number you clicked. \"Changes\" counts every status change in the last 60 minutes (a brief change between refreshes counts twice: out and back). \"Left Avail\" counts moves from Available to anything except a call. \"Lasted\" is how long they stayed in the status they switched to. Grey \"Logged out\" rows are logouts of a few minutes or more (not counted as changes; hover the time to see when they came back). Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
   }
 
   // ---------------- Snapshot: download the main numbers as a time-stamped CSV ----------------
