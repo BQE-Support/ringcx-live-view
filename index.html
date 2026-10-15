@@ -316,7 +316,7 @@
           <table>
             <thead><tr>
               <th>Agent</th><th>Status now</th><th>Why flagged</th>
-              <th class="num">RNA</th><th class="num" title="Times they left Available for a status that doesn't take calls, in the last 60 minutes">Left Avail 60m</th><th class="num" title="Status changes in the last 60 minutes">Changes 60m</th><th class="num" title="Time in a status that doesn't take calls">Not taking</th><th>Review</th>
+              <th class="num">RNA</th><th class="num" title="Times they left Available for a status that doesn't take calls, in the last 60 minutes">Left Avail 60m</th><th class="num" title="Status changes in the last 60 minutes, not counting taking calls (Available, Engaged and Transition back and forth)">Changes 60m</th><th class="num" title="Time in a status that doesn't take calls">Not taking</th><th>Review</th>
             </tr></thead>
             <tbody id="watchBody"></tbody>
           </table>
@@ -810,7 +810,7 @@
     var ev = (h.ev || []).slice().sort(function (x, y) { return y.t - x.t; });
     var cutoff = Date.now() - 3600 * 1000, exitsMode = log.mode === "exits";
     var nChanges = 0, nExits = 0;
-    ev.forEach(function (x) { if (x.t >= cutoff) { nChanges += x.hidden ? 2 : 1; if (isExit(x)) nExits++; } });
+    ev.forEach(function (x) { if (x.t >= cutoff) { if (!isCallCycle(x)) nChanges += x.hidden ? 2 : 1; if (isExit(x)) nExits++; } });
     // Logouts as their own rows (Fred, 2026-10-15: Armando showed 1:17 in ePayment Support when he had logged out
     // at 10:01 for lunch). They don't count as status changes.
     var nReal = ev.length;
@@ -835,7 +835,7 @@
       if (x.hidden) lasted = "brief";
       else if (i === 0 && newestIsNow) lasted = count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>";
       else lasted = fmtDur(Math.max(0, ((i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t) - x.t) / 1000));
-      var recent = x.t >= cutoff, exit = recent && isExit(x);
+      var recent = x.t >= cutoff && !isCallCycle(x), exit = x.t >= cutoff && isExit(x);
       var tags = (recent ? "<span class='chip info'>Changes" + (x.hidden ? " ×2" : "") + "</span>" : "") + (exit ? " <span class='chip warn'>Left Avail</span>" : "");
       var hit = exitsMode ? exit : recent;
       return "<tr class='" + (hit ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + esc(statusName(x.fl, x.fb)) + "</td><td>" + (i === 0 && newestIsNow ? "<b>" + esc(statusName(x.tl, x.tb)) + "</b>" : esc(statusName(x.tl, x.tb))) + "</td><td>" + tags + "</td><td class='num'>" + lasted + "</td><td>" + (x.hidden ? "" : actCell(log.name, x.t, until, live)) + "</td></tr>" +
@@ -847,7 +847,7 @@
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
       "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th>Counted in</th><th class='num'>Lasted</th><th>Zendesk / Jira</th></tr></thead><tbody>" +
       (nowRow + rows || "<tr><td colspan='6' class='muted'>No status changes recorded in the last 10 hours.</td></tr>") + "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>Highlighted rows are the ones behind the number you clicked. \"Changes\" counts every status change in the last 60 minutes (a brief change between refreshes counts twice: out and back). \"Left Avail\" counts moves from Available to anything except a call. \"Lasted\" is how long they stayed in the status they switched to. Grey \"Logged out\" rows are logouts of a few minutes or more (not counted as changes; hover the time to see when they came back). Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
+      "<div class='tiny muted' style='margin-top:6px'>Highlighted rows are the ones behind the number you clicked. \"Changes\" counts status changes in the last 60 minutes (a brief change between refreshes counts twice: out and back). Taking calls (Available, Engaged and Transition back and forth) is never counted. \"Left Avail\" counts moves from Available to anything except a call. \"Lasted\" is how long they stayed in the status they switched to. Grey \"Logged out\" rows are logouts of a few minutes or more (not counted as changes; hover the time to see when they came back). Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
   }
 
   // ---------------- Snapshot: download the main numbers as a time-stamped CSV ----------------
@@ -1503,13 +1503,18 @@
     if (!noSave) save(HIST_KEY, hist);
   }
 
+  // Taking calls: Available -> Engaged -> Transition -> Available. That's the work we want, so it never counts as
+  // a status change (Fred, 2026-10-15). Engaged and Transition are both recorded as "ONCALL".
+  function isCallCycle(e) {
+    return !e.hidden && (e.fb === "AVAILABLE" || e.fb === "ONCALL") && (e.tb === "AVAILABLE" || e.tb === "ONCALL");
+  }
   function changeStats(a) {
     var h = hist.agents[String(a.agentId)];
     var cutoff = Date.now() - 3600 * 1000;
     var ev = h ? h.ev.filter(function (e) { return e.t >= cutoff; }) : [];
     var changes = 0, exits = 0;
     ev.forEach(function (e) {
-      changes += e.hidden ? 2 : 1;
+      if (!isCallCycle(e)) changes += e.hidden ? 2 : 1;
       // Leaving Available for something that doesn't take calls (a call is fine).
       if (e.fb === "AVAILABLE" && e.tb !== "ONCALL" && e.tb !== "AVAILABLE") exits++;
     });
