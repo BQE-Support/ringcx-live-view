@@ -416,7 +416,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.39</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.40</footer>
     </main>
   </section>
 </div>
@@ -1036,6 +1036,16 @@
     if (o !== null) return o;
     return !!isSup || !!(supNames && supNames[k]) || CONFIG.TREAT_AS_SUPERVISOR.some(function (x) { return normName(x) === k; });
   }
+  function isL2Name(name) { var k = normName(name); return (CONFIG.L2_LOGINS_MANAGERS_ONLY || []).some(function (x) { return normName(x) === k; }); }
+  function hideLoginOf(name) { return !isManagerViewer() && isL2Name(name); }
+  // Remove any L2 login traces this browser kept earlier (sessions, day totals, logout gaps).
+  function purgeL2Logins() {
+    if (isManagerViewer()) return;
+    Object.keys(hist.agents || {}).forEach(function (id) {
+      var h = hist.agents[id];
+      if (h && h.name && isL2Name(h.name)) { delete h.sessions; delete h.dayLogin; delete h.curSession; delete h.gaps; }
+    });
+  }
   function isManagerViewer() { return (CONFIG.MANAGER_IDS || []).indexOf(String(myAgentId() || "")) >= 0; }
   function isLoginExcluded(name) {
     var k = normName(name), same = function (x) { return normName(x) === k; };
@@ -1226,7 +1236,8 @@
     return txt ? JSON.parse(txt) : [];
   }
   async function api(path, body) {
-    if (viaRelay()) return relayApi(path, body);
+    // Non-managers always read live agent data through the relay, which removes L2s' login times.
+    if (viaRelay() || (path === "realTimeData/agent" && !isManagerViewer())) return relayApi(path, body);
     if (tokenNearExpiry()) await refreshToken();
     var url = CONFIG.RCX_SERVER + "/voice/api/v1/admin/accounts/" + CONFIG.ACCOUNT_ID + "/" + path;
     function go() {
@@ -1305,6 +1316,7 @@
   if (!hist || hist.day !== todayKey()) hist = { day: todayKey(), since: Date.now(), agents: {} };
 
   function observe(agents, fetchedAt, noSave) {
+    purgeL2Logins();
     if (hist.day !== todayKey()) hist = { day: todayKey(), since: fetchedAt, agents: {} };
     var keepAfter = fetchedAt - 10 * 3600 * 1000;
     // Was this page watching without a break? (Closed/hidden pages leave gaps that aren't real logouts.)
@@ -1343,6 +1355,7 @@
       h.lastSeen = fetchedAt;
       // Login time is per login session in RingCX (summed); RNA is a running day total (max is taken).
       // Each session keeps its latest values so the day figures survive a logout/login.
+      if (!hideLoginOf(fullName(a))) {   // L2 login sessions are not kept on non-managers' pages (Fred, 2026-10-15)
       var sk = String(a.loginDts || "session");
       h.sessions = h.sessions || {};
       // before = RingCX time in OTHER sessions when this one was first seen. Sessions run one after another,
@@ -1355,6 +1368,7 @@
       // loggedInDuration is only the current session. A gap between them = sessions this page never saw.
       h.dayLogin = Math.max(h.dayLogin || 0, a.loginTime || 0);
       h.curSession = a.loggedInDuration || 0;
+      }
       h.name = fullName(a); h.sup = isSupervisor(a) || treatedAsSupervisor(a);
       // Which queue each agent was on for each call (call lists: the queue before a transfer).
       if (a.callUii && +a.gateId > 0) { hist.callGates = hist.callGates || {}; (hist.callGates[a.callUii] = hist.callGates[a.callUii] || {})[id] = String(a.gateId); }
@@ -2075,7 +2089,7 @@
       });
       abandons.all = parseCsv(csv).filter(function (r) { return CONFIG.HIDDEN_QUEUES.indexOf(r.source_name) < 0; })
         .map(function (r) { r.source_name = queueLabel(r.source_name); return r; });
-      abandons.rows = abandons.all.filter(function (r) { return r.call_result === "ABANDON" && r.source_type === "ACD-INBOUND"; })
+      abandons.rows = abandons.all.filter(function (r) { return (r.call_result === "ABANDON" && r.source_type === "ACD-INBOUND") || hungUpRinging(r); })
         .sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
       abandons.at = Date.now(); abandons.err = null;
     } catch (e) {
@@ -2107,7 +2121,7 @@
         if (ptMin !== null && ptMin >= 0 && (c.first === null || ptMin < c.first)) c.first = ptMin;
       }
       (abandons.all || []).forEach(function (r) {
-        if (r.source_type !== "ACD-INBOUND" || !r.connected_name || done[r.UII]) return;
+        if (r.source_type !== "ACD-INBOUND" || !r.connected_name || done[r.UII] || hungUpRinging(r)) return;
         done[r.UII] = 1;
         var legs = transferLegs(r);
         if (legs) { legs.forEach(function (l) { credit(lastFirst(l.name), r.UII, l.dur, ptMinutes(Date.parse(l.start))); }); return; }
@@ -2220,7 +2234,7 @@
 
   function renderAbandonDrill(box) {
     var rows = (abandons.rows || []).filter(function (r) { return !queueFilter || r.source_name === queueFilter; });
-    var waits = rows.map(function (r) { return +r.queue_time || 0; });
+    var waits = rows.map(abandonWaitSec);
     var avg = waits.length ? waits.reduce(function (s, x) { return s + x; }, 0) / waits.length : 0;
     var long = waits.filter(function (w) { return w >= CONFIG.WAIT_FLASH_SEC; }).length;
     var sub = abandons.rows ? rows.length + " call" + (rows.length === 1 ? "" : "s") + (rows.length ? " · avg wait " + fmtDur(avg) + " · " + long + " waited " + fmtShort(CONFIG.WAIT_FLASH_SEC) + "+" : "") : "";
@@ -2230,8 +2244,9 @@
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
       "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th class='num'>Waited before hanging up</th><th>Caller</th><th>Note</th></tr></thead><tbody>" +
       (rows.map(function (r) {
-        var w = +r.queue_time || 0;
-        var note = w <= 5 ? "<span class='chip info'>≤5s: likely misdial or transfer leg</span>" : (w >= CONFIG.WAIT_FLASH_SEC ? "<span class='chip crit'>Waited " + fmtShort(CONFIG.WAIT_FLASH_SEC) + "+</span>" : "");
+        var w = abandonWaitSec(r), ringing = hungUpRinging(r);
+        var note = (ringing ? "<span class='chip warn'>Hung up while ringing " + esc(firstLast(r.connected_name)) + " (" + fmtDur(Math.max(0, w - (+r.queue_time || 0))) + ")</span> " : "") +
+          (!ringing && w <= 5 ? "<span class='chip info'>≤5s: likely misdial or transfer leg</span>" : (w >= CONFIG.WAIT_FLASH_SEC ? "<span class='chip crit'>Waited " + fmtShort(CONFIG.WAIT_FLASH_SEC) + "+</span>" : ""));
         return "<tr class='" + (w >= CONFIG.WAIT_FLASH_SEC ? "flag-crit" : "") + "'>" +
           "<td>" + esc(etToPtClock(r.call_start_dts)) + "</td>" +
           "<td>" + esc(r.source_name) + "</td>" +
@@ -2241,8 +2256,18 @@
           "</tr>";
       }).join("") || "<tr><td colspan='5' class='muted'>" + (abandons.rows ? "No abandoned calls in the call detail report yet today." : "") + "</td></tr>") +
       "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>From RingCX's call detail report, since midnight Pacific. RingCX's live Abandoned counter can also include very short transfer legs that this report doesn't list, so the two numbers can differ.</div>";
+      "<div class='tiny muted' style='margin-top:6px'>From RingCX's call detail report, since midnight Pacific. Includes callers who hung up while an agent's phone was ringing (the report marks those CONNECTED with 0s talk and no recording), matching RingCX's live Abandoned counter. Waited = time from the start of the call to the hang-up.</div>";
   }
+  // A queue call the report marks CONNECTED but that nobody spoke on: an agent was rung, the caller hung up
+  // first, 0s talk and no recording. RingCX's live Abandoned counter counts these (Fred, 2026-10-15: list them
+  // as abandoned, not answered). The recording check keeps handed-off calls out (0s for the first agent, but
+  // recorded): since 2026-06-11, 165 of 382 zero-talk caller hang-ups had no recording, 209 of the 225 over 2 min had one.
+  function hungUpRinging(r) {
+    return r.source_type === "ACD-INBOUND" && r.call_result === "CONNECTED" && !(+r.connected_duration) &&
+      r.call_term_party === "CALLER" && !r.recording_url;
+  }
+  // Abandons: queue wait; hung up while ringing: the whole call (queue wait + ring time).
+  function abandonWaitSec(r) { return hungUpRinging(r) ? (+r.call_duration || 0) : (+r.queue_time || 0); }
 
   // ---------------- short calls (answered, under SHORT_CALL_SEC) with recordings ----------------
   // A real question takes about a minute just to log the ticket, so answered queue calls shorter
@@ -2259,7 +2284,7 @@
   function answeredCalls() {
     var seen = {};
     return (abandons.all || []).filter(function (r) {
-      if (r.source_type !== "ACD-INBOUND" || !r.connected_name || seen[r.UII]) return false;
+      if (r.source_type !== "ACD-INBOUND" || !r.connected_name || seen[r.UII] || hungUpRinging(r)) return false;
       if (queueFilter && r.source_name !== queueFilter) return false;   // queue filter (click a queue card)
       seen[r.UII] = 1; return true;
     }).sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
