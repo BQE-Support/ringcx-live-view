@@ -410,7 +410,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.27</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.28</footer>
     </main>
   </section>
 </div>
@@ -1216,7 +1216,9 @@
     }
     var r = await go();
     if (r.status === 401) { await refreshToken(); r = await go(); }
-    if (r.status === 403) { session.relay = true; return relayApi(path, body); }
+    // No RingCX admin user: RingCX answers 401 (not 403) even with a freshly refreshed sign-in. A truly
+    // expired sign-in fails refreshToken() above instead. Either way the relay re-checks the sign-in.
+    if (r.status === 403 || r.status === 401) { session.relay = true; return relayApi(path, body); }
     if (!r.ok) { var e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
     var txt = await r.text();
     if (body) return txt;
@@ -2299,7 +2301,7 @@
       var viaR = function () { return fetch(CONFIG.SUPABASE_URL + "/functions/v1/relay", { method: "POST", headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess, "Content-Type": "application/json" }, body: JSON.stringify({ recording: url }) }); };
       var r = viaRelay() ? await viaR() : await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } });
       if (r.status === 401 && !viaRelay()) { await refreshToken(); r = await fetch(url, { headers: { Authorization: "Bearer " + session.rcxAccess } }); }
-      if (r.status === 403 && !viaRelay()) { session.relay = true; r = await viaR(); }
+      if ((r.status === 403 || r.status === 401) && !viaRelay()) { session.relay = true; r = await viaR(); }
       if (!r.ok) throw new Error("HTTP " + r.status);
       recordings[uii] = URL.createObjectURL(await r.blob());
       var cell = btn.closest("td");
@@ -2412,7 +2414,10 @@
 
   function renderQueues(e) {
     var showClosed = $("showClosed").checked;
-    var qs = data.queues.slice().sort(function (a, b) { return (b.inQueue - a.inQueue) || (b.presented - a.presented) || String(a.gateName).localeCompare(b.gateName); });
+    // Fixed order (Fred, 2026-10-15); anything else follows alphabetically.
+    var QUEUE_ORDER = ["CORE", "Payroll Specialist", "BillQuick", "ArchiOffice", "Unrecorded Line"];
+    var qPos = function (q) { var i = QUEUE_ORDER.map(function (x) { return x.toLowerCase(); }).indexOf(String(q.gateName).toLowerCase()); return i < 0 ? 99 : i; };
+    var qs = data.queues.slice().sort(function (a, b) { return (qPos(a) - qPos(b)) || String(a.gateName).localeCompare(b.gateName); });
     var hidden = 0;
     var html = qs.map(function (q) {
       var open = queueOpen(q);
