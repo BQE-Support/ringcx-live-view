@@ -410,7 +410,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.24</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.25</footer>
     </main>
   </section>
 </div>
@@ -1671,6 +1671,13 @@
     // Long calls goes at the very end, after Short calls (Fred).
     var lcIdx = tiles.map(function (t) { return t.filter; }).indexOf("longcalls");
     if (lcIdx >= 0) tiles.push(tiles.splice(lcIdx, 1)[0]);
+    // Total talk, then First call resolution, sit right before Abandoned (Fred).
+    ["Total talk", "First call resolution"].forEach(function (lbl) {
+      var i = tiles.map(function (t) { return t.label; }).indexOf(lbl);
+      if (i < 0) return;
+      var t = tiles.splice(i, 1)[0];
+      tiles.splice(tiles.map(function (x) { return x.label; }).indexOf("Abandoned"), 0, t);
+    });
     $("kpiGrid").innerHTML = tiles.map(function (t) {
       var active = t.filter && t.filter === drill;
       if (t.tickets) active = drill === "tickets" && drillModule === t.tickets;
