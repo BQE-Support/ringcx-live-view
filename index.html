@@ -344,7 +344,7 @@
       </div>
 
       <details class="panel collapsible" id="esPanel" open>
-        <summary class="section-title">ES tickets waiting on L1 <span class="sub" id="esSub"></span></summary>
+        <summary class="section-title">ES Tickets waiting on Support Team <span class="sub" id="esSub"></span></summary>
         <div id="esBody" class="tiny muted">Loading…</div>
       </details>
 
@@ -416,7 +416,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.33</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.34/footer>
     </main>
   </section>
 </div>
@@ -1624,7 +1624,7 @@
     // ES tickets waiting on L1 (Fred): one flag, yellow past ES_WARN_HOURS, red if any past ES_CRIT_HOURS.
     var esw = esWaiting();
     if (esw.over) items.push({ lvl: esw.crit ? "crit" : "warn", score: esw.crit ? 700 : 350, link: "#esPanel",
-      html: "<b>ES tickets awaiting input</b>: " + esw.over + " waiting on L1 over " + ES_WARN_HOURS + "h" + (esw.crit ? " (" + esw.crit + " over " + ES_CRIT_HOURS + "h)" : "") });
+      html: "<b>ES tickets awaiting input</b>: " + esw.over + " waiting on Support over " + ES_WARN_HOURS + "h" + (esw.crit ? " (" + esw.crit + " over " + ES_CRIT_HOURS + "h)" : "") });
     items.sort(function (x, y) { return y.score - x.score; });
     $("alertList").innerHTML = items.length
       ? items.map(function (i) {
