@@ -410,7 +410,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.28</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.29</footer>
     </main>
   </section>
 </div>
@@ -1321,8 +1321,8 @@
         if (h.base === "AVAILABLE") h.availSec = (h.availSec || 0) + gap;   // Agents table "Avail today"
       }
       h.lastSeen = fetchedAt;
-      // Login time and RNA are per login session in RingCX; keep each session's latest values so
-      // the day total survives a logout/login.
+      // Login time is per login session in RingCX (summed); RNA is a running day total (max is taken).
+      // Each session keeps its latest values so the day figures survive a logout/login.
       var sk = String(a.loginDts || "session");
       h.sessions = h.sessions || {};
       // before = RingCX time in OTHER sessions when this one was first seen. Sessions run one after another,
@@ -2015,7 +2015,7 @@
   function lastFirst(n) { var p = String(n || "").trim().split(" "); return p.slice(1).join(" ") + ", " + p[0]; }
   function dayStats(a) {
     var h = hist.agents[String(a.agentId)] || {}, login = 0, rna = 0;
-    Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna += h.sessions[k].rna; });
+    Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna = Math.max(rna, h.sessions[k].rna || 0); });
     login = Math.max(login, a.loggedInDuration || a.loginTime || 0);
     rna = Math.max(rna, a.rna || 0);
     var c = callIndex()[lastFirst(fullName(a))];
@@ -2029,7 +2029,7 @@
     Object.keys(hist.agents).forEach(function (id) {
       var h = hist.agents[id]; if (!h.name) return;
       var login = 0, rna = 0;
-      Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna += h.sessions[k].rna; });
+      Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna = Math.max(rna, h.sessions[k].rna || 0); });
       people[h.name] = { id: id, name: h.name, sup: h.sup, login: login, rna: rna, ready: h.readySec || 0, seen: h.seenSec || 0 };
     });
     // Live session values are fresher than history for anyone logged in right now.
@@ -2600,7 +2600,7 @@
       var h = hist.agents[id]; if (!h.name || !h.sessions || !Object.keys(h.sessions).length) return;
       var k = normName(h.name); if (live[k] || isSupervisorName(h.name, h.sup)) return;
       var login = 0, rna = 0;
-      Object.keys(h.sessions).forEach(function (s) { login += h.sessions[s].login; rna += h.sessions[s].rna; });
+      Object.keys(h.sessions).forEach(function (s) { login += h.sessions[s].login; rna = Math.max(rna, h.sessions[s].rna || 0); });
       out[k] = { id: id, name: h.name, lastSeen: h.lastSeen || null, login: Math.max(login, h.dayLogin || 0), rna: rna, calls: 0, talk: 0, avail: h.availSec || 0 };
     });
     Object.keys(calls).forEach(function (ln) {
