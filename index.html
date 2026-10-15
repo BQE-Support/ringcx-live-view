@@ -416,7 +416,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.35</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.36</footer>
     </main>
   </section>
 </div>
@@ -1634,6 +1634,46 @@
       : "<span class='alert ok'>All clear: no callers waiting, every open queue has someone available, nobody flagged" + (vendor.at && !vendor.groups.some(function (g) { return g.errors; }) ? ", and Gusto API, GlobalPay and BQE CORE are operational" : "") + ".</span>";
   }
 
+  // ---------------- callers waiting (Waiting now tile) ----------------
+  // RingCX's activeCalls/list per queue lists each call with callState QUEUED (waiting) or ACTIVE (with
+  // an agent), when it entered the queue, and the caller. Fetched only while the list is open.
+  var waitingCalls = { rows: null, at: 0, loading: false, err: null };
+  async function loadWaiting() {
+    if (waitingCalls.loading || Date.now() - waitingCalls.at < 8000) return;
+    waitingCalls.loading = true;
+    try {
+      var qs = data.queues.filter(function (q) { return q.inQueue > 0 && q.gateId; });
+      var lists = await Promise.all(qs.map(function (q) {
+        return api("activeCalls/list?product=ACD&productId=" + q.gateId).then(function (l) { return (l || []).map(function (c) { c.queue = q.gateName; return c; }); });
+      }));
+      waitingCalls.rows = [].concat.apply([], lists).filter(function (c) { return c.callState === "QUEUED"; })
+        .sort(function (a, b) { return Date.parse(a.enqueueTime) - Date.parse(b.enqueueTime); });
+      waitingCalls.err = null;
+    } catch (x) { waitingCalls.err = x.message; }
+    finally { waitingCalls.at = Date.now(); waitingCalls.loading = false; if (drill === "waiting") renderDrillOnly(); }
+  }
+  function fmtPhone(n) { var d = String(n || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, ""); return d.length === 10 ? "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6) : (n || ""); }
+  function renderWaitingDrill(box) {
+    box.setAttribute("data-kind", "waiting");
+    var rows = (waitingCalls.rows || []).filter(function (c) { return !queueFilter || c.queue === queueFilter; });
+    var byQ = {}; rows.forEach(function (c) { byQ[c.queue] = (byQ[c.queue] || 0) + 1; });
+    var qLine = Object.keys(byQ).map(function (q) { return esc(q) + " " + byQ[q]; }).join(" · ");
+    box.innerHTML = "<div class='section-title'>Callers waiting now <span class='sub'>" + rows.length + " waiting" + (qLine ? " · " + qLine : "") + " · longest first</span>" +
+      "<span class='sub'>" + (waitingCalls.err ? esc(waitingCalls.err) : (waitingCalls.at ? "as of " + fmtClock(waitingCalls.at) : "loading…")) + "</span>" +
+      "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
+      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Queue</th><th class='num'>Waiting</th><th>Caller</th><th>Joined queue (PT)</th></tr></thead><tbody>" +
+      (rows.map(function (c, i) {
+        var t = Date.parse(c.enqueueTime), sec = (Date.now() - t) / 1000;
+        var lvl = sec >= CONFIG.WAIT_FLASH_SEC ? "crit" : (sec >= 60 ? "warn" : "");
+        return "<tr class='" + (lvl ? "flag-" + lvl : "") + "'><td class='num'>" + (i + 1) + "</td><td>" + esc(c.queue) + "</td>" +
+          "<td class='num'><span class='" + (lvl === "crit" ? "hot" : (lvl ? "warmn" : "")) + "'>" + count(Math.max(0, sec - elapsed())) + "</span></td>" +
+          "<td>" + esc(fmtPhone(c.ani)) + (c.cnam && c.cnam.trim() ? " <span class='tiny muted'>" + esc(c.cnam.trim()) + "</span>" : "") + "</td>" +
+          "<td>" + esc(fmtClock(t).replace(" PT", "")) + "</td></tr>";
+      }).join("") || "<tr><td colspan='5' class='muted'>" + (waitingCalls.rows ? "Nobody is waiting right now." : "Loading…") + "</td></tr>") +
+      "</tbody></table></div>" +
+      "<div class='tiny muted' style='margin-top:6px'>Every caller waiting in a queue right now, from RingCX, longest wait first; refreshed with the page. Red after " + fmtShort(CONFIG.WAIT_FLASH_SEC) + ". Follows the queue filter.</div>";
+  }
+
   function sum(arr, k) { return arr.reduce(function (s, x) { return s + (+x[k] || 0); }, 0); }
 
   function renderKpis(e, agents, sups, watch) {
@@ -1648,7 +1688,7 @@
     var longestQ = Q.filter(function (q) { return q.inQueue > 0; })
       .sort(function (a, b) { return (b.longestInQueue || 0) - (a.longestInQueue || 0); })[0];
     var tiles = [
-      { label: "Waiting now", value: waiting, cls: waiting ? (longest + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn") : "", note: waiting ? waitingIn.join("<br>") : "no callers in queue" },
+      { label: "Waiting now", value: waiting, filter: waiting ? "waiting" : null, cls: waiting ? (longest + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn") : "", note: waiting ? waitingIn.join("<br>") : "no callers in queue" },
       { label: "Longest wait", value: longestQ ? count(longestQ.longestInQueue || 0) : "–",
         cls: longestQ ? (longest + e > CONFIG.WAIT_CRIT_SEC ? "crit" : "warn") : "",
         flashBase: longestQ ? (longestQ.longestInQueue || 0) : null,
@@ -1962,6 +2002,7 @@
     abandoned: { title: "Abandoned calls today" },      // call list, not an agent list (no test)
     shortcalls: { title: "Short calls today" },         // call list, not an agent list (no test)
     answered: { title: "Answered calls today" },
+    waiting: { title: "Callers waiting now" },   // opened from the Waiting now tile (call list, no agent test)
     agentcalls: { title: "Calls today for one agent" },   // opened from the Calls number in the Agents table        // call list, not an agent list (no test)
     longcalls: { title: "Long calls right now" }        // live call list with Listen / Barge in (no test)
   };
@@ -2443,6 +2484,7 @@
     if (!drill) { box.hidden = true; box.removeAttribute("data-kind"); return; }
     if (drill === "longcalls") { box.hidden = false; renderLongDrill(box, e, agents); return; }
     if (drill === "statuslog") { box.hidden = false; renderStatusLog(box); return; }
+    if (drill === "waiting") { box.hidden = false; loadWaiting(); renderWaitingDrill(box); return; }
     if (drill === "tickets") { box.hidden = false; loadAbandons(false); renderTicketDrill(box); return; }
     if (drill === "agentcalls") { box.hidden = false; loadAbandons(false); renderCallDrill(box, "agentcalls:" + drillAgent); return; }
     if (drill === "shortcalls" || drill === "answered") { box.hidden = false; loadAbandons(false); renderCallDrill(box, drill); return; }
