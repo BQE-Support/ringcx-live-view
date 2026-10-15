@@ -55,6 +55,12 @@
   .inline-box { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin: 0 6px; background: var(--surface); }
   .inline-box .section-title { font-size: 15px; flex-wrap: wrap; }
   .inline-box { box-sizing: border-box; position: sticky; left: 6px; white-space: normal; }
+  .act-btn { padding: 2px 8px; font-size: 12px; white-space: nowrap; }
+  .act-row td { white-space: normal; background: var(--surface); padding: 8px 12px 10px 24px; }
+  .act-sys { margin: 2px 0 6px; }
+  .act-item { margin: 4px 0 0 12px; }
+  .act-list { margin: 2px 0 4px 18px; padding: 0; font-size: 12px; }
+  .act-list li { margin: 1px 0; }
   .inline-box .section-title .sub, .inline-box td, .inline-box th { white-space: normal; }
   .inline-box td.wrap { overflow-wrap: anywhere; }
   a.name-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--ink-3); }
@@ -416,7 +422,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.43</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.44</footer>
     </main>
   </section>
 </div>
@@ -547,13 +553,21 @@
   document.querySelectorAll("[data-cfgdur]").forEach(function (el) { el.textContent = fmtShort(CONFIG[el.getAttribute("data-cfgdur")]); });
 
   // ---------------- theme ----------------
+  // Remembered per supervisor (by RingCX agent ID) on each browser, so a shared PC keeps everyone's choice (Fred, 2026-10-15).
   var ui = load(UI_KEY) || {};
-  if (ui.theme) document.documentElement.setAttribute("data-theme", ui.theme);
+  function themeViewerId() { try { return session ? myAgentId() : null; } catch (x) { return null; } }
+  function applyTheme() {
+    var id = themeViewerId(), t = (id && ui.themes && ui.themes[id]) || ui.theme;
+    if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme");
+  }
+  applyTheme();
   $("themeBtn").addEventListener("click", function () {
     var cur = document.documentElement.getAttribute("data-theme") ||
       (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    ui.theme = cur === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", ui.theme);
+    var t = cur === "dark" ? "light" : "dark", id = themeViewerId();
+    ui.theme = t;   // also the default for this browser before anyone signs in
+    if (id) { ui.themes = ui.themes || {}; ui.themes[id] = t; }
+    document.documentElement.setAttribute("data-theme", t);
     save(UI_KEY, ui);
   });
 
@@ -609,6 +623,7 @@
     var name = d ? ((d.firstName || "") + " " + (d.lastName || "")).trim() : (session && session.name) || "";
     session = { rcxAccess: access, rcxRefresh: refresh, obtained: Date.now(), name: name };
     save(STORE_KEY, session);
+    applyTheme();   // this supervisor's saved theme
     showViewer();
   }
   function viewerName() {
@@ -723,6 +738,69 @@
   }
   // Same rules as changeStats(): which events feed "Changes 60m" and "Left Avail 60m".
   function isExit(e) { return e.fb === "AVAILABLE" && e.tb !== "ONCALL" && e.tb !== "AVAILABLE"; }
+
+  // ---------------- Activity dropdown: Zendesk + Jira work during one status (the "activity" function) ----------------
+  // Fred, 2026-10-15: "what work has been done in Jira and Zendesk during his time in this status?"
+  // Each status row gets a toggle; open rows stay open across redraws (actOpen) and results are cached
+  // per agent + status start (actCache). A status still going is re-asked after 2 minutes.
+  var actOpen = {}, actCache = {};
+  function actKey(name, from) { return normName(name) + "|" + from; }
+  async function loadActivity(name, from, to, live) {
+    var k = actKey(name, from), c = actCache[k];
+    if (c && (c.loading || (!c.err && (!live || Date.now() - c.at < 2 * 60000)))) return;
+    actCache[k] = { loading: true, at: Date.now(), data: c && c.data };
+    try {
+      if (tokenNearExpiry()) await refreshToken();
+      var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/activity?name=" + encodeURIComponent(name) + "&from=" + Math.round(from) + "&to=" + Math.round(to),
+        { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      actCache[k] = { at: Date.now(), data: j };
+    } catch (x) { actCache[k] = { at: Date.now(), err: x.message, data: c && c.data }; }
+    if (data.fetchedAt) render();
+  }
+  function actToggle(name, from, to, live) {
+    var k = actKey(name, from);
+    if (actOpen[k]) delete actOpen[k]; else actOpen[k] = true;
+    if (actOpen[k]) loadActivity(name, from, to, live);
+    render();
+  }
+  function actBlock(title, part, items) {
+    if (!part) return "";
+    if (part.error) return "<div class='act-sys'><b>" + title + "</b> <span class='muted'>" + esc(part.error) + "</span></div>";
+    var list = items(part);
+    return "<div class='act-sys'><b>" + title + "</b> " + (list.length ? "<span class='muted'>(" + list.length + ")</span>" + list.join("") : "<span class='muted'>nothing</span>") + "</div>";
+  }
+  function renderActivity(name, from, to, live) {
+    var k = actKey(name, from), c = actCache[k];
+    if (live) loadActivity(name, from, to, live);
+    if (!c || (!c.data && c.loading)) return "<span class='muted'>Looking in Zendesk and Jira…</span>";
+    if (!c.data) return "<span class='muted'>Couldn't load: " + esc(c.err || "?") + "</span>";
+    var d = c.data;
+    function acts(list) {
+      return "<ul class='act-list'>" + list.map(function (a) { return "<li><span class='muted'>" + fmtClock(a.t) + "</span> " + esc(a.text) + "</li>"; }).join("") + "</ul>";
+    }
+    var zd = actBlock("Zendesk", d.zendesk, function (p) {
+      return (p.tickets || []).map(function (t) {
+        return "<div class='act-item'><a href='https://bqe.zendesk.com/agent/tickets/" + t.id + "' target='_blank' rel='noopener'>#" + t.id + " ↗</a> " + esc(t.subject) + acts(t.actions) + "</div>";
+      });
+    });
+    var jr = actBlock("Jira", d.jira, function (p) {
+      return (p.issues || []).map(function (i) {
+        return "<div class='act-item'><a href='" + es.site + "/browse/" + esc(i.key) + "' target='_blank' rel='noopener'>" + esc(i.key) + " ↗</a> " + esc(i.summary) + " <span class='muted'>(" + esc(i.status || "") + ")</span>" + acts(i.actions) + "</div>";
+      });
+    });
+    return zd + jr + "<div class='tiny muted'>" + fmtClock(from) + " to " + (live ? "now" : fmtClock(to)) + ". Replies, notes, status/assignee changes, Jira comments and time logged count; just reading a ticket leaves no trace." +
+      (c.loading ? " Refreshing…" : "") + "</div>";
+  }
+  function actCell(name, from, to, live) {
+    var k = actKey(name, from);
+    return "<button class='btn act-btn' data-act-name='" + esc(name) + "' data-act-from='" + Math.round(from) + "' data-act-to='" + Math.round(to) + "' data-act-live='" + (live ? 1 : 0) + "' title='Zendesk and Jira work during this status'>" + (actOpen[k] ? "▾" : "▸") + " Activity</button>";
+  }
+  function actRow(name, from, to, live) {
+    return actOpen[actKey(name, from)] ? "<tr class='act-row'><td colspan='6'>" + renderActivity(name, from, to, live) + "</td></tr>" : "";
+  }
+
   function renderStatusLog(box, log) {
     log = log || drillLog;
     box.setAttribute("data-kind", "statuslog");
@@ -735,23 +813,28 @@
     ev.forEach(function (x) { if (x.t >= cutoff) { nChanges += x.hidden ? 2 : 1; if (isExit(x)) nExits++; } });
     // The newest change normally IS the current status; show it live instead of a separate "now" row.
     var newestIsNow = h.label && ev.length && Math.abs(h.start - ev[0].t) < 60000;
-    var nowRow = h.label && !newestIsNow ? "<tr><td>" + fmtClock(h.start) + "</td><td class='muted'>…</td><td><b>" + esc(h.label) + "</b> (now)</td><td></td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td></tr>" : "";
+    var nowMs = Date.now();
+    var nowRow = h.label && !newestIsNow ? "<tr><td>" + fmtClock(h.start) + "</td><td class='muted'>…</td><td><b>" + esc(h.label) + "</b> (now)</td><td></td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td><td>" + actCell(log.name, h.start, nowMs, true) + "</td></tr>" +
+      actRow(log.name, h.start, nowMs, true) : "";
     var rows = ev.map(function (x, i) {
       var lasted;
+      // The window this status covered: until the next change (or now / the current status's start).
+      var live = i === 0 && (newestIsNow || !h.label), until = i === 0 ? (live ? nowMs : h.start) : ev[i - 1].t;
       if (x.hidden) lasted = "brief";
       else if (i === 0 && newestIsNow) lasted = count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>";
       else lasted = fmtDur(Math.max(0, ((i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t) - x.t) / 1000));
       var recent = x.t >= cutoff, exit = recent && isExit(x);
       var tags = (recent ? "<span class='chip info'>Changes" + (x.hidden ? " ×2" : "") + "</span>" : "") + (exit ? " <span class='chip warn'>Left Avail</span>" : "");
       var hit = exitsMode ? exit : recent;
-      return "<tr class='" + (hit ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + esc(statusName(x.fl, x.fb)) + "</td><td>" + (i === 0 && newestIsNow ? "<b>" + esc(statusName(x.tl, x.tb)) + "</b>" : esc(statusName(x.tl, x.tb))) + "</td><td>" + tags + "</td><td class='num'>" + lasted + "</td></tr>";
+      return "<tr class='" + (hit ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + esc(statusName(x.fl, x.fb)) + "</td><td>" + (i === 0 && newestIsNow ? "<b>" + esc(statusName(x.tl, x.tb)) + "</b>" : esc(statusName(x.tl, x.tb))) + "</td><td>" + tags + "</td><td class='num'>" + lasted + "</td><td>" + (x.hidden ? "" : actCell(log.name, x.t, until, live)) + "</td></tr>" +
+        (x.hidden ? "" : actRow(log.name, x.t, until, live));
     }).join("");
     var what = exitsMode ? nExits + " time" + (nExits === 1 ? "" : "s") + " left Available in the last 60 min (highlighted)"
       : nChanges + " change" + (nChanges === 1 ? "" : "s") + " in the last 60 min (highlighted)";
     box.innerHTML = "<div class='section-title'>Status changes (last 10 hours): " + esc(log.name) + " <span class='sub'>" + what + " · " + ev.length + " in all · " + esc(trackedLabel()) + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
-      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th>Counted in</th><th class='num'>Lasted</th></tr></thead><tbody>" +
-      (nowRow + rows || "<tr><td colspan='5' class='muted'>No status changes recorded in the last 10 hours.</td></tr>") + "</tbody></table></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th>Counted in</th><th class='num'>Lasted</th><th>Zendesk / Jira</th></tr></thead><tbody>" +
+      (nowRow + rows || "<tr><td colspan='6' class='muted'>No status changes recorded in the last 10 hours.</td></tr>") + "</tbody></table></div>" +
       "<div class='tiny muted' style='margin-top:6px'>Highlighted rows are the ones behind the number you clicked. \"Changes\" counts every status change in the last 60 minutes (a brief change between refreshes counts twice: out and back). \"Left Avail\" counts moves from Available to anything except a call. \"Lasted\" is how long they stayed in the status they switched to. Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
   }
 
@@ -2693,9 +2776,10 @@
   // RingCX has no API to log an agent out: its supervisor view does it over the supervisor's own agent
   // connection, which this page never opens (that is what would sign the viewer in as an agent). So this
   // opens RingCX's supervisor Agents view (named tab, reused on later clicks), where the X logs them out.
-  var RCX_SUPERVISOR_AGENTS = "https://ringcx.ringcentral.com/voice/agent/#/home/supervisor/agent";
+  // RingCX's supervisor Agents view for the signed-in supervisor (their own agent ID in the link, Fred 2026-10-15).
+  function rcxSupervisorUrl() { return "https://ringcx.ringcentral.com/voice/agent/?agentId=" + encodeURIComponent(myAgentId() || "") + "#/home/supervisor/agent"; }
   function rcxLogoutLink(name) {
-    return "<a href='" + RCX_SUPERVISOR_AGENTS + "' target='ringcx-supervisor' rel='noopener' class='tiny' title='Opens the RingCX supervisor Agents view in a separate tab. Find " + esc(name) + " and click the X to log them out. If the RingCX agent app is already open in another tab, use that one instead.'>Log out in RingCX ↗</a>";
+    return "<a href='" + esc(rcxSupervisorUrl()) + "' target='ringcx-supervisor' rel='noopener' class='tiny' title='Opens the RingCX supervisor Agents view in a separate tab. Find " + esc(name) + " and click the X to log them out. If the RingCX agent app is already open in another tab, use that one instead.'>Log out in RingCX ↗</a>";
   }
   function renderWatch(e, watch, snoozed) {
     snoozed = snoozed || [];
@@ -2938,6 +3022,12 @@
     render();
   }
   document.addEventListener("click", function (ev) {
+    var ab = ev.target.closest("[data-act-name]");
+    if (ab) {
+      ev.preventDefault();
+      actToggle(ab.getAttribute("data-act-name"), +ab.getAttribute("data-act-from"), +ab.getAttribute("data-act-to"), ab.getAttribute("data-act-live") === "1");
+      return;
+    }
     var f = ev.target.closest("[data-filter]");
     if (f) { setFilter(f.getAttribute("data-filter")); return; }
     // Agent KPI tiles open/close their drill-down list, and keep the Agents table filter in step.
