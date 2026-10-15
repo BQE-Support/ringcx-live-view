@@ -422,7 +422,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.44</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.45</footer>
     </main>
   </section>
 </div>
@@ -656,7 +656,7 @@
       var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/pto", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
-      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = (j.schedule || []).map(dstAdjust);
+      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = (j.schedule || []).map(dstAdjust).map(scheduleOverride);
       renderPto(j); renderLunch(elapsed()); renderLogins(elapsed());
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
@@ -929,6 +929,24 @@
     var p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", timeZoneName: "shortOffset" }).formatToParts(new Date());
     var tz = (p.filter(function (x) { return x.type === "timeZoneName"; })[0] || {}).value || "";
     return /GMT-7\b/.test(tz);
+  }
+  // Temporary schedules the roster doesn't show yet (Smartsheet can't be edited right now). Each lapses on its own
+  // after "until" (Pacific date). Times are Pacific "HH:MM"; omit a field to keep the roster value.
+  var SCHEDULE_OVERRIDES = {
+    // Covering for Vina until she's back mid-November (Armando to Natasha, 2026-10-15).
+    "Armando Sanchez": { shift: "06:00", lunch: "10:00", until: "2026-11-15" }
+  };
+  function scheduleOverride(s) {
+    var k = normName(s.name), key = Object.keys(SCHEDULE_OVERRIDES).filter(function (x) { return normName(x) === k; })[0];
+    if (!key) return s;
+    var o = SCHEDULE_OVERRIDES[key], today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
+    if (o.until && today > o.until) return s;
+    var toMin = function (t) { return +t.slice(0, 2) * 60 + +t.slice(3, 5); };
+    var out = {}; Object.keys(s).forEach(function (f) { out[f] = s[f]; });
+    if (o.shift) out.shift = toMin(o.shift);
+    if (o.lunch) out.lunch = toMin(o.lunch);
+    out.temp = true;
+    return out;
   }
   function dstAdjust(s) {
     var k = normName(s.name);
@@ -1413,6 +1431,7 @@
     // Was this page watching without a break? (Closed/hidden pages leave gaps that aren't real logouts.)
     var contiguous = hist.lastPoll && fetchedAt - hist.lastPoll <= 3 * intervalSec * 1000 + 60000;
     if (!contiguous) hist.watchStart = fetchedAt;
+    var prevPoll = hist.lastPoll || 0;
     hist.lastPoll = fetchedAt;
     agents.forEach(function (a) {
       var id = String(a.agentId);
@@ -1434,7 +1453,9 @@
       // Time accounting for the leaderboard: credit the gap since the last refresh to the status
       // the agent was in (capped, so a sleeping laptop doesn't credit hours).
       // A real logout: gone for OFFLINE_MIN+ while this page kept watching the whole time.
-      if (h.lastSeen && fetchedAt - h.lastSeen > CONFIG.OFFLINE_MIN * 60000 && h.lastSeen >= (hist.watchStart || 0) - 60000) {
+      // Also real when a later refresh already saw them gone, even if watching broke off before they came back
+      // (Armando, 2026-10-15: a 10:01 lunch logout was lost to a tracker outage around 11:05).
+      if (h.lastSeen && fetchedAt - h.lastSeen > CONFIG.OFFLINE_MIN * 60000 && (h.lastSeen >= (hist.watchStart || 0) - 60000 || h.lastSeen < prevPoll - 1000)) {
         h.gaps = (h.gaps || []).concat([{ from: h.lastSeen, to: fetchedAt }]);
       }
       if (h.lastSeen) {
