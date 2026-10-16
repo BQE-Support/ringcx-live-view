@@ -222,6 +222,7 @@
   .chip.info { background: var(--surface-alt); color: var(--ink-2); }
   .hot { color: var(--critical); font-weight: 700; }
   .warmn { color: var(--warning); font-weight: 700; }
+  .good { color: var(--good); font-weight: 700; }
   .muted { color: var(--ink-3); }
   .tiny { font-size: 11px; }
 
@@ -372,7 +373,7 @@
           <div><div class="board-h low">Bottom 5</div><div id="boardLow"></div></div>
         </div>
         <div id="boardAll" hidden><div class="board-h">Everyone, ranked</div><div id="boardAllList"></div></div>
-        <div class="tiny muted" style="margin-top:6px">Score is 0-100: today's best = 100, everyone else relative to them (hover for raw points). Points = calls answered per logged-in hour × 10, minus 5 per RNA, plus Ready × 10, minus 5 if lunch ran 5+ min over the hour (minus 10 if 15+ min over; timed from when they actually went to lunch), minus 5 for a confirmed late first login of 5+ min (minus 10 if 15+; see Logins today, unconfirmed times don't count). Calls per hour uses RingCX's logged-in total for the whole day. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
+        <div class="tiny muted" style="margin-top:6px">Fixed 100-point scorecard (100 = every part met; hover a score for its breakdown): <b>Ready 35</b> (Available, Engaged or Transition; full at 85%+, none at 50%), <b>no RNA 15</b> (1 RNA = 7, 2+ = 0), <b>on-time start 12</b> (confirmed 5-15 min late = 6, more = 0; unconfirmed counts as on time), <b>lunch within the hour 8</b> (5-15 min over = 4, more = 0; timed from when they actually went), <b>tickets 30</b> (−5 for each Zendesk / ES ticket still waiting on them after the end of their next shift, −10 if 2+ days past that; the number in brackets = waiting on them now; click for the list). Calls and talk time are shown but don't score: agents can't control how many calls they're offered. Grades: 90+ green, 75-89 normal, 60-74 yellow, under 60 red. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet.</div>
         <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Busy (yellow), Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
       </div>
 
@@ -396,7 +397,7 @@
           <span class="sub" id="ydSub"></span>
         </div>
         <div id="ydBody"><span class="muted">Open this section to load it.</span></div>
-        <div class="tiny muted" style="margin-top:6px">A finished day, rebuilt from the server's every-minute snapshots and that day's RingCX call report, then scored with exactly the same rules as Performance today (0-100, that day's best = 100; hover a score for raw points). Late starts use that weekday's roster start; only confirmed first logins count. The last 7 days are available (◂ ▸). Numbers can differ slightly from what Performance showed live that day: this uses the whole day's record, including any time the page was closed.</div>
+        <div class="tiny muted" style="margin-top:6px">A finished day, rebuilt from the server's every-minute snapshots and that day's RingCX call report, then scored with exactly the same fixed 100-point scorecard as Performance today (hover a score for its breakdown). Tickets use that day's server checks, which started Fri 10/16; earlier days score tickets as full marks. Late starts use that weekday's roster start; only confirmed first logins count. The last 7 days are available (◂ ▸). Numbers can differ slightly from what Performance showed live that day: this uses the whole day's record, including any time the page was closed.</div>
       </details>
 
       <details class="panel">
@@ -416,13 +417,15 @@
               <li>Wrap-up longer than <span data-cfgdur="WRAP_WARN_SEC"></span>.</li>
             </ul>
           </li>
-          <li><b>Performance today</b> ranks people on a score made of three parts:
+          <li><b>Performance today</b> scores people on a fixed 100-point scorecard (Fred, 2026-10-16). Agents can't control how many calls they're offered, so calls and talk time are shown but don't score:
             <ul>
-              <li>Calls answered per logged-in hour, times 10.</li>
-              <li>Minus 5 for each RNA today.</li>
-              <li>Plus up to 10 for the share of time spent Available or Engaged. Until 30 minutes of someone's time has been observed, this part counts as half.</li>
+              <li><b>Ready, 35:</b> share of logged-in time Available, Engaged or in Transition. Full at 85% or more, none at 50% or less, in proportion between. Full points until 30 minutes have been watched.</li>
+              <li><b>No RNA, 15:</b> 1 RNA = 7, 2 or more = 0.</li>
+              <li><b>On-time start, 12:</b> a confirmed first login 5-15 min after the roster start = 6, later = 0. Unconfirmed first logins count as on time.</li>
+              <li><b>Lunch within the hour, 8:</b> 5-15 min over = 4, more = 0.</li>
+              <li><b>Tickets, 30:</b> tickets waiting on them (Zendesk assigned and Open, or On Hold with no due date or a passed one; ES "Awaiting info" or "Resolved to L1") must be handled by the end of their first shift that starts after the ticket got into that state. Each one still waiting after its deadline costs 5; still waiting 2+ days past it costs 10. The server checks every 10 minutes. Click the Tickets cell for the list with links.</li>
             </ul>
-            The score is shown on a 0-100 scale: today's best = 100 and everyone else is relative to them (below 0 shows as 0). Hover a score to see its raw points. Top 5 and Bottom 5 rank agents only. Supervisors (including Connor Lenhart and Victor Guadarrama) are scored too, but they appear only in "Show all", with a Supervisor tag.
+            Grades: 90+ green, 75-89 normal, 60-74 yellow, under 60 red. Hover a score for its breakdown. Top 5 and Bottom 5 rank agents only. Supervisors (including Connor Lenhart and Victor Guadarrama) are scored too, but they appear only in "Show all", with a Supervisor tag.
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
           <li><b>"WORKING"</b> on its own (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets an "Only use for RNA" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
           <li><b>Vendor status</b> in What to Watch comes from each vendor's public status page, checked every 2 minutes: <b>Gusto</b> (the API component only), <b>GlobalPay</b> (Worldpay, plus Payrix US), and <b>BQE CORE</b> (both regions). It shows a degraded or down component, an open incident, or maintenance in progress. Red = major outage or a major/critical incident; yellow = anything else. Click it to open the status page. Global Payments has no public developer status page we could find, so GlobalPay covers Worldpay and Payrix.</li>
@@ -434,7 +437,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.51</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.52</footer>
     </main>
   </section>
 </div>
@@ -2302,6 +2305,96 @@
     return { login: login, rna: rna, calls: Math.max(reportCalls, a.callsHandled || 0), talk: Math.max(c ? c.talk : 0, a.totalTalkTime || 0) };
   }
 
+  // ---------------- ticket timeliness (Zendesk + ES tickets waiting on an agent; the "zdwatch" function) ----------------
+  // Fred, 2026-10-16. Waiting on the agent = assigned to them and, in Zendesk, custom status Open or On Hold with no
+  // due date (a passed due date counts from that date); in Jira ES, "Awaiting info" or "Resolved to L1". It has to be
+  // handled (out of that state) by the end of their first shift that STARTS after it entered the state. The server
+  // checks every 10 minutes; each ticket comes with the first and last check it was still waiting in.
+  var waits = { rows: null, at: 0, loading: false, err: null };   // today's; the Yesterday section swaps in its own
+  async function fetchWaits(ymd) {
+    if (tokenNearExpiry()) await refreshToken();
+    var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/zdwatch" + (ymd ? "?day=" + ymd : ""), { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+    var j = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+    var f = j.fields || [];
+    return (j.tickets || []).map(function (row) { var o = {}; f.forEach(function (k, i) { o[k] = row[i]; }); return o; });
+  }
+  async function loadWaits() {
+    if (waits.loading || !session || !CONFIG.SUPABASE_URL) return;
+    waits.loading = true;
+    try { waits.rows = await fetchWaits(""); waits.at = Date.now(); waits.err = null; }
+    catch (e) { waits.err = e.message; }
+    finally { waits.loading = false; if (data.fetchedAt) render(); }
+  }
+  // Is this ticket row theirs? By a first.last@bqe.com email first (Jira shows Armando as "Armando Aceves"), then by name.
+  function waitIsFor(name, x) {
+    var k = normName(name), words = k.split(" "), joined = words.join("");
+    var local = String(x.email || "").toLowerCase().split("@")[0].replace(/[^a-z]/g, "");
+    if (local && local === joined) return true;
+    var nw = normName(x.name).split(" ");
+    return normName(x.name) === k || (nw.length === words.length && words.every(function (w) { return nw.indexOf(w) >= 0; }));
+  }
+  function addDaysYmd(ymd, n) { return new Date(Date.parse(ymd + "T12:00:00Z") + n * 86400000).toISOString().slice(0, 10); }
+  function ymdOfMs(ms) { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(ms)); }
+  function onPtoDay(name, ymd) { var k = normName(name); return (pto.rows || []).some(function (r) { return normName(r.name) === k && r.start <= ymd && r.end >= ymd; }); }
+  // End of the first shift that starts after t (roster start + SHIFT_HOURS; skips days off and PTO). No roster row:
+  // 8 AM Pacific, Monday to Friday.
+  function shiftDeadline(name, t) {
+    var s = schedFor(name), start0 = ymdOfMs(t);
+    for (var i = 0; i < 21; i++) {
+      var ymd = addDaysYmd(start0, i), wd = new Date(ymd + "T12:00:00Z").getUTCDay();
+      if (s && s.shift !== null ? s.days.indexOf(wd) < 0 : (wd === 0 || wd === 6)) continue;
+      if (onPtoDay(name, ymd)) continue;
+      var start = Date.parse(ptMidnightIsoOf(ymd)) + (s && s.shift !== null ? s.shift : 8 * 60) * 60000;
+      if (start >= t) return start + CONFIG.SHIFT_HOURS * 3600000;
+    }
+    return t + 24 * 3600000;
+  }
+  // As of asOf: tickets that were still waiting after their deadline (-5 each; -10 if still waiting 2+ days past it)
+  // and how many are waiting on them right now.
+  function ticketTimeliness(name, asOf) {
+    if (!waits.rows) return null;
+    var mine = waits.rows.filter(function (x) { return x.entered && waitIsFor(name, x); });
+    var late = [], pen = 0;
+    mine.forEach(function (x) {
+      var dl = shiftDeadline(name, x.entered);
+      if (dl > asOf || x.last < dl) return;   // not due yet, or handled before the deadline
+      var bad = Math.min(x.last, asOf) - dl > 2 * 86400000;
+      late.push({ x: x, dl: dl, bad: bad }); pen += bad ? 10 : 5;
+    });
+    var nowList = mine.filter(function (x) { return x.last >= asOf - 15 * 60000; });
+    return { pts: Math.max(0, 30 - pen), late: late, waiting: nowList.length, mine: mine };
+  }
+  function scoreGrade(s) { return s >= 90 ? "good" : (s >= 75 ? "" : (s >= 60 ? "warmn" : "hot")); }
+  function scoreTitle(r) {
+    var p = r.parts;
+    return "Ready " + p.ready + "/35" + (r.ready == null ? " (not enough time watched yet)" : "") + " · RNA " + p.rna + "/15 · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · Tickets " +
+      (p.tickets == null ? "30/30 (not loaded yet)" : p.tickets + "/30") + ". Fixed scale: 100 = every part met.";
+  }
+  function ticketCell(r) {
+    var t = r.tk;
+    if (!t) return "<span class='muted' title='Ticket data not loaded yet'>–</span>";
+    var tip = t.late.map(function (l) { return (l.x.src === "es" ? l.x.id : "#" + l.x.id) + " " + l.x.label + ", due by " + fmtClock(l.dl) + (l.bad ? " (2+ days late)" : ""); }).join("; ");
+    return "<a href='#' data-tk-open='" + esc(normName(r.name)) + "' title='" + esc(tip || "Nothing past its deadline") + " · " + t.waiting + " waiting on them now. Click for the list.'>" +
+      (t.late.length ? "<span class='" + (t.late.some(function (l) { return l.bad; }) ? "hot" : "warmn") + "'>" + t.late.length + " late</span>" : "<span class='muted'>ok</span>") +
+      (t.waiting ? " <span class='muted tiny'>(" + t.waiting + ")</span>" : "") + "</a>";
+  }
+  var tkOpen = {};   // name -> true: ticket list shown under their row
+  function ticketListHtml(r, asOf) {
+    var t = r.tk; if (!t) return "";
+    var zd = "https://bqe.zendesk.com/agent/tickets/", es = "https://bqetrack.atlassian.net/browse/";
+    var lateKeys = {}; t.late.forEach(function (l) { lateKeys[l.x.src + l.x.id] = l; });
+    var list = t.mine.slice().sort(function (a, b) { return a.entered - b.entered; });
+    return "<div class='section-title' style='font-size:15px'>Tickets waiting on " + esc(r.name) + " <span class='sub'>" + t.late.length + " past deadline · " + t.waiting + " waiting now</span></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Ticket</th><th>State</th><th>Waiting since</th><th>Deadline (end of next shift)</th><th>Result</th><th>Subject</th></tr></thead><tbody>" +
+      (list.map(function (x) {
+        var l = lateKeys[x.src + x.id], dl = shiftDeadline(r.name, x.entered), still = x.last >= asOf - 15 * 60000;
+        var res = l ? "<span class='" + (l.bad ? "hot" : "warmn") + "'>" + (still ? "late, still waiting" : "handled late") + "</span>" : (still ? (dl > asOf ? "<span class='muted'>due " + fmtClock(dl) + "</span>" : "") : "<span class='good'>handled in time</span>");
+        return "<tr" + (l ? " class='flag-warn'" : "") + "><td><a href='" + (x.src === "es" ? es + esc(x.id) : zd + esc(x.id)) + "' target='_blank' rel='noopener'>" + (x.src === "es" ? esc(x.id) : "#" + esc(x.id)) + " ↗</a></td>" +
+          "<td>" + esc(x.label) + "</td><td>" + esc(ymdLabel(ymdOfMs(x.entered))) + " " + fmtClock(x.entered) + "</td><td>" + esc(ymdLabel(ymdOfMs(dl))) + " " + fmtClock(dl) + "</td><td>" + res + "</td><td class='wrap'>" + esc(x.subject || "") + "</td></tr>";
+      }).join("") || "<tr><td colspan='6' class='muted'>Nothing waiting on them.</td></tr>") + "</tbody></table></div>";
+  }
+
   function boardRows() {
     var calls = callIndex();   // "Last, First" -> { uiis, talk }
     var people = {};
@@ -2338,16 +2431,23 @@
       // "on a call by" / "earlier session not seen" can't be proven late, so they cost nothing.
       var lg = loginByName[normName(n)] || {}, lateMin = lg.conf === "confirmed" && lg.late !== null && lg.late > CONFIG.LOGIN_GRACE_MIN ? lg.late : 0;
       var latePenalty = lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? CONFIG.LATE_PENALTY_CRIT : (lateMin > 0 ? CONFIG.LATE_PENALTY_WARN : 0);
-      var score = perHr * 10 - p.rna * 5 + readyShare * 10 - lunchPenalty - latePenalty;
-      out.push({ name: n, sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: p.seen >= 1800 ? readyShare : null, login: p.login, score: score,
+      // Fixed 100-point scorecard (Fred, 2026-10-16): agents can't control how many calls they're offered, so calls
+      // don't score. Ready 35 (full at 85%+, none at 50%), no RNA 15 (1 = 7, 2+ = 0), on-time start 12 (5-15 min = 6,
+      // more = 0; unconfirmed counts as on time), lunch within the hour 8 (5-15 over = 4, more = 0), tickets 30.
+      var ready = p.seen >= 1800 ? readyShare : null;
+      var tk = ticketTimeliness(n, hist.endAt || Date.now());
+      var parts = {
+        ready: Math.round(ready == null ? 35 : 35 * Math.max(0, Math.min(1, (ready - 0.5) / 0.35))),
+        rna: p.rna === 0 ? 15 : (p.rna === 1 ? 7 : 0),
+        start: lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? 0 : (lateMin > 0 ? 6 : 12),
+        lunch: ll === "crit" ? 0 : (ll === "warn" ? 4 : 8),
+        tickets: tk ? tk.pts : null
+      };
+      var score = parts.ready + parts.rna + parts.start + parts.lunch + (tk ? tk.pts : 30);
+      out.push({ name: n, sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: ready, login: p.login, score: score, parts: parts, tk: tk,
         lunchOver: L && L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(L.over) : 0, lunchLvl: ll, lateMin: lateMin, lateConf: lg.conf || null });
     });
-    out = out.filter(function (r) { return inQueue(r.name); }).sort(function (a, b) { return b.score - a.score; });
-    // Shown on a 0-100 scale (Fred, 2026-10-15): today's best score = 100, the rest relative to it, never below 0.
-    // The raw points are kept for the tooltip.
-    var best = out.length ? out[0].score : 0;
-    out.forEach(function (r) { r.raw = r.score; r.score = best > 0 ? Math.max(0, r.score) / best * 100 : 0; });
-    return out;
+    return out.filter(function (r) { return inQueue(r.name); }).sort(function (a, b) { return b.score - a.score || b.answered - a.answered; });
   }
 
   function renderBoard() {
@@ -2357,11 +2457,11 @@
     var ranked = rows.filter(function (r) { return !r.sup; });
     var top = ranked.slice(0, 5), low = ranked.length > 5 ? ranked.slice(-Math.min(5, ranked.length - 5)).reverse() : [];
     function table(list, startRank, dir, total) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
             "<td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
-            "<td class='num' title='" + r.raw.toFixed(1) + " points: calls/hr × 10, minus 5 per RNA, plus Ready × 10, minus lunch/late penalties. Today&#39;s best = 100.'><b>" + Math.round(r.score) + "</b></td>" +
+            "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
             "<td class='num'>" + r.answered + "</td>" +
             "<td class='num'>" + r.perHr.toFixed(1) + "</td>" +
             "<td class='num'>" + fmtDur(r.talk) + "</td>" +
@@ -2370,8 +2470,10 @@
             "<td class='num'>" + (r.lateMin ? "<span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "' title='First login " + Math.round(r.lateMin) + " min after scheduled start (confirmed)'>" + fmtShort(r.lateMin * 60) + " late</span>"
               : "<span class='muted' title='" + (r.lateConf && r.lateConf !== "confirmed" ? "First login not confirmed (see Logins today), so not counted" : "On time, or no schedule") + "'>" + (r.lateConf && r.lateConf !== "confirmed" ? "?" : "ok") + "</span>") + "</td>" +
             "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
-            "<td class='num'>" + fmtDur(r.login) + "</td></tr>";
-        }).join("") || "<tr><td colspan='11' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
+            "<td class='num'>" + ticketCell(r) + "</td>" +
+            "<td class='num'>" + fmtDur(r.login) + "</td></tr>" +
+            (tkOpen["today|" + normName(r.name)] ? "<tr class='inline-drill'><td colspan='12'><div class='inline-box'>" + ticketListHtml(r, Date.now()) + "</div></td></tr>" : "");
+        }).join("") || "<tr><td colspan='12' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
         "</tbody></table></div>";
     }
     // "Show all" swaps Top 5 / Bottom 5 for one full ranked list (choice remembered in this browser).
@@ -2433,9 +2535,10 @@
     var m = /GMT([+-])(\d+)/.exec((p.filter(function (x) { return x.type === "timeZoneName"; })[0] || {}).value || "GMT-8");
     return ymd + "T00:00:00.000" + (m ? m[1] : "-") + String(m ? m[2] : 8).padStart(2, "0") + "00";
   }
-  function scoreDay(ymd, fields, polls, calls) {
+  function scoreDay(ymd, fields, polls, calls, dayWaits) {
     if (!polls.length) return { empty: true };
-    var saved = { hist: hist, abandons: abandons, agents: data.agents, loginByName: loginByName, intervalSec: intervalSec };
+    var saved = { hist: hist, abandons: abandons, agents: data.agents, loginByName: loginByName, intervalSec: intervalSec, waits: waits };
+    waits = { rows: dayWaits };   // that day's ticket checks (null = not tracked yet that day)
     try {
       intervalSec = 60;   // the snapshots' cadence
       var t0 = Date.parse(polls[0].ts), t1 = Date.parse(polls[polls.length - 1].ts);
@@ -2466,7 +2569,7 @@
       Object.keys(hist.agents).forEach(function (id) { var h = hist.agents[id]; if (h.name) byName[normName(h.name)] = h; });
       return { rows: rows, answered: answered, abandoned: abandoned, talk: talk, from: t0, to: t1, byName: byName };
     } finally {
-      hist = saved.hist; abandons = saved.abandons; data.agents = saved.agents; loginByName = saved.loginByName; intervalSec = saved.intervalSec;
+      hist = saved.hist; abandons = saved.abandons; data.agents = saved.agents; loginByName = saved.loginByName; intervalSec = saved.intervalSec; waits = saved.waits;
       callIdx.at = -2;   // today's call index rebuilds on next use
     }
   }
@@ -2488,7 +2591,10 @@
         var t = etMs(c.call_start_dts);
         return CONFIG.HIDDEN_QUEUES.indexOf(c.source_name) < 0 && (!isFinite(t) || (t >= from && t < to));
       }).map(function (c) { c.source_name = queueLabel(c.source_name); return c; });
-      yd.cache[ymd] = scoreDay(ymd, j.fields || [], j.polls || [], calls);
+      // Ticket checks started 2026-10-16; a day before that (or a failed load) scores tickets as full marks.
+      var dayWaits = null;
+      try { dayWaits = await fetchWaits(ymd); if (!dayWaits.length) dayWaits = null; } catch (e) { dayWaits = null; }
+      yd.cache[ymd] = scoreDay(ymd, j.fields || [], j.polls || [], calls, dayWaits);
     } catch (e) { yd.err[ymd] = e.message; }
     finally { yd.loading = false; renderDay(); }
   }
@@ -2516,22 +2622,24 @@
     function rowHtml(r, rank) {
       var k = normName(r.name), open = !!yd.open[ymd + "|" + k];
       return "<tr" + (open ? " class='flag-warn'" : "") + "><td class='num'>" + (rank || "") + "</td><td><a href='#' data-yd-agent='" + esc(k) + "' title='Show this day&#39;s status changes, with Zendesk / Jira activity for each'>" + (open ? "▾ " : "▸ ") + esc(r.name) + "</a>" + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
-        "<td class='num' title='" + r.raw.toFixed(1) + " points: calls/hr × 10, minus 5 per RNA, plus Ready × 10, minus lunch/late penalties. That day&#39;s best = 100.'><b>" + Math.round(r.score) + "</b></td>" +
+        "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
         "<td class='num'>" + r.answered + "</td><td class='num'>" + r.perHr.toFixed(1) + "</td><td class='num'>" + fmtDur(r.talk) + "</td>" +
         "<td class='num'>" + rnaCell(r.rna) + "</td>" +
         "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
         "<td class='num'>" + startCell(r) + "</td>" +
         "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
+        "<td class='num'>" + ticketCell(r) + "</td>" +
         "<td class='num'>" + fmtDur(r.login) + "</td></tr>" +
-        (open ? "<tr class='inline-drill'><td colspan='11'><div class='inline-box'>" + dayLogHtml(d.byName[k], r.name) + "</div></td></tr>" : "");
+        (tkOpen[ymd + "|" + k] ? "<tr class='inline-drill'><td colspan='12'><div class='inline-box'>" + ticketListHtml(r, d.to + 60000) + "</div></td></tr>" : "") +
+        (open ? "<tr class='inline-drill'><td colspan='12'><div class='inline-box'>" + dayLogHtml(d.byName[k], r.name) + "</div></td></tr>" : "");
     }
     var best = agents[0];
     $("ydBody").innerHTML =
       "<div class='tiny' style='margin:4px 0 8px'><b>" + d.answered + "</b> queue calls answered · <b>" + d.abandoned + "</b> abandoned · <b>" + fmtDur(d.talk) + "</b> talk · " +
         agents.length + " agents scored" + (best ? " · best: <b>" + esc(best.name) + "</b>" : "") + "</div>" +
-      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>First login</th><th class='num'>Lunch</th><th class='num'>Logged in</th></tr></thead><tbody>" +
-      (agents.map(function (r, i) { return rowHtml(r, i + 1); }).join("") || "<tr><td colspan='11' class='muted'>Nobody to score that day.</td></tr>") +
-      (sups.length ? "<tr><td colspan='11' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
+      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      (agents.map(function (r, i) { return rowHtml(r, i + 1); }).join("") || "<tr><td colspan='12' class='muted'>Nobody to score that day.</td></tr>") +
+      (sups.length ? "<tr><td colspan='12' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
       "</tbody></table></div>";
   }
   // One person's whole finished day: every status change (newest first) plus logouts, each with the same
@@ -2558,6 +2666,15 @@
   }
   function renderDayIfOpen() { if (yd.cache[ptYmd(yd.back)] && $("ydPanel").open) renderDay(); }
   yd.open = {};
+  // Tickets cell (Performance today and Yesterday): the ticket list under that row.
+  document.addEventListener("click", function (ev) {
+    var t = ev.target.closest("[data-tk-open]");
+    if (!t) return;
+    ev.preventDefault();
+    var k = (t.closest("#ydBody") ? ptYmd(yd.back) : "today") + "|" + t.getAttribute("data-tk-open");
+    if (tkOpen[k]) delete tkOpen[k]; else tkOpen[k] = true;
+    if (t.closest("#ydBody")) renderDay(); else render();
+  });
   $("ydBody").addEventListener("click", function (ev) {
     var a = ev.target.closest("[data-yd-agent]");
     if (!a) return;
@@ -3403,6 +3520,7 @@
     loadPto(); clearInterval(ptoTimer); ptoTimer = setInterval(loadPto, 30 * 60 * 1000);
     // Reviews: on start, every 2 minutes as a backstop, and instantly when another viewer changes one.
     loadReviews(); setInterval(loadReviews, 2 * 60 * 1000);
+    loadWaits(); setInterval(loadWaits, 5 * 60 * 1000);   // the server checks tickets every 10 minutes
     // Full-day history from the server's every-minute snapshots (replaces this browser's partial view).
     loadHistory();
     loadQueueMembers();   // who's assigned to which queue, for the queue filter
