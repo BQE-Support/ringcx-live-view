@@ -438,7 +438,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.58</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.59</footer>
     </main>
   </section>
 </div>
@@ -2441,11 +2441,13 @@
     var hit = w.filter(function (r) { return waitIsFor(name, { name: r[0], email: r[1] }); });
     return hit.reduce(function (o, r) { o.email += +r[2] || 0; o.web += +r[3] || 0; o.tookEmail += +r[4] || 0; o.tookWeb += +r[5] || 0; return o; }, { email: 0, web: 0, tookEmail: 0, tookWeb: 0 });
   }
-  // Email + webform tickets they took per logged-in hour (phone: RingCX logged-in time; email: Zendesk).
+  // All tickets they took per logged-in hour, one count (Fred, 2026-10-16): calls answered (each call makes a ticket)
+  // + email/webform tickets taken. Phone-origin tickets are never in the email/webform count, so nothing is counted twice.
+  // Phone: RingCX logged-in time; email agents: Zendesk logged-in time.
   function tookPerHr(r) {
-    if (!waits.work) return "<span class='muted'>–</span>";
-    var w = r.work || { tookEmail: 0, tookWeb: 0 }, took = w.tookEmail + w.tookWeb, hrs = (r.login || 0) / 3600;
-    return hrs < 0.25 ? "<span class='muted'>–</span>" : (took / hrs).toFixed(1);
+    var w = r.work || { tookEmail: 0, tookWeb: 0 }, calls = r.answered || 0, nonCall = w.tookEmail + w.tookWeb, hrs = (r.login || 0) / 3600;
+    if (hrs < 0.25 || (!waits.work && !calls)) return "<span class='muted'>–</span>";
+    return "<span title='" + (calls + nonCall) + " tickets in " + fmtDur(r.login) + ": " + calls + " from calls + " + nonCall + " email/webform" + (waits.work ? "" : " (email/webform not loaded yet)") + "'>" + ((calls + nonCall) / hrs).toFixed(1) + "</span>";
   }
   // Non-call tickets they took that day (assigned to them; email + webform origin), worked count on hover.
   function workCell(r) {
@@ -2532,7 +2534,7 @@
     return "<div class='board-h' style='margin-top:14px'>Email Team <span class='muted tiny' style='font-weight:400'>scored from Zendesk statuses · pickup = Email::New (unassigned) waiting over " + CONFIG.EMAIL_PICKUP_MIN + " min while they were ready</span></div>" +
       // Same column order as the phone table (Fred, 2026-10-16): Email/Webform, Tickets/hr, then status (phone: Talk),
       // Slow pickup (phone: RNA), Ready, First online (phone: Start), Lunch, Tickets, ES 30d, Logged in.
-      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Non-call tickets (email + webform) assigned to them, and how many they worked'>Email/Webform</th><th class='num' title='Email + webform tickets they took per hour logged in to Zendesk'>Tickets/hr</th><th>Zendesk status</th><th class='num'>Slow pickup</th><th class='num'>Ready</th><th class='num'>First online</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Non-call tickets (email + webform) assigned to them, and how many they worked'>Email/Webform</th><th class='num' title='All tickets they took per hour logged in to Zendesk: email/webform tickets taken (plus any calls)'>Tickets/hr</th><th>Zendesk status</th><th class='num'>Slow pickup</th><th class='num'>Ready</th><th class='num'>First online</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
       (list.map(function (r, i) {
         var p = r.parts, tip = "Ready " + p.ready + "/35" + (r.ready == null ? " (under 30 min logged in)" : "") + " · Pickup " + p.pickup + "/15 · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · Tickets " + (p.tickets == null ? "20/20 (not loaded)" : p.tickets + "/20") + " · ES escalations " + p.es + "/10. Fixed scale: 100 = every part met.";
         var startTxt = r.first === null ? "<span class='muted'>–</span>" : (r.firstUnsure ? "≤ " : "") + fmtClock(r.first) +
@@ -2650,7 +2652,7 @@
     var ranked = rows.filter(function (r) { return !r.sup; });
     var top = ranked.slice(0, 5), low = ranked.length > 5 ? ranked.slice(-Math.min(5, ranked.length - 5)).reverse() : [];
     function table(list, startRank, dir, total) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them today, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='Email + webform tickets they took per logged-in hour'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them today, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
             "<td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
@@ -2831,7 +2833,7 @@
     $("ydBody").innerHTML =
       "<div class='tiny' style='margin:4px 0 8px'><b>" + d.answered + "</b> queue calls answered · <b>" + d.abandoned + "</b> abandoned · <b>" + fmtDur(d.talk) + "</b> talk · " +
         agents.length + " agents scored" + (best ? " · best: <b>" + esc(best.name) + "</b>" : "") + "</div>" +
-      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them that day, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='Email + webform tickets they took per logged-in hour'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them that day, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
       (agents.map(function (r, i) { return rowHtml(r, i + 1); }).join("") || "<tr><td colspan='15' class='muted'>Nobody to score that day.</td></tr>") +
       (sups.length ? "<tr><td colspan='15' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
       "</tbody></table></div>" + emailTableHtml(d.email, d.to + 60000, ymd);
