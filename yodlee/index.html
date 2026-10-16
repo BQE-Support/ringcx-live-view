@@ -95,6 +95,8 @@ tbody tr.expand td { background: var(--surface-alt); }
 .events li:first-child { border-top: 0; }
 .signin { max-width: 440px; margin: 12vh auto; text-align: center; }
 .signin p { color: var(--ink-2); }
+.signin-form { display: flex; flex-direction: column; gap: 8px; max-width: 320px; margin: 16px auto 0; }
+.signin-form .search { max-width: none; }
 footer { text-align: center; color: var(--ink-3); font-size: 12px; margin-top: 28px; }
 @media (max-width: 640px) {
   h1 { font-size: 24px; } .toolbar { align-items: flex-start; } .refresh-note { text-align: left; }
@@ -108,8 +110,13 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; margin-top: 2
   <div id="signin" class="signin" hidden>
     <div class="eyebrow">Support · Yodlee</div>
     <h1>Yodlee Watch</h1>
-    <p id="signinMsg">Sign in with your RingCentral account to see Yodlee service requests next to their Zendesk tickets.</p>
-    <button class="btn primary" id="signinBtn">Sign in with RingCentral</button>
+    <p id="signinMsg">Sign in with the email and password Fred set up for you.</p>
+    <form id="signinForm" class="signin-form">
+      <input class="search" id="email" type="email" autocomplete="username" placeholder="you@bqe.com" required aria-label="Email">
+      <input class="search" id="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password">
+      <button class="btn primary" type="submit" id="signinBtn">Sign in</button>
+      <button class="btn" type="button" id="linkBtn">Email me a sign-in link instead</button>
+    </form>
   </div>
 
   <div id="app" hidden>
@@ -124,6 +131,7 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; margin-top: 2
         <div style="display:flex;gap:8px;align-items:center">
           <span class="tiny muted" id="viewer"></span>
           <button class="btn" id="themeBtn" title="Switch light/dark">Theme</button>
+          <button class="btn" id="signoutBtn">Sign out</button>
           <button class="btn primary" id="refreshBtn">Refresh</button>
         </div>
         <div class="refresh-note" id="refreshNote"></div>
@@ -185,14 +193,12 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; margin-top: 2
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
 <script>
 (function () {
   "use strict";
-  var VERSION = "1.0";
+  var VERSION = "1.1";
   var CONFIG = {
-    CLIENT_ID: "ZOg1i27x7SSdnbmeHGkLpT",             // "BQE RingCX Live View" RingCentral app (shared)
-    RC_SERVER: "https://platform.ringcentral.com",
-    RCX_SERVER: "https://ringcx.ringcentral.com",
     REDIRECT_URI: location.origin + location.pathname.replace(/index\.html$/, ""),
     SUPABASE_URL: "https://qevavlolbygnjynyikru.supabase.co",
     SUPABASE_ANON_KEY: "sb_publishable_dvaKYnU6ab7qzSTWMUl00Q_hEVNOVDk",
@@ -201,15 +207,13 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; margin-top: 2
     RECHECK_MIN: 30          // while the tab is visible, re-check for a newer snapshot this often
   };
   var IS_DEV = location.hostname === "localhost" && /[?&]dev\b/.test(location.search);
-  var STORE_KEY = "yodleeWatch.session.v1", PKCE_KEY = "yodleeWatch.pkce", DONE_KEY = "yodleeWatch.done.v1", THEME_KEY = "yodleeWatch.theme";
+  var STORE_KEY = "yodleeWatch.sb.v1", DONE_KEY = "yodleeWatch.done.v1", THEME_KEY = "yodleeWatch.theme";
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function load(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
   function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   function form(o) { return Object.keys(o).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(o[k]); }).join("&"); }
-  function b64url(bytes) { var s = ""; for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
-  function jwtClaims(t) { try { var p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); return JSON.parse(atob(p + "===".slice((p.length + 3) % 4))); } catch (e) { return {}; } }
   function ms(iso) { var t = Date.parse(iso || ""); return isNaN(t) ? null : t; }
   function ago(iso) {
     var t = ms(iso); if (t == null) return "";
@@ -241,59 +245,53 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; margin-top: 2
     save(THEME_KEY, dark ? "light" : "dark"); applyTheme();
   });
 
-  // ---------------- auth (RingCentral PKCE -> RingCX token, same as the RingCX Live View) ----------------
-  var session = load(STORE_KEY);
+  // ---------------- auth (Supabase Auth: email + password, or an emailed sign-in link) ----------------
+  // Accounts are created by Fred in Supabase (Authentication > Users > Add user, auto-confirm).
+  // The "yodlee" function decides access: confirmed account AND email on its VIEWER_EMAILS list.
+  var sb = window.supabase ? window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY,
+    { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: STORE_KEY, flowType: "pkce" } }) : null;
+  var session = null;
   function showSignin(msg) { $("app").hidden = true; $("signin").hidden = false; if (msg) $("signinMsg").textContent = msg; }
-  async function startSignIn() {
-    var verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
-    var challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-    var state = b64url(crypto.getRandomValues(new Uint8Array(16)));
-    try { sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier: verifier, state: state })); } catch (e) {}
-    location.href = CONFIG.RC_SERVER + "/restapi/oauth/authorize?" + form({ response_type: "code", client_id: CONFIG.CLIENT_ID, redirect_uri: CONFIG.REDIRECT_URI, state: state, code_challenge: challenge, code_challenge_method: "S256" });
+  function signinMsg(msg) { $("signinMsg").textContent = msg; }
+  $("signinForm").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var email = $("email").value.trim().toLowerCase(), pw = $("password").value;
+    if (!pw) { signinMsg("Enter your password, or use the emailed link."); return; }
+    $("signinBtn").disabled = true;
+    try {
+      var r = await sb.auth.signInWithPassword({ email: email, password: pw });
+      if (r.error) throw r.error;
+      $("password").value = "";
+      await start();
+    } catch (err) { signinMsg("Sign-in failed: " + (err.message || err)); }
+    finally { $("signinBtn").disabled = false; }
+  });
+  $("linkBtn").addEventListener("click", async function () {
+    var email = $("email").value.trim().toLowerCase();
+    if (!/@bqe\.com$/.test(email)) { signinMsg("Enter your @bqe.com email first."); return; }
+    $("linkBtn").disabled = true;
+    try {
+      var r = await sb.auth.signInWithOtp({ email: email, options: { shouldCreateUser: false, emailRedirectTo: CONFIG.REDIRECT_URI } });
+      if (r.error) throw r.error;
+      signinMsg("Check your inbox for a sign-in link from Supabase. If nothing arrives in a few minutes, use your password instead.");
+    } catch (err) { signinMsg("Couldn't send a link: " + (err.message || err)); }
+    finally { $("linkBtn").disabled = false; }
+  });
+  $("signoutBtn").addEventListener("click", async function () { try { await sb.auth.signOut(); } catch (e) {} location.reload(); });
+  async function currentSession() {
+    var r = await sb.auth.getSession();
+    session = r.data && r.data.session ? r.data.session : null;
+    return session;
   }
-  async function finishSignIn(code, state) {
-    var pk = null; try { pk = JSON.parse(sessionStorage.getItem(PKCE_KEY)); } catch (e) {}
-    history.replaceState(null, "", CONFIG.REDIRECT_URI);
-    if (!pk || pk.state !== state) throw new Error("Sign-in state mismatch. Please try again.");
-    var r = await fetch(CONFIG.RC_SERVER + "/restapi/oauth/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form({ grant_type: "authorization_code", code: code, redirect_uri: CONFIG.REDIRECT_URI, client_id: CONFIG.CLIENT_ID, code_verifier: pk.verifier }) });
-    if (!r.ok) throw new Error("RingCentral sign-in failed (HTTP " + r.status + ").");
-    var rc = await r.json();
-    var x = await fetch(CONFIG.RCX_SERVER + "/api/auth/login/rc/accesstoken?includeRefresh=true", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form({ rcAccessToken: rc.access_token, rcTokenType: "Bearer" }) });
-    if (!x.ok) throw new Error("RingCentral sign-in worked, but RingCX refused it (HTTP " + x.status + ").");
-    setSession(await x.json());
-  }
-  function setSession(t) {
-    var d = t.agentDetails && t.agentDetails[0];
-    var name = d ? ((d.firstName || "") + " " + (d.lastName || "")).trim() : (session && session.name) || "";
-    session = { rcxAccess: t.accessToken, rcxRefresh: t.refreshToken || (session && session.rcxRefresh), obtained: Date.now(), name: name };
-    save(STORE_KEY, session);
-  }
-  var refreshing = null;
-  function refreshToken() {
-    if (refreshing) return refreshing;
-    refreshing = (async function () {
-      try {
-        var r = await fetch(CONFIG.RCX_SERVER + "/api/auth/token/refresh", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: form({ refresh_token: session.rcxRefresh, rcTokenType: "Bearer" }) });
-        if (!r.ok) throw new Error("refresh HTTP " + r.status);
-        setSession(await r.json());
-      } finally { refreshing = null; }
-    })();
-    return refreshing;
-  }
-  function nearExpiry() { var c = jwtClaims(session.rcxAccess); return c.exp ? c.exp * 1000 - Date.now() < 60000 : Date.now() - session.obtained > 4 * 60000; }
 
   async function api(method, action) {
     if (IS_DEV) return devApi(method, action);
-    if (nearExpiry()) await refreshToken();
-    var h = { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess, "x-viewer-name": session.name || "" };
+    if (!(await currentSession())) { showSignin("Please sign in."); throw new Error("forbidden"); }
+    var h = { apikey: CONFIG.SUPABASE_ANON_KEY, "x-sb-token": session.access_token };
     if (method === "GET" && etag) h["If-None-Match"] = etag;
     var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/yodlee" + (action ? "?action=" + action : ""), { method: method, headers: h });
-    if (r.status === 401) { await refreshToken(); h["x-rcx-token"] = session.rcxAccess; r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/yodlee" + (action ? "?action=" + action : ""), { method: method, headers: h }); }
     var body = await r.json().catch(function () { return {}; });
-    if (r.status === 403) { showSignin(body.error || "Yodlee Watch isn't shared with you yet."); throw new Error("forbidden"); }
+    if (r.status === 401 || r.status === 403) { showSignin(body.error || "Please sign in again."); throw new Error("forbidden"); }
     if (!r.ok && r.status !== 429) throw new Error(body.error || ("HTTP " + r.status));
     if (method === "GET" && r.headers.get("ETag")) etag = r.headers.get("ETag");
     return body;
@@ -540,20 +538,23 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; margin-top: 2
   var lastLoad = Date.now();
   function showError(e) { if (e && e.message === "forbidden") return; $("banners").innerHTML = "<div class='banner critical'>Couldn't load Yodlee Watch: " + esc(e && e.message || e) + "</div>"; }
 
+  async function start() {
+    $("signin").hidden = true; $("app").hidden = false;
+    $("signoutBtn").hidden = IS_DEV;
+    $("viewer").textContent = IS_DEV ? "Local test data" : (session && session.user ? "Signed in as " + session.user.email : "");
+    try { await loadData(); } catch (e) { showError(e); }
+  }
   async function boot() {
     $("ver").textContent = "v" + VERSION;
-    $("signinBtn").addEventListener("click", function () { startSignIn().catch(function (e) { showSignin(e.message); }); });
+    if (IS_DEV) return start();
+    if (!sb) { showSignin("The sign-in library didn't load. Check your connection and reload."); return; }
+    // An emailed sign-in link lands here with ?code=...; supabase-js exchanges it (detectSessionInUrl).
     var qs = new URLSearchParams(location.search);
-    try {
-      if (qs.get("code")) await finishSignIn(qs.get("code"), qs.get("state"));
-      else if (qs.get("error")) { history.replaceState(null, "", CONFIG.REDIRECT_URI); showSignin("Sign-in was cancelled or refused: " + qs.get("error")); return; }
-    } catch (e) { showSignin(e.message); return; }
-    if (!IS_DEV && !(session && session.rcxAccess)) { showSignin(); return; }
-    $("signin").hidden = true; $("app").hidden = false;
-    $("viewer").textContent = IS_DEV ? "Local test data" : (session.name ? "Signed in as " + session.name : "");
-    try { await loadData(); } catch (e) { if (String(e.message).indexOf("refresh HTTP") === 0) { localStorage.removeItem(STORE_KEY); session = null; showSignin("Your sign-in expired. Please sign in again."); } else showError(e); }
-  }
-  boot();
+    if (qs.get("error_description")) { history.replaceState(null, "", CONFIG.REDIRECT_URI); showSignin("Sign-in link didn't work: " + qs.get("error_description")); return; }
+    if (qs.get("code")) { try { await sb.auth.exchangeCodeForSession(qs.get("code")); } catch (e) {} history.replaceState(null, "", CONFIG.REDIRECT_URI); }
+    if (!(await currentSession())) { showSignin(); return; }
+    start();
+  }  boot();
 })();
 </script>
 </body>
