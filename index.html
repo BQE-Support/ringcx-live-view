@@ -438,7 +438,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.60</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.61</footer>
     </main>
   </section>
 </div>
@@ -3476,6 +3476,24 @@
     var c = inlineBox.querySelector("[data-drill-close]");
     if (c) { c.removeAttribute("data-drill-close"); c.setAttribute("data-inline-close", ""); }
   }
+  // Clicking outside a drill-down closes it (Fred, 2026-10-16): the KPI drill, the inline Agents / Logins panels, the
+  // Performance / Yesterday ticket lists and the Yesterday status lists. Clicks inside one, on anything clickable
+  // (links, buttons, form fields, KPI tiles, column headers), or that finish selecting text leave them open, so
+  // opening another drill-down or copying from one still works. Runs before the page's own click handlers.
+  document.addEventListener("click", function (ev) {
+    var t = ev.target;
+    if (!t || !t.closest) return;
+    if (t.closest("#kpiDrill, .inline-drill, .inline-box, .act-row, a, button, input, textarea, select, label, summary, .kpi, th, [role=button], [data-filter]")) return;
+    if (window.getSelection && String(window.getSelection())) return;
+    var closedKpi = !!drill, any = closedKpi;
+    if (inline) { inline = null; any = true; }
+    if (loginInline) { loginInline = null; any = true; }
+    if (Object.keys(tkOpen).length) { tkOpen = {}; any = true; }
+    if (yd.open && Object.keys(yd.open).length) { yd.open = {}; any = true; }
+    if (!any) return;
+    if (closedKpi) { drill = null; setFilter("all", true); } else render();   // same as the drill's own Close button
+    renderDayIfOpen();
+  }, true);
   function toggleInline(kind, id, name) {
     var same = inline && inline.kind === kind && rowKey(inline.id, inline.name) === rowKey(id, name);
     inline = same ? null : { kind: kind, id: id, name: name, fresh: true };
