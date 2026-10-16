@@ -434,7 +434,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.50</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.51</footer>
     </main>
   </section>
 </div>
@@ -2933,11 +2933,27 @@
     var x = (window.__watchByKey || {})[key], text = String(drafts[key] || "").trim();
     if (!x) return;
     if (text.length < 3) { alert("Please write a short reason (at least 3 characters)."); return; }
+    if (!startSaving("review:" + key)) return;
     try {
       await reviewsApi("POST", { action: "add", agentKey: key, agentName: fullName(x.a), signature: sigOf(x), reason: text });
       delete drafts[key]; await loadReviews(); tellOthersReviewsChanged();
     } catch (err) { alert("Couldn't save the review: " + err.message); }
+    finally { doneSaving("review:" + key); }
   }
+  // One save at a time per box (Fred, 2026-10-16: Enter + a click saved Armando's review twice, 1.4 s apart).
+  // The pressed Save button shows "Saving…" until it's done; the reviews function also drops an identical repeat.
+  var savingNow = {};
+  function startSaving(k) {
+    if (savingNow[k]) return false;
+    savingNow[k] = true;
+    document.querySelectorAll("[data-review-save],[data-lnote-save],[data-lnote-edit-save]").forEach(function (b) {
+      var bk = b.hasAttribute("data-review-save") ? "review:" + b.getAttribute("data-review-save")
+        : b.hasAttribute("data-lnote-save") ? "login:" + b.getAttribute("data-lnote-save") : "edit:" + b.getAttribute("data-lnote-edit-save");
+      if (bk === k) { b.disabled = true; b.textContent = "Saving…"; }
+    });
+    return true;
+  }
+  function doneSaving(k) { delete savingNow[k]; }
   // Logins today notes: same reviews table/function, signature "login" keeps them apart from watch reviews.
   // Shared with every viewer, stamped with who wrote them and when; no snooze, just notes.
   var LOGIN_SIG = "login";
@@ -2973,18 +2989,22 @@
   async function saveLoginNote(k, name) {
     var dk = "login:" + k, text = String(drafts[dk] || "").trim();
     if (text.length < 3) { alert("Please write a short note (at least 3 characters)."); return; }
+    if (!startSaving(dk)) return;
     try {
       await reviewsApi("POST", { action: "add", agentKey: k, agentName: name, signature: LOGIN_SIG, reason: text });
       delete drafts[dk]; await loadReviews(); tellOthersReviewsChanged();
     } catch (err) { alert("Couldn't save the note: " + err.message); }
+    finally { doneSaving(dk); }
   }
   async function editLoginNote(id) {
     var ek = "edit:" + id, text = String(drafts[ek] || "").trim();
     if (text.length < 3) { alert("Please write a short note (at least 3 characters)."); return; }
+    if (!startSaving(ek)) return;
     try {
       await reviewsApi("POST", { action: "edit", id: +id, reason: text });
       delete drafts[ek]; await loadReviews(); tellOthersReviewsChanged();
     } catch (err) { alert("Couldn't save the change: " + err.message); }
+    finally { doneSaving(ek); }
   }
   async function undoReview(id) {
     try { await reviewsApi("POST", { action: "undo", id: id }); await loadReviews(); tellOthersReviewsChanged(); }
