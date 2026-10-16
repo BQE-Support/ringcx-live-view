@@ -434,7 +434,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.49</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.50</footer>
     </main>
   </section>
 </div>
@@ -770,12 +770,14 @@
       actCache[k] = { at: Date.now(), data: j };
     } catch (x) { actCache[k] = { at: Date.now(), err: x.message, data: c && c.data }; }
     if (data.fetchedAt) render();
+    renderDayIfOpen();   // the Yesterday section's drill-downs use the same dropdowns
   }
   function actToggle(name, from, to, live) {
     var k = actKey(name, from);
     if (actOpen[k]) delete actOpen[k]; else actOpen[k] = true;
     if (actOpen[k]) loadActivity(name, from, to, live);
     render();
+    renderDayIfOpen();
   }
   function actBlock(title, part, items) {
     if (!part) return "";
@@ -1459,7 +1461,7 @@
   function observe(agents, fetchedAt, noSave) {
     purgeL2Logins();
     if (hist.day !== todayKey()) hist = { day: todayKey(), since: fetchedAt, agents: {} };
-    var keepAfter = fetchedAt - 10 * 3600 * 1000;
+    var keepAfter = hist.keepAll ? 0 : fetchedAt - 10 * 3600 * 1000;   // keepAll: a past day replayed whole (Yesterday)
     // Was this page watching without a break? (Closed/hidden pages leave gaps that aren't real logouts.)
     var contiguous = hist.lastPoll && fetchedAt - hist.lastPoll <= 3 * intervalSec * 1000 + 60000;
     if (!contiguous) hist.watchStart = fetchedAt;
@@ -2437,7 +2439,7 @@
     try {
       intervalSec = 60;   // the snapshots' cadence
       var t0 = Date.parse(polls[0].ts), t1 = Date.parse(polls[polls.length - 1].ts);
-      hist = { day: todayKey(), since: t0, agents: {}, source: "server", endAt: t1 + 60000 };
+      hist = { day: todayKey(), since: t0, agents: {}, source: "server", endAt: t1 + 60000, keepAll: true };
       polls.forEach(function (p) {
         observe((p.a || []).map(function (row) { var o = {}; fields.forEach(function (f, i) { o[f] = row[i]; }); return o; }), Date.parse(p.ts), true);
       });
@@ -2460,7 +2462,9 @@
         if (r.call_result === "ABANDON" || hungUpRinging(r)) abandoned++;
         else if (r.connected_name) { answered++; talk += +r.connected_duration || 0; }
       });
-      return { rows: rows, answered: answered, abandoned: abandoned, talk: talk, from: t0, to: t1 };
+      var byName = {};   // that day's history per person, for the status / activity drill-downs
+      Object.keys(hist.agents).forEach(function (id) { var h = hist.agents[id]; if (h.name) byName[normName(h.name)] = h; });
+      return { rows: rows, answered: answered, abandoned: abandoned, talk: talk, from: t0, to: t1, byName: byName };
     } finally {
       hist = saved.hist; abandons = saved.abandons; data.agents = saved.agents; loginByName = saved.loginByName; intervalSec = saved.intervalSec;
       callIdx.at = -2;   // today's call index rebuilds on next use
@@ -2510,14 +2514,16 @@
       return t + (li.start === null ? "" : " <span class='muted tiny' title='Scheduled " + clockOf(li.start) + (li.conf === "confirmed" ? "" : "; first login not confirmed, so not counted") + "'>" + (li.conf === "confirmed" || li.late === null || li.late <= CONFIG.LOGIN_GRACE_MIN ? "ok" : "?") + "</span>");
     }
     function rowHtml(r, rank) {
-      return "<tr><td class='num'>" + (rank || "") + "</td><td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+      var k = normName(r.name), open = !!yd.open[ymd + "|" + k];
+      return "<tr" + (open ? " class='flag-warn'" : "") + "><td class='num'>" + (rank || "") + "</td><td><a href='#' data-yd-agent='" + esc(k) + "' title='Show this day&#39;s status changes, with Zendesk / Jira activity for each'>" + (open ? "▾ " : "▸ ") + esc(r.name) + "</a>" + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td class='num' title='" + r.raw.toFixed(1) + " points: calls/hr × 10, minus 5 per RNA, plus Ready × 10, minus lunch/late penalties. That day&#39;s best = 100.'><b>" + Math.round(r.score) + "</b></td>" +
         "<td class='num'>" + r.answered + "</td><td class='num'>" + r.perHr.toFixed(1) + "</td><td class='num'>" + fmtDur(r.talk) + "</td>" +
         "<td class='num'>" + rnaCell(r.rna) + "</td>" +
         "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
         "<td class='num'>" + startCell(r) + "</td>" +
         "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
-        "<td class='num'>" + fmtDur(r.login) + "</td></tr>";
+        "<td class='num'>" + fmtDur(r.login) + "</td></tr>" +
+        (open ? "<tr class='inline-drill'><td colspan='11'><div class='inline-box'>" + dayLogHtml(d.byName[k], r.name) + "</div></td></tr>" : "");
     }
     var best = agents[0];
     $("ydBody").innerHTML =
@@ -2528,6 +2534,38 @@
       (sups.length ? "<tr><td colspan='11' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
       "</tbody></table></div>";
   }
+  // One person's whole finished day: every status change (newest first) plus logouts, each with the same
+  // Zendesk / Jira Activity dropdown as today's drill-down. Nothing is highlighted: there is no "last 60 min".
+  function dayLogHtml(h, name) {
+    if (!h) return "<span class='muted'>No status history for " + esc(name) + " that day.</span>";
+    var ev = (h.ev || []).filter(function (x) { return !x.hidden; }).slice();
+    var nChanges = (h.ev || []).filter(function (x) { return !isCallCycle(x); }).reduce(function (n, x) { return n + (x.hidden ? 2 : 1); }, 0);
+    (h.gaps || []).forEach(function (g) {
+      var before = ev.filter(function (x) { return !x.gap && x.t <= g.from; }).sort(function (x, y) { return y.t - x.t; })[0];
+      ev.push({ t: g.from, gap: true, back: g.to, fl: before ? statusName(before.tl, before.tb) : "…" });
+    });
+    ev.sort(function (x, y) { return y.t - x.t; });
+    var end = h.lastSeen || (h.start || 0);
+    var rows = ev.map(function (x, i) {
+      if (x.gap) return "<tr class='muted'><td>" + fmtClock(x.t) + "</td><td>" + esc(x.fl) + "</td><td><i>Logged out</i></td><td class='num' title='Back at " + fmtClock(x.back) + "'>" + fmtDur(Math.max(0, (x.back - x.t) / 1000)) + "</td><td>" + actCell(name, x.t, x.back, false) + "</td></tr>" + actRow(name, x.t, x.back, false);
+      var until = i === 0 ? Math.max(end, x.t) : ev[i - 1].t;
+      return "<tr><td>" + fmtClock(x.t) + "</td><td>" + esc(statusName(x.fl, x.fb)) + "</td><td>" + esc(statusName(x.tl, x.tb)) + (isCallCycle(x) ? "" : " <span class='chip info'>change</span>") + "</td><td class='num'>" + fmtDur(Math.max(0, (until - x.t) / 1000)) + (i === 0 ? " <span class='muted tiny'>(to last seen)</span>" : "") + "</td><td>" + actCell(name, x.t, until, false) + "</td></tr>" + actRow(name, x.t, until, false);
+    }).join("");
+    return "<div class='section-title' style='font-size:15px'>Status changes: " + esc(name) + " <span class='sub'>" + ymdLabel(ptYmd(yd.back)) + " · " + nChanges + " status change" + (nChanges === 1 ? "" : "s") + " (taking calls not counted) · last seen " + fmtClock(end) + "</span></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>From</th><th>To</th><th class='num'>Lasted</th><th>Zendesk / Jira</th></tr></thead><tbody>" +
+      (rows || "<tr><td colspan='5' class='muted'>No status changes recorded that day.</td></tr>") + "</tbody></table></div>" +
+      "<div class='tiny muted' style='margin-top:6px'>\"change\" marks the ones that count as status changes (not taking calls). Grey \"Logged out\" rows are logouts of a few minutes or more. Activity shows the Zendesk / Jira work during that status.</div>";
+  }
+  function renderDayIfOpen() { if (yd.cache[ptYmd(yd.back)] && $("ydPanel").open) renderDay(); }
+  yd.open = {};
+  $("ydBody").addEventListener("click", function (ev) {
+    var a = ev.target.closest("[data-yd-agent]");
+    if (!a) return;
+    ev.preventDefault();
+    var k = ptYmd(yd.back) + "|" + a.getAttribute("data-yd-agent");
+    if (yd.open[k]) delete yd.open[k]; else yd.open[k] = true;
+    renderDay();
+  });
   $("ydPanel").addEventListener("toggle", function () { if (this.open) loadDay(); });
   $("ydPrev").addEventListener("click", function () { if (yd.back < 7) { yd.back++; loadDay(); } });
   $("ydNext").addEventListener("click", function () { if (yd.back > 1) { yd.back--; loadDay(); } });
