@@ -438,7 +438,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.59</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.60</footer>
     </main>
   </section>
 </div>
@@ -1153,7 +1153,7 @@
       var set = {}, groups = await api("agentGroups");
       for (var i = 0; i < groups.length; i++) {
         var agents = await api("agentGroups/" + groups[i].agentGroupId + "/agents");
-        agents.forEach(function (a) { if (String(a.agentType).toUpperCase() === "SUPERVISOR") set[normName(a.firstName + " " + a.lastName)] = 1; });
+        agents.forEach(function (a) { if (String(a.agentType).toUpperCase() === "SUPERVISOR") set[normName(a.firstName + " " + a.lastName)] = String(a.firstName + " " + a.lastName).trim(); });
       }
       supNames = set; renderLogins(elapsed());
     } catch (x) { /* not critical: supervisors seen today are still left out */ }
@@ -1266,6 +1266,24 @@
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN) return;
       rows.push({ name: s.name, sup: isSupervisorName(s.name, false), start: s.shift, first: null, late: nowMin - s.shift, logins: 0, total: 0, missing: true });
     });
+    // Supervisors with no RingCX login today: their Zendesk login instead (Fred, 2026-10-16), from the server's
+    // every-minute Zendesk statuses (managers only, like supervisors' logins).
+    var supCands = {};
+    rows.forEach(function (r, i) { if (r.missing && r.sup) supCands[normName(r.name)] = { idx: i, name: r.name, start: r.start }; });
+    Object.keys(supNames || {}).concat(CONFIG.TREAT_AS_SUPERVISOR.map(normName)).forEach(function (k) {
+      if (seenNames[k] || supCands[k] || out[k]) return;
+      var nm = supNames && typeof supNames[k] === "string" ? supNames[k] : CONFIG.TREAT_AS_SUPERVISOR.filter(function (x) { return normName(x) === k; })[0];
+      if (!nm || isLoginExcluded(nm)) return;
+      var s = sched[k];
+      supCands[k] = { idx: -1, name: nm, start: s && s.shift !== null && s.days.indexOf(n.day) >= 0 ? s.shift : null };
+    });
+    Object.keys(supCands).forEach(function (k) {
+      var c = supCands[k], z = zdDay(c.name); if (!z) return;
+      var first = ptMinOf(z.first);
+      var row = { name: c.name, sup: true, start: c.start, first: first, late: c.start !== null ? first - c.start : null, conf: z.firstUnsure ? "zdunsure" : "zd",
+        logins: 1, total: z.logged / 1000, zd: z, lastSeen: z.last };
+      if (c.idx >= 0) rows[c.idx] = row; else rows.push(row);
+    });
     rows = rows.filter(function (r) { return inQueue(r.name); });   // queue filter
     rows.sort(function (x, y) { return (x.sup ? 1 : 0) - (y.sup ? 1 : 0) || (y.missing ? 1 : 0) - (x.missing ? 1 : 0) || (y.late || -999) - (x.late || -999) || x.name.localeCompare(y.name); });
     // Only a CONFIRMED first login can be red. "On a call by" is an upper bound (at most that late),
@@ -1274,6 +1292,7 @@
       if (r.late === null) return "<span class='muted'>–</span>";
       if (r.late <= CONFIG.LOGIN_GRACE_MIN) return "<span class='muted'>on time</span>";
       if (r.conf === "unknown") return "<span class='muted' title='They had an earlier session this page never saw, so their real first login was earlier than this.'>can't tell</span>";
+      if (r.conf === "zdunsure") return "<span class='muted' title='Online in Zendesk before the server started checking today, so possibly on time. Not counted as late.'>at most " + fmtShort(r.late * 60) + "</span>";
       if (r.conf === "call" || r.conf === "est") return "<span class='muted' title='At most this late, possibly on time: the first login was an earlier session this page never saw. Not counted as late.'>at most " + fmtShort(r.late * 60) + "</span>";
       return "<span class='" + (r.late >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "'>" + fmtShort(r.late * 60) + "</span>";
     }
@@ -1282,16 +1301,20 @@
       if (r.conf === "call") return "≤ " + clockOf(r.first) + " <span class='chip info' title='RingCX shows an earlier session this page did not see. Their earliest queue call today was at this time, so they were logged in by then.'>on a call by</span>";
       if (r.conf === "est") return "≤ " + clockOf(r.first) + " <span class='chip info' title='RingCX shows earlier login time this page did not see. Working back from the earliest session we saw by that much time puts the first login at or before this.'>from login time</span>";
       if (r.conf === "unknown") return "before " + clockOf(r.first) + " <span class='chip info' title='RingCX shows an earlier session this page did not see, and there was no earlier call to pin it down.'>earlier session not seen</span>";
+      if (r.conf === "zd") return clockOf(r.first) + " <span class='chip info' title='No RingCX login today: first time online in Zendesk (the server checks every minute)'>Zendesk</span>";
+      if (r.conf === "zdunsure") return "≤ " + clockOf(r.first) + " <span class='chip info' title='No RingCX login today. Already online in Zendesk when the server started checking today.'>Zendesk</span>";
       return clockOf(r.first) + " <span class='muted tiny' title='RingCX day total matches the sessions this page saw.'>confirmed</span>";
     }
     // Only a confirmed first login counts as late; an "at most" bound may well be on time.
-    function isLate(r) { return r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN && (r.conf === "confirmed" || r.missing); }
+    function isLate(r) { return r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN && (r.conf === "confirmed" || r.conf === "zd" || r.missing); }
     body.innerHTML = rows.map(function (r, i) {
       var group = r.sup && (i === 0 || !rows[i - 1].sup)
         ? "<tr><td colspan='8' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" : "";
-      var flag = r.missing || (r.conf === "confirmed" && r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (isLate(r) ? "flag-warn" : "");
+      var flag = r.missing || ((r.conf === "confirmed" || r.conf === "zd") && r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (isLate(r) ? "flag-warn" : "");
       var pastEnd = r.live && r.start !== null && nowMin > r.start + CONFIG.SHIFT_HOURS * 60;
-      var status = r.missing ? "<span class='chip crit'>Not logged in yet</span>"
+      var status = r.zd ? (r.zd.now !== "offline" ? "<span class='st st-green' style='font-weight:400'>In Zendesk: " + esc(r.zd.now) + "</span> <span class='muted tiny'>(no RingCX login)</span>"
+          : "<span class='muted'>Offline in Zendesk · last seen " + fmtClock(r.zd.last) + " (no RingCX login)</span>")
+        : r.missing ? "<span class='chip crit'>Not logged in yet</span>"
         : (r.live ? "<span class='st st-green' style='font-weight:400'>Logged in</span>" +
             (pastEnd ? " <span class='chip warn'>Past shift end (" + clockOf(r.start + CONFIG.SHIFT_HOURS * 60) + ") by " + fmtShort((nowMin - r.start - CONFIG.SHIFT_HOURS * 60) * 60) + "</span> " + rcxLogoutLink(r.name) : "")
           : "<span class='muted'>Logged out" + (r.lastSeen ? " · last seen " + fmtClock(r.lastSeen) : "") + "</span>");
@@ -2421,6 +2444,19 @@
   function zdRowFor(name, p, f) {
     var iName = f.indexOf("name"), iEmail = f.indexOf("email");
     return (p.a || []).filter(function (r) { return waitIsFor(name, { name: r[iName], email: r[iEmail] }); })[0] || null;
+  }
+  // A person's Zendesk day from the server's every-minute statuses: first / last time online, time online, status now.
+  function zdDay(name) {
+    var av = waits.avail; if (!av || !av.polls || !av.polls.length) return null;
+    var f = av.fields || [], iS = f.indexOf("status"), asOf = Date.now(), first = null, last = null, logged = 0, now = "offline", unsure = false;
+    av.polls.forEach(function (p, i) {
+      var row = zdRowFor(name, p, f), st = row ? String(row[iS]) : "offline";
+      var ts = Date.parse(p.ts), next = i + 1 < av.polls.length ? Date.parse(av.polls[i + 1].ts) : Math.min(asOf, ts + 60000);
+      var step = Math.max(0, Math.min(next - ts, 180000));
+      if (i === av.polls.length - 1) now = st;
+      if (st !== "offline") { if (first === null) { first = ts; unsure = i === 0; } last = ts; logged += step; }
+    });
+    return first === null ? null : { first: first, last: last, logged: logged, now: now, firstUnsure: unsure };
   }
   function emailCredit(name, h) {
     var av = waits.avail, out = { ready: 0, seen: 0 };
