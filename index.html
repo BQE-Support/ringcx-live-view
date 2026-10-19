@@ -415,7 +415,7 @@
           <li><b>SLA</b> is RingCX's own service-level count for each queue, from its real-time data (<code>slaPass</code> / <code>slaFail</code>). A call passes if it is answered within the queue's SLA time, which is 30 seconds on every BQE queue. Calls answered later, or abandoned after 30 seconds, fail. The top tile adds up all queues. The counts are today's running totals.</li>
           <li><b>Queue hours:</b> the viewer shows a queue as Open only if RingCX says it's open and, for queues with configured hours, the current time is inside them. Payroll Specialist is open M–F 6am–4pm Pacific, which matches its RingCX schedule. Outside those hours it shows Closed and raises no staffing alerts. If RingCX ever reports it open outside those hours, the page flags it as a schedule problem.</li>
           <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up. The tiles split this into <b>Busy</b> (yellow statuses) and <b>Break / lunch</b> (grey: On-Break, Away, Lunch).</li>
-          <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, whenever they are Available or Engaged. Connor Lenhart is treated as a supervisor too (TREAT_AS_SUPERVISOR in the page settings).</li>
+          <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, whenever they are Available or Engaged. Victor Guadarrama is treated as a supervisor too (TREAT_AS_SUPERVISOR in the page settings).</li>
           <li>The avoidance watch flags an agent only when at least <b><span data-cfg="MIN_SIGNALS"></span> of these signals</b> are true at the same time. One signal alone is not flagged.
             <ul>
               <li>Any RNA (ring, no answer) today. Two or more is critical.</li>
@@ -432,7 +432,7 @@
               <li><b>Lunch within the hour, 8:</b> 5-15 min over = 4, more = 0.</li>
               <li><b>Tickets, 15:</b> tickets waiting on them (Zendesk assigned and Open, or On Hold with no due date or a passed one; ES "Awaiting info" or "Resolved to L1") must be handled by the end of their first shift that starts after the ticket got into that state. Each one still waiting after its deadline costs 5; still waiting 2+ days past it costs 10. The server checks every 10 minutes. Click the Tickets cell for the list with links.</li>
             </ul>
-            Grades: 90+ green, 75-89 normal, 60-74 yellow, under 60 red. Hover a score for its breakdown. Top 5 and Bottom 5 rank agents only. Supervisors (including Connor Lenhart and Victor Guadarrama) are scored too, but they appear only in "Show all", with a Supervisor tag.
+            Grades: 90+ green, 75-89 normal, 60-74 yellow, under 60 red. Hover a score for its breakdown. Top 5 and Bottom 5 rank agents only. Supervisors (including Victor Guadarrama) are scored too, but they appear only in "Show all", with a Supervisor tag.
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
           <li><b>"WORKING"</b> on its own (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets a "Lost Connection" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
           <li><b>Vendor status</b> in What to Watch comes from each vendor's public status page, checked every 2 minutes: <b>Gusto</b> (the API component only), <b>GlobalPay</b> (Worldpay, plus Payrix US), and <b>BQE CORE</b> (both regions). It shows a degraded or down component, an open incident, or maintenance in progress. Red = major outage or a major/critical incident; yellow = anything else. Click it to open the status page. Global Payments has no public developer status page we could find, so GlobalPay covers Worldpay and Payrix.</li>
@@ -444,7 +444,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.66</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.67</footer>
     </main>
   </section>
 </div>
@@ -539,7 +539,8 @@
       "Payroll Specialist": { days: [1, 2, 3, 4, 5], open: "06:00", close: "16:00", tz: "America/Los_Angeles", label: "M–F 6am–4pm PT" }
     },
     // Agents treated exactly like RingCX supervisors (agent type AGENT in RingCX, supervisor role at BQE).
-    TREAT_AS_SUPERVISOR: ["Connor Lenhart", "Victor Guadarrama"],
+    TREAT_AS_SUPERVISOR: ["Victor Guadarrama"],
+    SUPERVISOR_TAG: ["Connor Lenhart"],
     // People who are supervisors only part of the day (Pacific). Outside these hours they count as
     // agents everywhere, whatever their RingCX type (Fred, 2026-10-14: Peter takes calls, supervises 3-5 PM).
     SUPERVISOR_HOURS: { "Peter Taylor": { from: "15:00", to: "17:00" } },
@@ -547,7 +548,7 @@
     LOGIN_EXCLUDE: ["Erasmo Robles", "Ricardo Andrade"],
     // L2s' logins are shown only to managers (Fred, 2026-10-15). L2 list confirmed by Fred (the roster tier lookup was out of date).
     MANAGER_IDS: ["3299715", "3301145", "3301139"],   // Fred, Ricardo, Erasmo
-    L2_LOGINS_MANAGERS_ONLY: ["Connor Lenhart", "Adnan Bakshi", "Daniel Suyo", "Joel Cazares", "Paulina Leal", "Salvador Rojas"]   // Fred 2026-10-15; Peter counts as L1
+    L2_LOGINS_MANAGERS_ONLY: ["Adnan Bakshi", "Daniel Suyo", "Joel Cazares", "Paulina Leal", "Salvador Rojas"]   // Fred 2026-10-15; Peter counts as L1
   };
   var IS_LOCAL_DEV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.port === "8765";
   var STORE_KEY = "rcxLiveView.session.v1";
@@ -1176,6 +1177,7 @@
   function isSupervisorName(name, isSup) {
     var k = normName(name), o = supHoursOverride(name);
     if (o !== null) return o;
+    if (hasSupTag(name)) return false;
     return !!isSup || !!(supNames && supNames[k]) || CONFIG.TREAT_AS_SUPERVISOR.some(function (x) { return normName(x) === k; });
   }
   function isL2Name(name) { var k = normName(name); return (CONFIG.L2_LOGINS_MANAGERS_ONLY || []).some(function (x) { return normName(x) === k; }); }
@@ -1183,7 +1185,7 @@
   // SUPERVISOR_HOURS (Peter), who count as agents here. Static, not by the clock.
   function isSupForLogins(name) {
     var k = normName(name);
-    if (Object.keys(CONFIG.SUPERVISOR_HOURS || {}).some(function (x) { return normName(x) === k; })) return false;
+    if (Object.keys(CONFIG.SUPERVISOR_HOURS || {}).some(function (x) { return normName(x) === k; }) || hasSupTag(name)) return false;
     return !!(supNames && supNames[k]) || CONFIG.TREAT_AS_SUPERVISOR.some(function (x) { return normName(x) === k; });
   }
   // Non-managers see agents' logins only (Fred, 2026-10-15): L2s and supervisors are hidden.
@@ -1477,6 +1479,7 @@
   }
   function isSupervisor(a) {
     var o = supHoursOverride(fullName(a));
+    if (o === null && hasSupTag(fullName(a))) return false;
     return o !== null ? o : String(a.agentType || "").toUpperCase() === "SUPERVISOR";
   }
   // Supervisors only count as call-takers while Available or on a call that came from a queue.
@@ -2676,7 +2679,7 @@
       if (live) { var ds = dayStats(live); answered = ds.calls; c = { uiis: c.uiis, talk: ds.talk }; p.rna = ds.rna; p.login = ds.login; }
       // Logged-in time: RingCX's own total for the whole day (every session), when it's higher than what this page saw.
       p.login = Math.max(p.login, (hist.agents[p.id] || {}).dayLogin || 0);
-      p.sup = isSupervisorName(n, p.sup);   // by name too: a history entry can miss the flag (Connor showed untagged)
+      p.sup = isSupervisorName(n, p.sup);   // by name too: a history entry can miss the flag
       var eligible = answered > 0 || (p.onDuty !== false && !p.sup && p.login >= CONFIG.BOARD_MIN_LOGIN_SEC);
       if (!eligible || p.login < 60) return;
       var perHr = answered / (p.login / 3600);
@@ -2724,7 +2727,7 @@
       return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num'>Calls</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them today, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
-            "<td>" + esc(r.name) + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+            "<td>" + esc(r.name) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
             "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
             "<td class='num'>" + r.answered + "</td>" +
             "<td class='num'>" + r.perHr.toFixed(1) + "</td>" +
@@ -2886,7 +2889,7 @@
     }
     function rowHtml(r, rank) {
       var k = normName(r.name), open = !!yd.open[ymd + "|" + k];
-      return "<tr" + (open ? " class='flag-warn'" : "") + "><td class='num'>" + (rank || "") + "</td><td><a href='#' data-yd-agent='" + esc(k) + "' title='Show this day&#39;s status changes, with Zendesk / Jira activity for each'>" + (open ? "▾ " : "▸ ") + esc(r.name) + "</a>" + (r.sup ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+      return "<tr" + (open ? " class='flag-warn'" : "") + "><td class='num'>" + (rank || "") + "</td><td><a href='#' data-yd-agent='" + esc(k) + "' title='Show this day&#39;s status changes, with Zendesk / Jira activity for each'>" + (open ? "▾ " : "▸ ") + esc(r.name) + "</a>" + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
         "<td class='num'>" + r.answered + "</td><td class='num'>" + r.perHr.toFixed(1) + "</td><td class='num'>" + workCell(r) + "</td><td class='num'>" + tookPerHr(r) + "</td><td class='num'>" + fmtDur(r.talk) + "</td>" +
         "<td class='num'>" + rnaCell(r.rna) + "</td>" +
@@ -3231,7 +3234,7 @@
       (rows.map(function (r) {
         var a = r.a;
         return "<tr class='" + (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "") + "'>" +
-          "<td>" + esc(fullName(a)) + ((isSupervisor(a) || treatedAsSupervisor(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+          "<td>" + esc(fullName(a)) + ((isSupervisor(a) || treatedAsSupervisor(a) || hasSupTag(fullName(a))) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
           "<td>" + stateHtml(a) + "</td>" +
           "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
           "<td>" + esc(isOnCall(a) ? (+a.gateId > 0 ? gateName(a.gateId) : "Outbound/direct") : "") + "</td>" +
@@ -3482,7 +3485,7 @@
             "<button class='btn' data-review-save='" + esc(key) + "'>Save</button> <button class='btn' data-review-cancel='" + esc(key) + "'>Cancel</button>"
           : "<button class='btn' data-review-open='" + esc(key) + "'>Review</button>";
         return "<tr class='flag-" + w.lvl + "'>" +
-          "<td>" + esc(fullName(a)) + "</td>" +
+          "<td>" + esc(fullName(a)) + (hasSupTag(fullName(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
           "<td>" + stateHtml(a) + "</td>" +
           "<td class='wrap'>" + w.reasons.map(function (r) { return "<span class='chip " + r.lvl + "'>" + esc(r.text) + "</span>"; }).join("") + prior + "</td>" +
           "<td class='num'>" + rnaCell(dayStats(a).rna) + "</td>" +
@@ -3597,8 +3600,10 @@
     if (inline && kind === "calls") loadAbandons(true);
     render();
   }
+  function hasSupTag(name) { var k = normName(name); return (CONFIG.SUPERVISOR_TAG || []).some(function (x) { return normName(x) === k; }); }
   function nameLink(id, name) {
-    return "<a href='#' class='name-link' data-status-log='" + esc(id) + "' data-status-name='" + esc(name) + "' data-status-mode='changes' title='Show this agent&#39;s status changes today'>" + esc(name) + "</a>";
+    return "<a href='#' class='name-link' data-status-log='" + esc(id) + "' data-status-name='" + esc(name) + "' data-status-mode='changes' title='Show this agent&#39;s status changes today'>" + esc(name) + "</a>" +
+      (hasSupTag(name) ? " <span class='chip info'>Supervisor</span>" : "");
   }
   // Next in line for the filtered queue (Fred, 2026-10-15). RingCX offers a queue's call to the agents
   // in that queue's available list (agents logged into that queue and Available): highest rank first, then
@@ -3682,7 +3687,7 @@
       }
       var a = r.a, cls = (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "");
       return "<tr class='" + cls + "' data-arow='" + esc(rowKey(String(a.agentId), r.name)) + "'>" +
-        "<td>" + nameLink(String(a.agentId), r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + ((isSupervisor(a) || treatedAsSupervisor(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+        "<td>" + nameLink(String(a.agentId), r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + ((isSupervisor(a) || treatedAsSupervisor(a)) && !hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td>" + stateHtml(a) + lineupChip(a, lineup) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
         "<td>" + esc(r.queue) + "</td>" +
