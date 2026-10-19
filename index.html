@@ -350,6 +350,12 @@
         </div>
       </div>
 
+      <details class="panel collapsible" id="flaggedPanel">
+        <summary class="section-title">Flagged for call avoidance today <span class="sub" id="flaggedSub"></span></summary>
+        <div id="flaggedBody" class="tiny muted">Loading…</div>
+        <div class="tiny muted" style="margin-top:6px">Everyone who showed up on the Call avoidance watch today, even briefly, with every note supervisors left on them (newest last). Any open board records flags as they happen, so a flag nobody reviewed still shows here with "No notes left". "Why flagged" lists each kind of reason once, with when it was first and last seen.</div>
+      </details>
+
       <details class="panel collapsible" id="esPanel" open>
         <summary class="section-title">ES Tickets waiting on Support Team <span class="sub" id="esSub"></span></summary>
         <div id="esBody" class="tiny muted">Loading…</div>
@@ -438,7 +444,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.65</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.66</footer>
     </main>
   </section>
 </div>
@@ -1735,6 +1741,8 @@
     renderDrill(e, agents, watch);
     renderWatch(e, watch, snoozed);
     renderAgents(e, agents);
+    recordFlags(all);
+    renderFlagged(all);
     renderSups(e, sups);
     renderLunch(e);
     renderEs();
@@ -3296,9 +3304,72 @@
   async function loadReviews() {
     if (reviews.loading || !session || !CONFIG.SUPABASE_URL) return;
     reviews.loading = true;
-    try { var j = await reviewsApi("GET"); reviews.list = j.reviews || []; reviews.at = Date.now(); reviews.err = null; }
+    try { var j = await reviewsApi("GET"); reviews.list = j.reviews || []; reviews.flags = j.flags || []; reviews.at = Date.now(); reviews.err = null; }
     catch (x) { reviews.err = x.message; }
     finally { reviews.loading = false; if (data.fetchedAt) render(); }
+  }
+  // ---------------- Flagged for call avoidance today (Fred, 2026-10-19) ----------------
+  // Each board reports who it sees flagged (a changed reason or level right away, otherwise at most every 5 minutes per
+  // agent), so the server keeps one row per agent per day. The section lists them with every note left on them.
+  var flagSent = {}, flagPosting = false;   // agentKey -> { at, sig }
+  function recordFlags(all) {
+    if (!session || !CONFIG.SUPABASE_URL || flagPosting || !all || !all.length) return;
+    var now = Date.now(), items = [];
+    all.forEach(function (x) {
+      var k = agentKeyOf(x.a), sig = sigOf(x) + "|" + x.w.lvl, prev = flagSent[k];
+      if (prev && prev.sig === sig && now - prev.at < 5 * 60000) return;
+      items.push({ agentKey: k, agentName: fullName(x.a), lvl: x.w.lvl,
+        reasons: x.w.reasons.map(function (r) { return String(r.text || "").replace(/<[^>]+>/g, ""); }) });
+      flagSent[k] = { at: now, sig: sig };
+    });
+    if (!items.length) return;
+    flagPosting = true;
+    reviewsApi("POST", { action: "flags", items: items })
+      .then(function () {
+        // Someone new: show them in the section now rather than at the next 2-minute reviews refresh.
+        if (items.some(function (i) { return !(reviews.flags || []).some(function (f) { return f.agent_key === i.agentKey; }); })) loadReviews();
+      })
+      .catch(function () { items.forEach(function (i) { delete flagSent[i.agentKey]; }); })   // try again next refresh
+      .then(function () { flagPosting = false; });
+  }
+  function notesFor(key) { return watchReviews().filter(function (r) { return r.agent_key === key; }).slice().reverse(); }   // oldest first
+  function renderFlagged(all) {
+    var body = $("flaggedBody"); if (!body) return;
+    if (!reviews.at) { body.className = "tiny muted"; body.textContent = reviews.err ? "Couldn't load: " + reviews.err : "Loading…"; $("flaggedSub").textContent = ""; return; }
+    var nowFlagged = {}, live = {};
+    (all || []).forEach(function (x) { nowFlagged[agentKeyOf(x.a)] = x; });
+    data.agents.forEach(function (a) { live[agentKeyOf(a)] = a; });
+    // Agents reviewed today but with no flag record (reviewed before flag recording started) are listed too.
+    var known = {}; (reviews.flags || []).forEach(function (f) { known[f.agent_key] = 1; });
+    var extra = [];
+    watchReviews().slice().reverse().forEach(function (r) {
+      if (known[r.agent_key]) return;
+      known[r.agent_key] = 1;
+      extra.push({ agent_key: r.agent_key, agent_name: r.agent_name, first_at: r.created_at, last_at: r.created_at, peak: null, reasons: {}, noRecord: true });
+    });
+    var flags = (reviews.flags || []).concat(extra).filter(function (f) { return inQueue(f.agent_name); }).slice()
+      .sort(function (x, y) { return (nowFlagged[y.agent_key] ? 1 : 0) - (nowFlagged[x.agent_key] ? 1 : 0) || Date.parse(x.first_at) - Date.parse(y.first_at); });
+    var withNotes = flags.filter(function (f) { return notesFor(f.agent_key).length; }).length;
+    $("flaggedSub").textContent = flags.length ? flags.length + " agent" + (flags.length === 1 ? "" : "s") + " · " + withNotes + " with notes · " + (flags.length - withNotes) + " without" : "";
+    if (!flags.length) { body.className = "tiny muted"; body.textContent = "Nobody has been flagged today."; return; }
+    body.className = "";
+    body.innerHTML = "<div class='table-wrap'><table><thead><tr><th>Agent</th><th>Flagged</th><th>Worst</th><th>Why flagged</th><th>Notes left</th><th>Status now</th></tr></thead><tbody>" +
+      flags.map(function (f) {
+        var a = live[f.agent_key], x = nowFlagged[f.agent_key], st = x ? reviewStateOf(x) : null;
+        var why = Object.keys(f.reasons || {}).map(function (k) { return f.reasons[k]; }).sort(function (p, q) { return Date.parse(p.first) - Date.parse(q.first); })
+          .map(function (r) { var a1 = Date.parse(r.first), b1 = Date.parse(r.last); return "<div>" + esc(r.t) + " <span class='muted tiny'>" + fmtClock(a1) + (b1 - a1 > 120000 ? "–" + fmtClock(b1) : "") + "</span></div>"; }).join("");
+        var notes = notesFor(f.agent_key).map(function (r) {
+          return "<div style='white-space:pre-wrap;margin-bottom:3px'><span class='muted'>" + fmtClock(Date.parse(r.created_at)) + " · " + esc(r.reviewer_name) + (r.edited_at ? " (edited)" : "") + ":</span> " + noteText(r) + "</div>";
+        }).join("") || "<span class='warmn'>No notes left</span>";
+        var status = x ? "<span class='chip " + (x.w.lvl === "crit" ? "crit" : "warn") + "'>Flagged now</span>" + (st && st.snoozed ? " <span class='muted tiny'>reviewed, snoozed until " + fmtClock(st.until) + "</span>" : "")
+          : (a ? esc(stateLabel(a)) : "<span class='muted'>Logged out</span>");
+        var first = Date.parse(f.first_at), last = Date.parse(f.last_at);
+        return "<tr" + (x ? " class='flag-" + (x.w.lvl === "crit" ? "crit" : "warn") + "'" : "") + "><td>" + nameLink(a ? String(a.agentId) : "", f.agent_name) + "</td>" +
+          "<td class='num'>" + fmtClock(first) + (last - first > 120000 ? "<div class='muted tiny'>to " + fmtClock(last) + "</div>" : "") + "</td>" +
+          "<td>" + (f.peak ? "<span class='chip " + (f.peak === "crit" ? "crit" : "warn") + "'>" + (f.peak === "crit" ? "Red" : "Yellow") + "</span>" : "<span class='muted'>–</span>") + "</td>" +
+          "<td class='wrap'>" + (f.noRecord ? "<span class='muted' title='Reviewed before this board started recording flags (10/19), so only the notes are known'>not recorded (reviewed before flag tracking began)</span>" : why) + "</td>" +
+          "<td class='wrap'>" + notes + "</td><td>" + status + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
   }
   function tellOthersReviewsChanged() {
     try { if (presence.channel) presence.channel.send({ type: "broadcast", event: "reviews", payload: {} }); } catch (x) {}
