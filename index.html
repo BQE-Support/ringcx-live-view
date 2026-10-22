@@ -435,6 +435,7 @@
             Grades: 90+ green, 75-89 normal, 60-74 yellow, under 60 red. Hover a score for its breakdown. Top 5 and Bottom 5 rank agents only. Supervisors (including Victor Guadarrama) are scored too, but they appear only in "Show all", with a Supervisor tag.
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
           <li><b>"WORKING"</b> on its own (not a WORKING sub-status like Escalating to L3) is the one status agents can't choose themselves in RingCX. RingCX puts people there itself, for example after a temporary disconnect, and it blocks calls. Anyone in it gets a "Lost Connection" tag next to their status. After <span data-cfgdur="STUCK_WARN_SEC"></span> they go on the Call avoidance watch on their own (no second signal needed), and the flag turns red after <span data-cfgdur="STUCK_CRIT_SEC"></span>, so a supervisor can ask them to update their status.</li>
+          <li><b>Ticket work with no trace:</b> anyone in ZD/ES Ticket Follow-up or Testing for longer than <span data-cfgdur="QUIET_WORK_SEC"></span> with nothing in Zendesk or Jira since the status started (no reply, note, status or assignee change, Jira comment or time logged) goes on the Call avoidance watch on their own. It turns red after <span data-cfgdur="QUIET_WORK_CRIT_SEC"></span>. The check is the same as the Activity dropdown in the status list and repeats every 2 minutes, so the flag clears as soon as something shows up. Just reading tickets leaves no trace, so ask before assuming.</li>
           <li><b>Vendor status</b> in What to Watch comes from each vendor's public status page, checked every 2 minutes: <b>Gusto</b> (the API component only), <b>GlobalPay</b> (Worldpay, plus Payrix US), and <b>BQE CORE</b> (both regions). It shows a degraded or down component, an open incident, or maintenance in progress. Red = major outage or a major/critical incident; yellow = anything else. Click it to open the status page. Global Payments has no public developer status page we could find, so GlobalPay covers Worldpay and Payrix.</li>
           <li><b>Longest wait</b> is the caller who has waited longest in any queue right now. Its tile flashes red once that wait passes <span data-cfgdur="WAIT_FLASH_SEC"></span>, and keeps flashing until no caller has waited that long, meaning they were answered or hung up. Queue cards with such a caller flash too.</li>
           <li><b>Status changes are counted by this browser while the page is open.</b> RingCX's real-time API only reports each agent's current status, so the page records every change it sees between refreshes. History is kept in this browser for the current day. If an agent changes status and comes back between two refreshes, the page still catches it from the reset status timer, but it counts as one change. A 15-second refresh catches more. Changes from before you opened the page are not included. Check the "watching since" time.</li>
@@ -444,7 +445,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.68</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.69</footer>
     </main>
   </section>
 </div>
@@ -480,7 +481,11 @@
     STUCK_STATE: "WORKING",
     STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
     STUCK_CRIT_SEC: 10 * 60,
-    MIN_SIGNALS: 2,                                // flag an agent only when this many different signals are true
+    // Ticket-work statuses: this long in one with nothing done in Zendesk or Jira = flagged on its own (Fred, 2026-10-22).
+    QUIET_WORK_STATES: ["ZD/ES TICKET FOLLOW-UP", "TESTING"],
+    QUIET_WORK_SEC: 30 * 60,
+    QUIET_WORK_CRIT_SEC: 60 * 60,
+    MIN_SIGNALS: 2,                               // flag an agent only when this many different signals are true
     LUNCH_EARLY_MIN: 30,                             // a logout this long before scheduled lunch still counts as lunch
     LUNCH_LATE_START_MIN: 60,                        // ...and up to this long after (late lunch is fine)
     LUNCH_OVER_WARN_MIN: 5,                          // lunch longer than LUNCH_MAX_MIN by this = yellow (Fred)
@@ -1616,13 +1621,33 @@
       stuck = true;
       add(stt >= CONFIG.STUCK_CRIT_SEC ? "crit" : "warn", "In WORKING " + fmtShort(stt) + ": blocks calls, ask them to update status", 400 + stt / 60, "stuck@" + stateStartMin);
     }
+    // Ticket-work status (ZD/ES follow-up, Testing) for 30+ min with no Zendesk or Jira trace: single-signal too.
+    var quiet = false, qst = quietWork(a, e);
+    if (qst) {
+      quiet = true;
+      add(qst >= CONFIG.QUIET_WORK_CRIT_SEC ? "crit" : "warn", stateLabel(a) + " " + fmtShort(qst) + " with nothing in Zendesk or Jira", 350 + qst / 60, "quiet@" + stateStartMin);
+    }
     // Lunch over by 5+ min (from when they actually went) is a single-signal flag too.
     var lunchOver = false;
     if (base(a) === "LUNCH") {
       var L = lunchFor(hist.agents[String(a.agentId)], schedFor(fullName(a)), true), ll = lunchLevel(L);
       if (ll) { lunchOver = true; add(ll, "Lunch over by " + Math.round(L.over) + " min (out since " + fmtClock(L.from) + ")", 380 + L.over, "lunch@" + Math.round(L.from / 60000)); }
     }
-    return (stuck || lunchOver || reasons.length >= CONFIG.MIN_SIGNALS) ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
+    return (stuck || lunchOver || quiet || reasons.length >= CONFIG.MIN_SIGNALS) ? { lvl: lvl, score: score, reasons: reasons, cs: cs } : null;
+  }
+  // Seconds in a ticket-work status once past QUIET_WORK_SEC with no Zendesk or Jira activity since it started, else 0.
+  // Uses the same "activity" function as the status-log dropdown; re-asked every 2 minutes while the status lasts.
+  // Unknown (still loading, or either system errored) is never flagged.
+  function quietWork(a, e) {
+    if (isOnCall(a) || CONFIG.QUIET_WORK_STATES.indexOf(String(a.agentState || "").toUpperCase()) < 0) return 0;
+    var st = (a.stateTime || 0) + e;
+    if (st < CONFIG.QUIET_WORK_SEC) return 0;
+    var from = Math.floor(((Date.parse(a.lastUpdate) || data.fetchedAt) - (a.stateTime || 0) * 1000) / 60000) * 60000;
+    var name = fullName(a), c = actCache[actKey(name, from)];
+    if (!(c && c.err && Date.now() - c.at < 2 * 60000)) loadActivity(name, from, Date.now(), true);
+    var d = c && c.data;
+    if (!d || !d.zendesk || !d.jira || d.zendesk.error || d.jira.error) return 0;
+    return (d.zendesk.tickets || []).length || (d.jira.issues || []).length ? 0 : st;
   }
 
   // ---------------- queue hours ----------------
