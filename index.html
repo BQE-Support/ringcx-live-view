@@ -365,7 +365,7 @@
         <div class="section-title">Supervisors <span class="sub" id="supSub"></span></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Supervisor</th><th>Status</th><th class="num">In status</th><th class="num" title="Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)">Calls <span class="tiny muted">in/out/follow</span></th><th class="num">Logged in</th></tr></thead>
+            <thead><tr><th>Supervisor</th><th>Status</th><th class="num">In status</th><th class="num" title="Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)">In/Out/Fol</th><th class="num">Logged in</th></tr></thead>
             <tbody id="supBody"></tbody>
           </table>
         </div>
@@ -445,7 +445,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.73<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.74<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
     </main>
   </section>
@@ -1803,7 +1803,7 @@
     { key: "state", label: "Status" },
     { key: "stateTime", label: "In status", num: true },
     { key: "queue", label: "Call queue" },
-    { key: "calls", label: "Calls <span class='tiny muted'>in/out/follow</span>", num: true },
+    { key: "calls", label: "In/Out/Fol", num: true },
     { key: "talk", label: "Talk", num: true },
     { key: "aht", label: "Avg talk", num: true },
     { key: "rna", label: "RNA", num: true },
@@ -2830,7 +2830,7 @@
     var ranked = rows.filter(function (r) { return !r.sup; });
     var top = ranked.slice(0, 5), low = ranked.length > 5 ? ranked.slice(-Math.min(5, ranked.length - 5)).reverse() : [];
     function table(list, startRank, dir, total) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>Calls <span class='tiny muted'>in/out/follow</span></th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them today, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them today, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
             "<td>" + esc(r.name) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
@@ -3012,7 +3012,7 @@
     $("ydBody").innerHTML =
       "<div class='tiny' style='margin:4px 0 8px'><b>" + d.answered + "</b> queue calls answered · <b>" + d.abandoned + "</b> abandoned · <b>" + fmtDur(d.talk) + "</b> talk · " +
         agents.length + " agents scored" + (best ? " · best: <b>" + esc(best.name) + "</b>" : "") + "</div>" +
-      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>Calls <span class='tiny muted'>in/out/follow</span></th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them that day, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them that day, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
       (agents.map(function (r, i) { return rowHtml(r, i + 1); }).join("") || "<tr><td colspan='16' class='muted'>Nobody to score that day.</td></tr>") +
       (sups.length ? "<tr><td colspan='16' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
       "</tbody></table></div>" + emailTableHtml(d.email, d.to + 60000, ymd);
