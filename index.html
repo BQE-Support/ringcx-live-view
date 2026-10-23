@@ -445,7 +445,8 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.72</footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.73<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
     </main>
   </section>
 </div>
@@ -553,6 +554,7 @@
     LOGIN_EXCLUDE: ["Erasmo Robles", "Ricardo Andrade"],
     // L2s' logins are shown only to managers (Fred, 2026-10-15). L2 list confirmed by Fred (the roster tier lookup was out of date).
     MANAGER_IDS: ["3299715", "3301145", "3301139"],   // Fred, Ricardo, Erasmo
+    ROLLBACK_IDS: ["3299715"],   // who sees "Roll back" beside the version (the rollback function checks too)
     L2_LOGINS_MANAGERS_ONLY: ["Adnan Bakshi", "Daniel Suyo", "Joel Cazares", "Paulina Leal", "Salvador Rojas"]   // Fred 2026-10-15; Peter counts as L1
   };
   var IS_LOCAL_DEV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.port === "8765";
@@ -1812,6 +1814,7 @@
 
   function render() {
     var e = elapsed();
+    $("rollbackWrap").hidden = CONFIG.ROLLBACK_IDS.indexOf(myAgentId() || "") < 0;
     var agents = data.agents.filter(inAgentSection).filter(inQueue);
     var sups = data.agents.filter(function (a) { return !inAgentSection(a); }).filter(inQueue);
     var all = agents.map(function (a) { return { a: a, w: watchFor(a, e) }; }).filter(function (x) { return x.w; })
@@ -3574,6 +3577,50 @@
     try { await reviewsApi("POST", { action: "undo", id: id }); await loadReviews(); tellOthersReviewsChanged(); }
     catch (err) { alert("Couldn't undo: " + err.message); }
   }
+
+  // ---------------- Roll back (owner only, 2026-10-23) ----------------
+  // Lists the last 10 publishes of this page and puts a chosen one back on GitHub Pages (the "rollback"
+  // function commits it). Only the page goes back; the server functions keep their current code.
+  async function rollbackApi(method, body) {
+    if (tokenNearExpiry()) await refreshToken();
+    var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/rollback", { method: method,
+      headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    var j = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+    return j;
+  }
+  async function openRollback(msg) {
+    var box = $("rollbackBox"); box.hidden = false;
+    box.innerHTML = "<div class='section-title'>Roll back this page <button class='btn close' data-rollback-close style='margin-left:auto'>Close</button></div>" +
+      (msg ? "<div style='margin-bottom:8px'>" + msg + "</div>" : "") + "<div class='tiny muted'>Loading the last 10 publishes…</div>";
+    try {
+      var j = await rollbackApi("GET");
+      box.querySelector(".tiny.muted").outerHTML = "<div class='table-wrap'><table><thead><tr><th>Version</th><th>Published</th><th>Change</th><th></th></tr></thead><tbody>" +
+        j.versions.map(function (v, i) {
+          var t = Date.parse(v.date);
+          return "<tr><td>" + esc(v.version || v.sha.slice(0, 7)) + "</td><td>" + esc(ymdOfMs(t)) + " " + fmtClock(t) + "</td><td class='wrap'>" + esc(v.message) + "</td><td>" +
+            (i === 0 ? "<span class='chip ok'>Live now</span>" : "<button class='btn' data-rollback-to='" + esc(v.sha) + "' data-rollback-ver='" + esc(v.version || v.sha.slice(0, 7)) + "'>Roll back to this</button>") + "</td></tr>";
+        }).join("") + "</tbody></table></div>" +
+        "<div class='tiny muted' style='margin-top:6px'>Only this page goes back. Server functions keep their current code, so pick a version from after the last function change when you can. " +
+        "GitHub Pages updates in about 1 to 2 minutes and open boards reload on their own within 5 minutes. The next normal publish replaces the rolled-back page." +
+        (j.canWrite ? "" : " <span class='warmn'>Rolling back needs the GITHUB_ROLLBACK_TOKEN secret in Supabase, which isn't set yet.</span>") + "</div>";
+    } catch (err) { box.querySelector(".tiny.muted").textContent = "Couldn't load versions: " + err.message; }
+  }
+  async function doRollback(sha, ver, btn) {
+    if (!confirm("Put Version " + ver + " back on the live page for everyone?")) return;
+    btn.disabled = true; btn.textContent = "Rolling back…";
+    try {
+      var j = await rollbackApi("POST", { sha: sha });
+      openRollback("<span class='chip ok'>Done</span> Version " + esc(j.version || ver) + " is published. Everyone's board picks it up within about 5 minutes; this one reloads in 2.");
+      setTimeout(function () { location.reload(); }, 120000);
+    } catch (err) { alert("Couldn't roll back: " + err.message); btn.disabled = false; btn.textContent = "Roll back to this"; }
+  }
+  $("rollbackBtn").addEventListener("click", function (ev) { ev.preventDefault(); openRollback(); });
+  $("rollbackBox").addEventListener("click", function (ev) {
+    if (ev.target.closest("[data-rollback-close]")) { $("rollbackBox").hidden = true; return; }
+    var b = ev.target.closest("[data-rollback-to]");
+    if (b) doRollback(b.getAttribute("data-rollback-to"), b.getAttribute("data-rollback-ver"), b);
+  });
 
   // RingCX has no API to log an agent out: its supervisor view does it over the supervisor's own agent
   // connection, which this page never opens (that is what would sign the viewer in as an agent). So this
