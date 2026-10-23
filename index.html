@@ -305,7 +305,7 @@
           </label>
           <span id="filterTag" class="filter-tag" hidden></span>
           <button id="refreshBtn" class="btn" title="Refresh now">Refresh</button>
-          <button id="reportBtn" class="btn" title="Team numbers and agent score summaries for the last 5 working days, ready to copy">Report</button>
+          <button id="reportBtn" class="btn" title="This week vs last week: team numbers and agent score summaries, ready to copy">Report</button>
           <button id="snapshotBtn" class="btn" title="Download the main numbers as a time-stamped spreadsheet (CSV)">Snapshot</button>
           <button id="themeBtn" class="btn" title="Toggle light/dark">Theme</button>
           <span id="viewerTag" class="snapshot-tag" hidden></span>
@@ -456,7 +456,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.79<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.80<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -3038,110 +3038,198 @@
   // exactly like Previous days. Team numbers per day, then each agent's average score, per-day scores, lowest day
   // and the scorecard part they lose the most points on. Copy report gives the same as plain text.
   var PART_MAX = [["ready", "Ready", 30], ["rna", "RNA", 15], ["pickup", "Pickup", 15], ["start", "Start", 12], ["lunch", "Lunch", 8], ["tickets", "Tickets", 15], ["es", "ES", 10], ["csat", "CSAT", 10]];
+  function dayShort(ymd) { var d = new Date(ymd + "T12:00:00Z"); return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()] + " " + (d.getUTCMonth() + 1) + "/" + d.getUTCDate(); }
   var report = { loading: false, data: null };
-  function reportDays() {
-    var out = [];
-    for (var b = 1; b <= 7 && out.length < 5; b++) { var ymd = ptYmd(b), wd = new Date(ymd + "T12:00:00Z").getUTCDay(); if (wd >= 1 && wd <= 5) out.push({ back: b, ymd: ymd }); }
-    return out.reverse();
+  // ---- saved days (dayscores function): each finished working day's scores, so weeks can be compared ----
+  // The server keeps agent snapshots for 8 days only. Boards save each finished working day once (a record of the team
+  // numbers and every agent's score), and the Report reads those records for anything older.
+  function dayRecord(ymd, d) {
+    if (!d || d.empty) return null;
+    var rows = d.rows.concat(d.email || []).filter(function (r) { return !r.sup; });
+    var scores = rows.map(function (r) { return r.score; });
+    return {
+      v: 1, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
+      team: { answered: d.answered, abandoned: d.abandoned, talk: Math.round(d.talk), outbound: rows.reduce(function (t, r) { return t + (r.outbound || 0); }, 0),
+        scored: rows.length, avg: scores.length ? scores.reduce(function (t, v) { return t + v; }, 0) / scores.length : null },
+      agents: rows.map(function (r) {
+        return { name: r.name, email: !!r.email, score: Math.round(r.score * 10) / 10, parts: r.parts || {}, answered: r.answered || 0, outbound: r.outbound || 0,
+          took: r.work ? (r.work.tookEmail || 0) + (r.work.tookWeb || 0) : 0, late: r.lateMin ? 1 : 0, longLunch: r.lunchOver ? 1 : 0 };
+      })
+    };
   }
-  function reportData(days) {
-    var people = {}, team = [];
-    days.forEach(function (x) {
-      var d = x.d, rows = d && !d.empty ? d.rows.concat(d.email || []).filter(function (r) { return !r.sup; }) : [];
-      var scores = rows.map(function (r) { return r.score; });
-      team.push({ ymd: x.ymd, missing: !d || d.empty, answered: d && !d.empty ? d.answered : null, abandoned: d && !d.empty ? d.abandoned : null, talk: d && !d.empty ? d.talk : null,
-        outbound: rows.reduce(function (t, r) { return t + (r.outbound || 0); }, 0), scored: rows.length,
-        avg: scores.length ? scores.reduce(function (t, v) { return t + v; }, 0) / scores.length : null });
-      rows.forEach(function (r) {
-        var k = normName(r.name), p = people[k] || (people[k] = { name: r.name, email: !!r.email, days: {}, lost: {}, answered: 0, outbound: 0, took: 0, late: 0, longLunch: 0 });
-        p.days[x.ymd] = r.score; p.email = p.email || !!r.email;
-        p.answered += r.answered || 0; p.outbound += r.outbound || 0;
-        if (r.work) p.took += (r.work.tookEmail || 0) + (r.work.tookWeb || 0);
-        if (r.lateMin) p.late++;
-        if (r.lunchOver) p.longLunch++;
+  async function dayscoresApi(method, query, body) {
+    if (tokenNearExpiry()) await refreshToken();
+    var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/dayscores" + (query || ""), { method: method,
+      headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    var j = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+    return j;
+  }
+  function isWorkday(ymd) { var wd = new Date(ymd + "T12:00:00Z").getUTCDay(); return wd >= 1 && wd <= 5; }
+  // Working days from..to (inclusive), oldest first.
+  function workdaysBetween(from, to) { var out = []; for (var y = from; y <= to; y = addDaysYmd(y, 1)) if (isWorkday(y)) out.push(y); return out; }
+  function backOf(ymd) { return Math.round((Date.parse(ptYmd(0) + "T12:00:00Z") - Date.parse(ymd + "T12:00:00Z")) / 86400000); }
+  // Builds and saves any finished working day of the last 7 that isn't saved yet. Each board does this once a day,
+  // a couple of minutes after it opens, so the saved days stay complete without anyone opening the Report.
+  var autoSave = { done: null, running: false };
+  async function saveMissingDays(have) {
+    var missing = workdaysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y]; });
+    for (var i = 0; i < missing.length; i++) {
+      var d = null;
+      try { d = await buildDay(backOf(missing[i])); } catch (e) { d = null; }
+      var rec = dayRecord(missing[i], d);
+      if (!rec) continue;
+      have[missing[i]] = rec;
+      try { await dayscoresApi("POST", "", { days: [{ day: missing[i], data: rec }] }); } catch (e) { /* tried again tomorrow or by the Report */ }
+    }
+    return have;
+  }
+  async function autoSaveDays() {
+    var today = ptYmd(0);
+    if (autoSave.running || autoSave.done === today || !session || !CONFIG.SUPABASE_URL || document.hidden) return;
+    var key = "rcxLiveView.daysSaved";
+    try { if (localStorage.getItem(key) === today) { autoSave.done = today; return; } } catch (e) {}
+    autoSave.running = true;
+    try {
+      var j = await dayscoresApi("GET", "?from=" + ptYmd(7) + "&to=" + ptYmd(1)), have = {};
+      (j.days || []).forEach(function (x) { have[String(x.day).slice(0, 10)] = x.data; });
+      await saveMissingDays(have);
+      autoSave.done = today;
+      try { localStorage.setItem(key, today); } catch (e) {}
+    } catch (e) { /* try again on the next check */ }
+    finally { autoSave.running = false; }
+  }
+  setTimeout(function () { autoSaveDays(); setInterval(autoSaveDays, 30 * 60000); }, 120000);
+
+  // ---------------- the Report: this week vs last week ----------------
+  // This week = Monday to yesterday; on a Monday (nothing finished yet) it's last week vs the week before.
+  function reportWeeks() {
+    var today = ptYmd(0), wd = new Date(today + "T12:00:00Z").getUTCDay(), mon = addDaysYmd(today, -(wd === 0 ? 6 : wd - 1));
+    var cur = { from: mon, to: ptYmd(1) };
+    if (cur.to < cur.from || !workdaysBetween(cur.from, cur.to).length) cur = { from: addDaysYmd(mon, -7), to: addDaysYmd(mon, -3) };
+    var prev = { from: addDaysYmd(cur.from, -7), to: addDaysYmd(cur.from, -3) };
+    cur.days = workdaysBetween(cur.from, cur.to); prev.days = workdaysBetween(prev.from, prev.to);
+    return { cur: cur, prev: prev };
+  }
+  function weekStats(days, recs) {
+    var have = days.filter(function (y) { return recs[y]; }), people = {};
+    var tot = { answered: 0, abandoned: 0, talk: 0, outbound: 0 }, avgs = [];
+    have.forEach(function (y) {
+      var t = recs[y].team;
+      tot.answered += t.answered || 0; tot.abandoned += t.abandoned || 0; tot.talk += t.talk || 0; tot.outbound += t.outbound || 0;
+      if (t.avg !== null && t.avg !== undefined) avgs.push(t.avg);
+      recs[y].agents.forEach(function (a) {
+        var k = normName(a.name), p = people[k] || (people[k] = { name: a.name, email: false, days: {}, lost: {}, answered: 0, outbound: 0, took: 0, late: 0, longLunch: 0 });
+        p.email = p.email || a.email; p.days[y] = a.score;
+        p.answered += a.answered; p.outbound += a.outbound; p.took += a.took; p.late += a.late; p.longLunch += a.longLunch;
         PART_MAX.forEach(function (pm) {
-          if (!r.parts || r.parts[pm[0]] === undefined) return;
-          var got = r.parts[pm[0]] === null ? pm[2] : r.parts[pm[0]];
+          if (a.parts[pm[0]] === undefined) return;
+          var got = a.parts[pm[0]] === null ? pm[2] : a.parts[pm[0]];
           p.lost[pm[1]] = (p.lost[pm[1]] || 0) + (pm[2] - got);
         });
       });
     });
-    var agents = Object.keys(people).map(function (k) {
-      var p = people[k], ds = Object.keys(p.days), n = ds.length;
-      p.n = n; p.avg = ds.reduce(function (t, y) { return t + p.days[y]; }, 0) / n;
-      var low = ds.sort(function (a, b) { return p.days[a] - p.days[b]; })[0]; p.low = { ymd: low, score: p.days[low] };
+    Object.keys(people).forEach(function (k) {
+      var p = people[k], ds = Object.keys(p.days);
+      p.n = ds.length; p.avg = ds.reduce(function (t, y) { return t + p.days[y]; }, 0) / p.n;
+      var low = ds.slice().sort(function (a, b) { return p.days[a] - p.days[b]; })[0]; p.low = { ymd: low, score: p.days[low] };
       var worst = Object.keys(p.lost).sort(function (a, b) { return p.lost[b] - p.lost[a]; })[0];
-      p.worst = worst && p.lost[worst] / n >= 1 ? { part: worst, perDay: p.lost[worst] / n } : null;
-      return p;
-    }).sort(function (a, b) { return b.avg - a.avg || b.n - a.n; });
-    return { days: days.map(function (x) { return x.ymd; }), team: team, agents: agents };
+      p.worst = worst && p.lost[worst] / p.n >= 1 ? { part: worst, perDay: p.lost[worst] / p.n } : null;
+    });
+    var n = have.length;
+    return { n: n, of: days.length, days: days, have: have, people: people,
+      perDay: n ? { answered: tot.answered / n, abandoned: tot.abandoned / n, talk: tot.talk / n, outbound: tot.outbound / n } : null,
+      abandonRate: tot.answered + tot.abandoned ? tot.abandoned / (tot.answered + tot.abandoned) * 100 : null,
+      avg: avgs.length ? avgs.reduce(function (t, v) { return t + v; }, 0) / avgs.length : null };
   }
-  function dayShort(ymd) { var d = new Date(ymd + "T12:00:00Z"); return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()] + " " + (d.getUTCMonth() + 1) + "/" + d.getUTCDate(); }
-  var REPORT_TEAM = [
-    ["Queue calls answered", function (t) { return t.answered; }],
-    ["Abandoned", function (t) { return t.abandoned; }],
-    ["Abandon rate", function (t) { return t.answered === null || !(t.answered + t.abandoned) ? null : Math.round(t.abandoned / (t.answered + t.abandoned) * 100) + "%"; }],
-    ["Talk time", function (t) { return t.talk === null ? null : fmtDur(t.talk); }],
-    ["Outbound calls", function (t) { return t.missing ? null : t.outbound; }],
-    ["People scored", function (t) { return t.missing ? null : t.scored; }],
-    ["Average score", function (t) { return t.avg === null ? null : Math.round(t.avg); }]
+  // dir: 1 = higher is better, -1 = lower is better, 0 = neutral
+  var WEEK_ROWS = [
+    ["Queue calls answered a day", function (w) { return w.perDay && w.perDay.answered; }, 0, "n"],
+    ["Abandoned a day", function (w) { return w.perDay && w.perDay.abandoned; }, -1, "n"],
+    ["Abandon rate", function (w) { return w.abandonRate; }, -1, "pct"],
+    ["Talk time a day", function (w) { return w.perDay && w.perDay.talk; }, 0, "dur"],
+    ["Outbound calls a day", function (w) { return w.perDay && w.perDay.outbound; }, 0, "n"],
+    ["Average score", function (w) { return w.avg; }, 1, "n"]
   ];
-  function teamTotal(label, team) {
-    var ok = team.filter(function (t) { return !t.missing; });
-    if (!ok.length) return null;
-    var sum = function (f) { return ok.reduce(function (s, t) { return s + (t[f] || 0); }, 0); };
-    if (label === "Queue calls answered") return sum("answered");
-    if (label === "Abandoned") return sum("abandoned");
-    if (label === "Abandon rate") { var a = sum("answered"), b = sum("abandoned"); return a + b ? Math.round(b / (a + b) * 100) + "%" : null; }
-    if (label === "Talk time") return fmtDur(sum("talk"));
-    if (label === "Outbound calls") return sum("outbound");
-    if (label === "People scored") return null;
-    var sc = ok.filter(function (t) { return t.avg !== null; });
-    return sc.length ? Math.round(sc.reduce(function (s, t) { return s + t.avg; }, 0) / sc.length) : null;
+  function wkVal(fmt, v) {
+    if (v === null || v === undefined) return "n/a";
+    if (fmt === "dur") return fmtDur(v);
+    if (fmt === "pct") return v.toFixed(1) + "%";
+    return v >= 10 ? String(Math.round(v)) : (Math.round(v * 10) / 10).toString();
   }
+  function wkChange(dir, fmt, a, b) {
+    if (a === null || a === undefined || b === null || b === undefined) return { text: "", cls: "" };
+    var d = a - b, small = Math.abs(d) < (fmt === "pct" ? 0.05 : 0.5);
+    var cls = small || !dir ? "" : ((d > 0) === (dir > 0) ? "good" : "hot");
+    var text = small ? "same" : fmt === "dur" ? (d > 0 ? "+" : "-") + fmtDur(Math.abs(d)) : fmt === "pct" ? (d > 0 ? "+" : "") + d.toFixed(1) + " pts" : (d > 0 ? "+" : "") + wkVal("n", d).replace("--", "-");
+    return { text: text, cls: cls };
+  }
+  function weekLabel(w) { return dayShort(w.days[0] || w.from) + " to " + dayShort(w.days[w.days.length - 1] || w.to); }
   function renderReport() {
-    var R = report.data, body = $("weekReportBody");
-    $("weekReportTitle").textContent = "Report: " + dayShort(R.days[0]) + " to " + dayShort(R.days[R.days.length - 1]);
-    var v = function (x) { return x === null || x === undefined ? "<span class='muted'>n/a</span>" : esc(String(x)); };
-    var html = "<div class='wr-sub'>Team, day by day</div><div class='table-wrap'><table class='wr-table'><thead><tr><th></th>" +
-      R.days.map(function (y) { return "<th>" + esc(dayShort(y)) + "</th>"; }).join("") + "<th>All days</th></tr></thead><tbody>" +
-      REPORT_TEAM.map(function (row) {
-        return "<tr><td>" + esc(row[0]) + "</td>" + R.team.map(function (t) { return "<td>" + v(row[1](t)) + "</td>"; }).join("") + "<td><b>" + v(teamTotal(row[0], R.team)) + "</b></td></tr>";
+    var R = report.data, cur = R.cur, prev = R.prev, v = function (x) { return x === null || x === undefined ? "<span class='muted'>n/a</span>" : esc(String(x)); };
+    $("weekReportTitle").textContent = "Report: " + weekLabel(R.weeks.cur) + " vs " + weekLabel(R.weeks.prev);
+    var cov = function (w) { return w.n + " of " + w.of + " days"; };
+    var html = "<div class='wr-sub'>Team, this week vs last week</div><div class='table-wrap'><table class='wr-table'><thead><tr><th></th><th>" + esc(weekLabel(R.weeks.cur)) + " <span class='muted tiny'>(" + cov(cur) + ")</span></th><th>" +
+      esc(weekLabel(R.weeks.prev)) + " <span class='muted tiny'>(" + cov(prev) + ")</span></th><th>Change</th></tr></thead><tbody>" +
+      WEEK_ROWS.map(function (row) {
+        var a = row[1](cur), b = row[1](prev), c = wkChange(row[2], row[3], a, b);
+        return "<tr><td>" + esc(row[0]) + "</td><td>" + v(a === null || a === undefined ? null : wkVal(row[3], a)) + "</td><td>" + v(b === null || b === undefined ? null : wkVal(row[3], b)) + "</td><td class='" + c.cls + "'>" + esc(c.text) + "</td></tr>";
       }).join("") + "</tbody></table></div>";
-    html += "<div class='wr-sub'>Agent scores</div><div class='table-wrap'><table class='wr-table'><thead><tr><th>Agent</th><th>Average</th>" +
-      R.days.map(function (y) { return "<th>" + esc(dayShort(y)) + "</th>"; }).join("") +
-      "<th>Days</th><th>Lowest day</th><th>Loses most on</th><th>In/Out</th><th>Email</th><th>Late starts</th><th>Long lunches</th></tr></thead><tbody>" +
-      (R.agents.map(function (p) {
-        return "<tr><td>" + esc(p.name) + (p.email ? " <span class='chip info'>Email</span>" : "") + "</td>" +
-          "<td><b class='" + scoreGrade(p.avg) + "'>" + Math.round(p.avg) + "</b></td>" +
-          R.days.map(function (y) { var sc = p.days[y]; return "<td>" + (sc === undefined ? "<span class='muted'>–</span>" : "<span class='" + scoreGrade(sc) + "'>" + Math.round(sc) + "</span>") + "</td>"; }).join("") +
-          "<td>" + p.n + "</td><td>" + (p.n > 1 ? Math.round(p.low.score) + " <span class='muted tiny'>" + esc(dayShort(p.low.ymd)) + "</span>" : "<span class='muted'>–</span>") + "</td>" +
-          "<td>" + (p.worst ? esc(p.worst.part) + " <span class='muted tiny'>-" + p.worst.perDay.toFixed(1) + "/day</span>" : "<span class='muted'>nothing</span>") + "</td>" +
-          "<td>" + (p.email ? "<span class='muted'>–</span>" : p.answered + "/" + p.outbound) + "</td><td>" + (p.took || "<span class='muted'>0</span>") + "</td>" +
-          "<td>" + (p.late ? "<span class='warmn'>" + p.late + "</span>" : "<span class='muted'>0</span>") + "</td>" +
-          "<td>" + (p.longLunch ? "<span class='warmn'>" + p.longLunch + "</span>" : "<span class='muted'>0</span>") + "</td></tr>";
-      }).join("") || "<tr><td colspan='12' class='muted'>Nobody scored on these days.</td></tr>") + "</tbody></table></div>";
-    var missing = R.team.filter(function (t) { return t.missing; }).map(function (t) { return dayShort(t.ymd); });
-    html += "<div class='wr-foot'>Working days only (Monday to Friday, Pacific), today left out. The server keeps 8 days of snapshots, so this covers at most the last 5 working days. " +
-      "Scores use the same fixed 100-point card as the board (hover a score there for its parts); supervisors and managers are left out. " +
-      "Loses most on = the scorecard part with the most points lost per day worked (Ready 30, RNA or email Pickup 15, Start 12, Lunch 8, Tickets 15, ES 10, CSAT 10). " +
-      "In/Out = queue calls answered / outbound calls dialed. Email = email and webform tickets taken. Late starts and long lunches count days." +
-      (missing.length ? " No snapshots for " + esc(missing.join(", ")) + "." : "") + "</div>";
-    body.innerHTML = html;
+    html += "<div class='wr-sub'>This week, day by day</div><div class='table-wrap'><table class='wr-table'><thead><tr><th></th>" +
+      cur.days.map(function (y) { return "<th>" + esc(dayShort(y)) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      [["Queue calls answered", "answered"], ["Abandoned", "abandoned"], ["Talk time", "talk"], ["Outbound calls", "outbound"], ["People scored", "scored"], ["Average score", "avg"]].map(function (row) {
+        return "<tr><td>" + row[0] + "</td>" + cur.days.map(function (y) {
+          var t = R.recs[y] && R.recs[y].team, x = t ? t[row[1]] : null;
+          return "<td>" + v(x === null || x === undefined ? null : (row[1] === "talk" ? fmtDur(x) : row[1] === "avg" ? Math.round(x) : x)) + "</td>";
+        }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>";
+    var names = Object.keys(cur.people).concat(Object.keys(prev.people).filter(function (k) { return !cur.people[k]; }));
+    var agents = names.map(function (k) { return { k: k, c: cur.people[k], p: prev.people[k] }; })
+      .sort(function (a, b) { return (b.c ? b.c.avg : -1) - (a.c ? a.c.avg : -1) || (b.p ? b.p.avg : -1) - (a.p ? a.p.avg : -1); });
+    R.agents = agents;
+    html += "<div class='wr-sub'>Agent scores</div><div class='table-wrap'><table class='wr-table'><thead><tr><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th>" +
+      cur.days.map(function (y) { return "<th>" + esc(dayShort(y)) + "</th>"; }).join("") +
+      "<th>Lowest day</th><th>Loses most on</th><th>In/Out</th><th>Email</th><th>Late starts</th><th>Long lunches</th></tr></thead><tbody>" +
+      (agents.map(function (x) {
+        var c = x.c, p = x.p, who = c || p, ch = wkChange(1, "n", c ? c.avg : null, p ? p.avg : null);
+        var grade = function (s) { return s === null || s === undefined ? "<span class='muted'>–</span>" : "<b class='" + scoreGrade(s) + "'>" + Math.round(s) + "</b>"; };
+        return "<tr><td>" + esc(who.name) + (who.email ? " <span class='chip info'>Email</span>" : "") + "</td>" +
+          "<td>" + grade(c ? c.avg : null) + (c ? " <span class='muted tiny'>" + c.n + "d</span>" : "") + "</td>" +
+          "<td>" + grade(p ? p.avg : null) + (p ? " <span class='muted tiny'>" + p.n + "d</span>" : "") + "</td>" +
+          "<td class='" + ch.cls + "'>" + esc(ch.text) + "</td>" +
+          cur.days.map(function (y) { var sc = c ? c.days[y] : undefined; return "<td>" + (sc === undefined ? "<span class='muted'>–</span>" : "<span class='" + scoreGrade(sc) + "'>" + Math.round(sc) + "</span>") + "</td>"; }).join("") +
+          "<td>" + (c && c.n > 1 ? Math.round(c.low.score) + " <span class='muted tiny'>" + esc(dayShort(c.low.ymd)) + "</span>" : "<span class='muted'>–</span>") + "</td>" +
+          "<td>" + (c && c.worst ? esc(c.worst.part) + " <span class='muted tiny'>-" + c.worst.perDay.toFixed(1) + "/day</span>" : "<span class='muted'>" + (c ? "nothing" : "–") + "</span>") + "</td>" +
+          "<td>" + (!c ? "<span class='muted'>–</span>" : c.email ? "<span class='muted'>–</span>" : c.answered + "/" + c.outbound) + "</td><td>" + (c ? c.took || "<span class='muted'>0</span>" : "<span class='muted'>–</span>") + "</td>" +
+          "<td>" + (c && c.late ? "<span class='warmn'>" + c.late + "</span>" : "<span class='muted'>0</span>") + "</td>" +
+          "<td>" + (c && c.longLunch ? "<span class='warmn'>" + c.longLunch + "</span>" : "<span class='muted'>0</span>") + "</td></tr>";
+      }).join("") || "<tr><td colspan='14' class='muted'>Nobody scored in these weeks.</td></tr>") + "</tbody></table></div>";
+    var gaps = cur.days.concat(prev.days).filter(function (y) { return !R.recs[y]; }).map(dayShort);
+    var partial = cur.days.concat(prev.days).filter(function (y) { return R.recs[y] && R.recs[y].partial; }).map(dayShort);
+    html += "<div class='wr-foot'>Weeks are Monday to Friday, Pacific; this week runs to yesterday (on a Monday the report compares last week with the week before). " +
+      "Daily volumes are per-day averages over the days each week has, so a short week compares fairly. Scores use the same fixed 100-point card as the board; supervisors and managers are left out. " +
+      "Each finished day is saved once (boards do it automatically), because the server only keeps 8 days of agent snapshots. " +
+      "Lowest day, Loses most on (scorecard part with the most points lost per day: Ready 30, RNA or email Pickup 15, Start 12, Lunch 8, Tickets 15, ES 10, CSAT 10), In/Out (queue calls answered / outbound dialed), Email (email and webform tickets taken), late starts and long lunches are for this week." +
+      (gaps.length ? " No saved scores for " + esc(gaps.join(", ")) + " (before saving started, or no snapshots left)." : "") +
+      (partial.length ? " Partial day (tracking started late): " + esc(partial.join(", ")) + "." : "") + "</div>";
+    $("weekReportBody").innerHTML = html;
   }
   function reportText() {
-    var R = report.data, lines = ["RingCX Live View report, " + dayShort(R.days[0]) + " to " + dayShort(R.days[R.days.length - 1]) + " (" + R.days.length + " working days)", "", "Team"];
-    REPORT_TEAM.forEach(function (row) {
-      var tot = teamTotal(row[0], R.team), per = R.team.map(function (t) { var x = row[1](t); return dayShort(t.ymd).split(" ")[0] + " " + (x === null ? "n/a" : x); }).join(", ");
-      lines.push("- " + row[0] + ": " + (tot === null ? "" : tot + " (") + per + (tot === null ? "" : ")"));
+    var R = report.data, cur = R.cur, prev = R.prev;
+    var lines = ["RingCX Live View report, " + weekLabel(R.weeks.cur) + " (" + cur.n + " days) vs " + weekLabel(R.weeks.prev) + " (" + prev.n + " days)", "", "Team"];
+    WEEK_ROWS.forEach(function (row) {
+      var a = row[1](cur), b = row[1](prev), c = wkChange(row[2], row[3], a, b);
+      lines.push("- " + row[0] + ": " + wkVal(row[3], a) + " (last week " + wkVal(row[3], b) + (c.text && c.text !== "same" ? ", " + c.text : "") + ")");
     });
     lines.push("", "Agent scores (average over the days they worked)");
-    R.agents.forEach(function (p) {
-      lines.push("- " + p.name + (p.email ? " (Email)" : "") + ": " + Math.round(p.avg) + " average over " + p.n + " day" + (p.n === 1 ? "" : "s") +
-        (p.n > 1 ? ", lowest " + Math.round(p.low.score) + " on " + dayShort(p.low.ymd) : "") +
-        (p.worst ? ", loses most on " + p.worst.part + " (" + p.worst.perDay.toFixed(1) + " points a day)" : "") +
-        (p.email ? ", " + p.took + " email tickets taken" : ", " + p.answered + " calls answered, " + p.outbound + " outbound") +
-        (p.late ? ", " + p.late + " late start" + (p.late === 1 ? "" : "s") : "") + (p.longLunch ? ", " + p.longLunch + " long lunch" + (p.longLunch === 1 ? "" : "es") : ""));
+    (R.agents || []).forEach(function (x) {
+      var c = x.c, p = x.p, who = c || p, ch = wkChange(1, "n", c ? c.avg : null, p ? p.avg : null);
+      lines.push("- " + who.name + (who.email ? " (Email)" : "") + ": " + (c ? Math.round(c.avg) + " this week over " + c.n + " day" + (c.n === 1 ? "" : "s") : "not scored this week") +
+        (p ? ", " + Math.round(p.avg) + " last week" + (ch.text && ch.text !== "same" ? " (" + ch.text + ")" : "") : "") +
+        (c && c.n > 1 ? ", lowest " + Math.round(c.low.score) + " on " + dayShort(c.low.ymd) : "") +
+        (c && c.worst ? ", loses most on " + c.worst.part + " (" + c.worst.perDay.toFixed(1) + " points a day)" : "") +
+        (c ? (c.email ? ", " + c.took + " email tickets taken" : ", " + c.answered + " calls answered, " + c.outbound + " outbound") : "") +
+        (c && c.late ? ", " + c.late + " late start" + (c.late === 1 ? "" : "s") : "") + (c && c.longLunch ? ", " + c.longLunch + " long lunch" + (c.longLunch === 1 ? "" : "es") : ""));
     });
     return lines.join("\n");
   }
@@ -3150,16 +3238,23 @@
     if (report.data) { renderReport(); return; }
     if (report.loading) return;
     report.loading = true;
-    var days = reportDays();
+    var W = reportWeeks(), body = $("weekReportBody");
+    $("weekReportTitle").textContent = "Report";
     try {
-      for (var i = 0; i < days.length; i++) {
-        $("weekReportTitle").textContent = "Report";
-        $("weekReportBody").innerHTML = "<div class='muted' style='padding:12px 0'>Rebuilding " + esc(dayShort(days[i].ymd)) + " (" + (i + 1) + " of " + days.length + ") from the server's snapshots…</div>";
-        try { days[i].d = await buildDay(days[i].back); } catch (e) { days[i].d = null; }
+      body.innerHTML = "<div class='muted' style='padding:12px 0'>Loading saved days…</div>";
+      var j = await dayscoresApi("GET", "?from=" + W.prev.from + "&to=" + W.cur.to), recs = {};
+      (j.days || []).forEach(function (x) { recs[String(x.day).slice(0, 10)] = x.data; });
+      // Days still on the server but not saved yet: rebuild and save them now.
+      var todo = W.cur.days.concat(W.prev.days).filter(function (y) { return !recs[y] && backOf(y) >= 1 && backOf(y) <= 7; });
+      for (var i = 0; i < todo.length; i++) {
+        body.innerHTML = "<div class='muted' style='padding:12px 0'>Rebuilding " + esc(dayShort(todo[i])) + " (" + (i + 1) + " of " + todo.length + ") from the server's snapshots…</div>";
+        var d = null; try { d = await buildDay(backOf(todo[i])); } catch (e) { d = null; }
+        var rec = dayRecord(todo[i], d);
+        if (rec) { recs[todo[i]] = rec; try { await dayscoresApi("POST", "", { days: [{ day: todo[i], data: rec }] }); } catch (e) {} }
       }
-      report.data = reportData(days); report.day = ptYmd(0);
+      report.data = { weeks: W, recs: recs, cur: weekStats(W.cur.days, recs), prev: weekStats(W.prev.days, recs) }; report.day = ptYmd(0);
       renderReport();
-    } catch (e) { $("weekReportBody").innerHTML = "<div class='muted'>Couldn't build the report: " + esc(e.message) + "</div>"; }
+    } catch (e) { body.innerHTML = "<div class='muted'>Couldn't build the report: " + esc(e.message) + "</div>"; }
     finally { report.loading = false; }
   }
   $("reportBtn").addEventListener("click", function () { if (report.day !== ptYmd(0)) report.data = null; openReport(); });
