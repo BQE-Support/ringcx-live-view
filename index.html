@@ -445,7 +445,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.75<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.76<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
     </main>
   </section>
@@ -2743,7 +2743,7 @@
         var p = r.parts, tip = "Ready " + p.ready + "/30" + (r.ready == null ? " (under 30 min logged in)" : "") + " · Pickup " + p.pickup + "/15 · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · Tickets " + (p.tickets == null ? "15/15 (not loaded)" : p.tickets + "/15") + " · ES escalations " + p.es + "/10 · CSAT " + p.csat + "/10. Fixed scale: 100 = every part met.";
         var startTxt = r.first === null ? "<span class='muted'>–</span>" : (r.firstUnsure ? "≤ " : "") + fmtClock(r.first) +
           (r.lateMin ? " <span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "'>" + fmtShort(r.lateMin * 60) + " late</span>" : (r.start !== null ? " <span class='muted tiny' title='Scheduled " + clockOf(r.start) + (r.firstUnsure ? "; online before the server started checking, so not counted" : "") + "'>" + (r.firstUnsure ? "?" : "ok") + "</span>" : ""));
-        return "<tr><td class='num'>" + (i + 1) + "</td><td>" + esc(r.name) + "</td>" +
+        return "<tr data-brow='" + esc(normName(r.name)) + "'><td class='num'>" + (i + 1) + "</td><td>" + esc(r.name) + "</td>" +
           "<td class='num' title='" + esc(tip) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
           "<td class='num'>" + workCell(r, ctx !== "today") + "</td>" +
           "<td class='num'>" + tookPerHr(r) + "</td>" +
@@ -2860,7 +2860,7 @@
     function table(list, startRank, dir, total) {
       return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them today, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
-          return "<tr><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
+          return "<tr data-brow='" + esc(normName(r.name)) + "'><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
             "<td>" + esc(r.name) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
             "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
             "<td class='num'>" + callsCell(r.name, r.answered, r.outbound, r.followups) + "</td>" +
@@ -2884,6 +2884,7 @@
     if (showAll) $("boardAllList").innerHTML = table(rows, 1, 1);
     else { $("boardTop").innerHTML = table(top, 1, 1); $("boardLow").innerHTML = table(low, 0, -1, ranked.length); }
     $("boardEmail").innerHTML = waits.avail || waits.at ? emailTableHtml(emailRows(rows.map(function (r) { return r.name; })), Date.now(), "today") : "";
+    placeBoardInline();
     $("boardSub").textContent = rows.length + " ranked" + (abandons.at ? " · calls as of " + fmtClock(abandons.at) : "") + " · logged-in time and RNA " + trackedLabel();
   }
   function renderDrillOnly() {
@@ -3752,6 +3753,37 @@
     var c = loginBox.querySelector("[data-drill-close]");
     if (c) { c.removeAttribute("data-drill-close"); c.setAttribute("data-login-inline-close", ""); }
   }
+  // Performance and Email Team drill-downs open right under the agent's row (2026-10-23), like the Agents table:
+  // one persistent row moved into place after each redraw, so a playing recording isn't cut off.
+  var boardInline = null;   // { kind: "calls" | "out" | "fu" | "ew", name, fresh }
+  var boardTr = document.createElement("tr"); boardTr.className = "inline-drill";
+  boardTr.innerHTML = "<td><div class='inline-box'></div></td>";
+  var boardBox = boardTr.querySelector(".inline-box");
+  function toggleBoardInline(kind, name) {
+    var same = boardInline && boardInline.kind === kind && normName(boardInline.name) === normName(name);
+    boardInline = same ? null : { kind: kind, name: name, fresh: true };
+    if (boardInline) boardBox.removeAttribute("data-kind");
+    if (boardInline && (kind === "calls" || kind === "out")) loadAbandons(true);
+    render();
+  }
+  function placeBoardInline() {
+    var gone = function () { if (boardTr.parentNode) boardTr.parentNode.removeChild(boardTr); };
+    if (!boardInline) return gone();
+    var k = normName(boardInline.name);
+    var row = [].filter.call(document.querySelectorAll("#boardTop tr[data-brow], #boardLow tr[data-brow], #boardAllList tr[data-brow], #boardEmail tr[data-brow]"), function (tr) {
+      return tr.getAttribute("data-brow") === k && tr.offsetParent !== null;
+    })[0];
+    if (!row) return gone();
+    boardTr.firstChild.colSpan = row.children.length;
+    var wrapEl = row.closest(".table-wrap");
+    if (wrapEl) boardBox.style.width = Math.max(320, wrapEl.clientWidth - 14) + "px";
+    if (row.nextSibling !== boardTr) row.parentNode.insertBefore(boardTr, row.nextSibling);
+    var b = boardInline;
+    if (b.kind === "fu" || b.kind === "ew") renderAgentTickets(boardBox, "agent" + b.kind + ":" + b.name);
+    else { renderCallDrill(boardBox, (b.kind === "out" ? "agentout:" : "agentcalls:") + b.name, b.fresh); b.fresh = false; }
+    var c = boardBox.querySelector("[data-drill-close]");
+    if (c) { c.removeAttribute("data-drill-close"); c.setAttribute("data-board-close", ""); }
+  }
   function placeInline() {
     if (!inline) { if (inlineTr.parentNode) inlineTr.parentNode.removeChild(inlineTr); return; }
     var row = [].filter.call($("agentBody").querySelectorAll("tr[data-arow]"), function (tr) {
@@ -3780,6 +3812,7 @@
     if (window.getSelection && String(window.getSelection())) return;
     var closedKpi = !!drill, any = closedKpi;
     if (inline) { inline = null; any = true; }
+    if (boardInline) { boardInline = null; any = true; }
     if (loginInline) { loginInline = null; any = true; }
     if (Object.keys(tkOpen).length) { tkOpen = {}; any = true; }
     if (yd.open && Object.keys(yd.open).length) { yd.open = {}; any = true; }
@@ -3978,6 +4011,18 @@
       return;
     }
     // Calls number in the Agents table: that agent's calls today, with recordings.
+    var bc = ev.target.closest("[data-board-close]");
+    if (bc) { ev.preventDefault(); boardInline = null; render(); return; }
+    var bl = ev.target.closest("#boardTop [data-agent-calls], #boardTop [data-agent-out], #boardTop [data-agent-fu], #boardTop [data-agent-ew], " +
+      "#boardLow [data-agent-calls], #boardLow [data-agent-out], #boardLow [data-agent-fu], #boardLow [data-agent-ew], " +
+      "#boardAllList [data-agent-calls], #boardAllList [data-agent-out], #boardAllList [data-agent-fu], #boardAllList [data-agent-ew], " +
+      "#boardEmail [data-agent-calls], #boardEmail [data-agent-out], #boardEmail [data-agent-fu], #boardEmail [data-agent-ew]");
+    if (bl && !bl.closest(".inline-drill")) {
+      ev.preventDefault();
+      var bk = ["calls", "out", "fu", "ew"].filter(function (x) { return bl.hasAttribute("data-agent-" + x); })[0];
+      toggleBoardInline(bk, bl.getAttribute("data-agent-" + bk));
+      return;
+    }
     var ao = ev.target.closest("[data-agent-out], [data-agent-fu], [data-agent-ew]");
     if (ao) {
       ev.preventDefault();
