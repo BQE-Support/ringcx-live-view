@@ -445,7 +445,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.74<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.75<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
     </main>
   </section>
@@ -2425,6 +2425,30 @@
     }
     return callIdx.map;
   }
+  function outboundCalls(name) {
+    var k = normName(name);
+    return (abandons.all || []).filter(function (r) { return r.source_type === "MANUAL OUTBOUND" && r.connected_name && normName(firstLast(r.connected_name)) === k; })
+      .sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
+  }
+  // Ticket lists behind the Fol and Email/Webform numbers (today, from the zdwatch function).
+  function renderAgentTickets(box, kind) {
+    var fu = kind.indexOf("agentfu:") === 0, name = kind.slice(kind.indexOf(":") + 1), w = workFor(name);
+    var list = w ? (fu ? w.fuList : w.ewList) : [];
+    var link = function (id) { return "<a href='https://bqe.zendesk.com/agent/tickets/" + id + "' target='_blank' rel='noopener'>#" + id + " ↗</a>"; };
+    var did = function (took, replies, solved) {
+      var p = []; if (took) p.push("took it"); if (replies) p.push(replies + " public repl" + (replies === 1 ? "y" : "ies")); if (solved) p.push("solved");
+      return p.join(", ") || "<span class='muted'>assigned only</span>";
+    };
+    var rows = fu ? list.map(function (t) { return "<tr><td>" + link(t[0]) + "</td><td class='wrap'>" + esc(t[3] || "") + "</td><td>" + did(0, t[1], t[2]) + "</td></tr>"; })
+      : list.slice().sort(function (a, b) { return b[2] - a[2] || b[0] - a[0]; }).map(function (t) { return "<tr><td>" + link(t[0]) + "</td><td>" + esc(t[1] === "webform" ? "Webform" : "Email") + "</td><td class='wrap'>" + esc(t[5] || "") + "</td><td>" + did(t[2], t[3], t[4]) + "</td></tr>"; });
+    box.innerHTML = "<div class='section-title'>" + (fu ? "Follow-ups today: " : "Email/webform tickets today: ") + esc(name) + " <span class='sub'>" + list.length + " ticket" + (list.length === 1 ? "" : "s") + "</span>" +
+      "<span class='sub'>" + (waits.at ? "as of " + fmtClock(waits.at) + " · Zendesk is checked every 10 minutes" : "Loading…") + "</span>" +
+      "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
+      "<div class='table-wrap'><table><thead><tr><th>Ticket</th>" + (fu ? "" : "<th>Origin</th>") + "<th>Subject</th><th>What they did today</th></tr></thead><tbody>" +
+      (rows.join("") || "<tr><td colspan='4' class='muted'>None yet today.</td></tr>") + "</tbody></table></div>" +
+      "<div class='tiny muted' style='margin-top:6px'>" + (fu ? "Call tickets created on an earlier day that they publicly replied to or solved today." :
+        "Email and webform tickets assigned to them today (took it), plus any they publicly replied to or solved today. Tickets created from calls are left out.") + "</div>";
+  }
   function outboundCount(name) { callIndex(); return Object.keys(callIdx.out[lastFirst(name)] || {}).length; }
   // Calls cell: inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day
   // they publicly replied to or solved today). Inbound opens their call list.
@@ -2433,7 +2457,8 @@
     var tip = inbound + " inbound queue calls answered · " + outbound + " outbound calls dialed · " +
       (fu === null || fu === undefined ? "follow-ups not loaded (or not tracked that day)" : fu + " follow-ups: call tickets from an earlier day they publicly replied to or solved");
     return "<span title='" + esc(tip) + "'>" + (inbound && !noLink ? "<a href='#' data-agent-calls='" + esc(name) + "' title='Show this agent&#39;s calls today, with recordings'>" + inbound + "</a>" : inbound) +
-      "<span class='muted'>/" + outbound + "/" + (fu === null || fu === undefined ? "–" : fu) + "</span></span>";
+      "<span class='muted'>/" + (outbound && !noLink ? "<a href='#' data-agent-out='" + esc(name) + "' title='Show their outbound calls today'>" + outbound + "</a>" : outbound) + "/" +
+      (fu === null || fu === undefined ? "–" : (fu && !noLink ? "<a href='#' data-agent-fu='" + esc(name) + "' title='Show the older call tickets they worked today'>" + fu + "</a>" : fu)) + "</span></span>";
   }
   function ptMinutes(ms) {
     if (!isFinite(ms)) return null;
@@ -2613,8 +2638,9 @@
     var hit = w.filter(function (r) { return waitIsFor(name, { name: r[0], email: r[1] }); });
     // followups stays null for a day saved before follow-ups were tracked (the server sends null).
     var tracked = !w.length || w.some(function (r) { return r[6] !== null && r[6] !== undefined; });
-    return hit.reduce(function (o, r) { o.email += +r[2] || 0; o.web += +r[3] || 0; o.tookEmail += +r[4] || 0; o.tookWeb += +r[5] || 0; if (tracked) o.followups += +r[6] || 0; return o; },
-      { email: 0, web: 0, tookEmail: 0, tookWeb: 0, followups: tracked ? 0 : null });
+    return hit.reduce(function (o, r) { o.email += +r[2] || 0; o.web += +r[3] || 0; o.tookEmail += +r[4] || 0; o.tookWeb += +r[5] || 0; if (tracked) o.followups += +r[6] || 0;
+        o.fuList = o.fuList.concat(r[7] || []); o.ewList = o.ewList.concat(r[8] || []); return o; },
+      { email: 0, web: 0, tookEmail: 0, tookWeb: 0, followups: tracked ? 0 : null, fuList: [], ewList: [] });
   }
   // All tickets they took per logged-in hour, one count (Fred, 2026-10-16): calls answered (each call makes a ticket)
   // + email/webform tickets taken. Phone-origin tickets are never in the email/webform count, so nothing is counted twice.
@@ -2625,11 +2651,13 @@
     return "<span title='" + (calls + nonCall) + " tickets in " + fmtDur(r.login) + ": " + calls + " from calls + " + nonCall + " email/webform" + (waits.work ? "" : " (email/webform not loaded yet)") + "'>" + ((calls + nonCall) / hrs).toFixed(1) + "</span>";
   }
   // Non-call tickets they took that day (assigned to them; email + webform origin), worked count on hover.
-  function workCell(r) {
+  function workCell(r, noLink) {
     if (!waits.work) return "<span class='muted' title='Not loaded yet'>–</span>";
     var w = r.work || { email: 0, web: 0, tookEmail: 0, tookWeb: 0 }, took = w.tookEmail + w.tookWeb, worked = w.email + w.web;
     var tip = "Took " + took + " non-call tickets (" + w.tookEmail + " email, " + w.tookWeb + " webform: assigned to them today, from New (unassigned) or given to them). Worked " + worked + " (" + w.email + " email, " + w.web + " webform: publicly replied to or solved). Tickets created from calls are left out.";
-    return "<span title='" + esc(tip) + "'>" + (took ? took : "<span class='muted'>0</span>") + (worked ? " <span class='muted tiny'>/ " + worked + " worked</span>" : "") + "</span>";
+    var inner = (took ? took : "<span class='muted'>0</span>") + (worked ? " <span class='muted tiny'>/ " + worked + " worked</span>" : "");
+    if (!noLink && (took || worked)) inner = "<a href='#' data-agent-ew='" + esc(r.name) + "'>" + inner + "</a>";
+    return "<span title='" + esc(tip) + "'>" + inner + "</span>";
   }
   // Roster row for a name; Zendesk shows some email agents by first name only ("Mohsin", "Bisma").
   function schedForLoose(name) {
@@ -2717,7 +2745,7 @@
           (r.lateMin ? " <span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "'>" + fmtShort(r.lateMin * 60) + " late</span>" : (r.start !== null ? " <span class='muted tiny' title='Scheduled " + clockOf(r.start) + (r.firstUnsure ? "; online before the server started checking, so not counted" : "") + "'>" + (r.firstUnsure ? "?" : "ok") + "</span>" : ""));
         return "<tr><td class='num'>" + (i + 1) + "</td><td>" + esc(r.name) + "</td>" +
           "<td class='num' title='" + esc(tip) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
-          "<td class='num'>" + workCell(r) + "</td>" +
+          "<td class='num'>" + workCell(r, ctx !== "today") + "</td>" +
           "<td class='num'>" + tookPerHr(r) + "</td>" +
           "<td>" + esc(r.now) + "</td>" +
           "<td class='num'>" + (r.slowMs ? "<span class='warmn' title='Ready time while a New (unassigned) ticket had waited over " + CONFIG.EMAIL_PICKUP_MIN + " min'>" + fmtDur(r.slowMs / 1000) + "</span>" : "<span class='muted'>0</span>") + "</td>" +
@@ -2998,7 +3026,7 @@
       var k = normName(r.name), open = !!yd.open[ymd + "|" + k];
       return "<tr" + (open ? " class='flag-warn'" : "") + "><td class='num'>" + (rank || "") + "</td><td><a href='#' data-yd-agent='" + esc(k) + "' title='Show this day&#39;s status changes, with Zendesk / Jira activity for each'>" + (open ? "▾ " : "▸ ") + esc(r.name) + "</a>" + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
-        "<td class='num'>" + callsCell(r.name, r.answered, r.outbound, r.followups, true) + "</td><td class='num'>" + r.perHr.toFixed(1) + "</td><td class='num'>" + workCell(r) + "</td><td class='num'>" + tookPerHr(r) + "</td><td class='num'>" + fmtDur(r.talk) + "</td>" +
+        "<td class='num'>" + callsCell(r.name, r.answered, r.outbound, r.followups, true) + "</td><td class='num'>" + r.perHr.toFixed(1) + "</td><td class='num'>" + workCell(r, true) + "</td><td class='num'>" + tookPerHr(r) + "</td><td class='num'>" + fmtDur(r.talk) + "</td>" +
         "<td class='num'>" + rnaCell(r.rna) + "</td>" +
         "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
         "<td class='num'>" + startCell(r) + "</td>" +
@@ -3173,23 +3201,23 @@
     if (!force && box.getAttribute("data-kind") === kind &&
         (box.getAttribute("data-at") === abandons.at + ":" + rsLegsVer || [].some.call(box.querySelectorAll("audio"), function (a) { return !a.paused; }))) return;
     callDrillRendered.at = abandons.at; box.setAttribute("data-kind", kind); box.setAttribute("data-at", abandons.at + ":" + rsLegsVer);
-    var isShort = kind === "shortcalls", isAgent = kind.indexOf("agentcalls:") === 0;
-    var agentName = isAgent ? kind.slice("agentcalls:".length) : "";
+    var isShort = kind === "shortcalls", isOut = kind.indexOf("agentout:") === 0, isAgent = kind.indexOf("agentcalls:") === 0 || isOut;
+    var agentName = isAgent ? kind.slice(kind.indexOf(":") + 1) : "";
     function agentsOf(r) { var l = transferLegs(r); return l ? l.map(function (x) { return normName(x.name); }) : [normName(firstLast(r.connected_name))]; }
-    var rows = isShort ? shortCalls() : (isAgent ? answeredCalls().filter(function (r) { return agentsOf(r).indexOf(normName(agentName)) >= 0; }) : answeredCalls()), byAgent = {};
+    var rows = isOut ? outboundCalls(agentName) : isShort ? shortCalls() : (isAgent ? answeredCalls().filter(function (r) { return agentsOf(r).indexOf(normName(agentName)) >= 0; }) : answeredCalls()), byAgent = {};
     rows.forEach(function (r) {
       var l = transferLegs(r), names = l ? l.map(function (x) { return x.name; }) : [firstLast(r.connected_name)];
       names.filter(function (n, i) { return names.indexOf(n) === i; }).forEach(function (n) { byAgent[n] = (byAgent[n] || 0) + 1; });
     });
     var agentsLine = Object.keys(byAgent).sort(function (a, b) { return byAgent[b] - byAgent[a]; }).map(function (n) { return esc(n) + " " + byAgent[n]; }).join(" · ");
     var status = abandons.loading ? "Loading call detail…" : (abandons.err ? esc(abandons.err) : (abandons.at ? "as of " + fmtClock(abandons.at) + " · calls appear a few minutes after they end" : ""));
-    var title = isShort ? "Short calls today" : (isAgent ? "Calls today: " + esc(agentName) : "Answered calls today");
+    var title = isOut ? "Outbound calls today: " + esc(agentName) : isShort ? "Short calls today" : (isAgent ? "Calls today: " + esc(agentName) : "Answered calls today");
     if (queueFilter) title += " · " + esc(queueFilter);
     var what = isShort ? "answered calls under " + CONFIG.SHORT_CALL_SEC + "s · " : "";
     box.innerHTML = "<div class='section-title'>" + title + " <span class='sub'>" + what + rows.length + " call" + (rows.length === 1 ? "" : "s") + (agentsLine ? " · " + agentsLine : "") + "</span>" +
       "<span class='sub'>" + status + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
-      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th>Agent</th><th class='num'>Talked</th><th>Caller</th><th>Recording</th><th>Zendesk</th><th>RingSense</th></tr></thead><tbody>" +
+      "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Queue</th><th>Agent</th><th class='num'>Talked</th><th>" + (isOut ? "Number dialed" : "Caller") + "</th><th>Recording</th><th>Zendesk</th><th>RingSense</th></tr></thead><tbody>" +
       (rows.map(function (r) {
         var uii = String(r.UII || "").replace(/^'/, ""), d = callTalkSec(r);
         var rec = recordings[uii] ? "<audio controls src='" + recordings[uii] + "'></audio>"
@@ -3217,16 +3245,16 @@
         }
         return "<tr class='" + (hl ? "flag-warn" : "") + "'>" +
           "<td>" + esc(etToPtClock(r.call_start_dts)) + "</td>" +
-          "<td>" + esc(r.source_name) + "</td>" +
+          "<td>" + (isOut ? "<span class='muted'>Outbound</span>" : esc(r.source_name)) + "</td>" +
           "<td>" + esc(firstLast(r.connected_name)) + "</td>" +
           "<td class='num'><span class='" + (hl ? "warmn" : "") + "'>" + fmtDur(d) + "</span></td>" +
           "<td>" + esc(r.ANI) + "</td>" +
           "<td data-rec='" + esc(uii) + "'>" + rec + "</td>" +
           "<td>" + zdLink(uii, r.connect_id, !r.recording_url && !(+r.connected_duration)) + "</td>" +
           "<td data-rs='" + esc(rsSession(r)) + "'>" + rsCell(rsSession(r)) + "</td></tr>";
-      }).join("") || "<tr><td colspan='8' class='muted'>" + (abandons.all ? (isShort ? "No answered calls under " + CONFIG.SHORT_CALL_SEC + "s yet today." : "No answered calls in the call report yet today.") : "") + "</td></tr>") +
+      }).join("") || "<tr><td colspan='8' class='muted'>" + (abandons.all ? (isOut ? "No outbound calls in the call report yet today." : isShort ? "No answered calls under " + CONFIG.SHORT_CALL_SEC + "s yet today." : "No answered calls in the call report yet today.") : "") + "</td></tr>") +
       "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>" + (isShort
+      "<div class='tiny muted' style='margin-top:6px'>" + (isOut ? "Calls they dialed out from RingCX today (manual dials), newest first. Talked = connected time, including voicemail. The report can trail by a few minutes." : isShort
         ? "Answered queue calls under " + CONFIG.SHORT_CALL_SEC + " seconds from answer to hang-up, counting the whole call and not just the first agent, so calls handed to someone else are not listed (rows under 30s are highlighted). Logging a real question takes about a minute, so these are worth a listen. 0:00 usually means the call dropped or was transferred right away."
         : "Every answered queue call today from RingCX's call report, newest first. Talk time runs from answer to hang-up for the whole call. Calls under " + CONFIG.SHORT_CALL_SEC + "s are highlighted. The report can trail the live Answered counter by a few minutes. A transferred call gets one row per agent (from RingSense, about 10 minutes after the call), each with that agent's own talk time and ticket; until then it shows as one row under the first agent, in the queue it ended in.") + "</div>";
     var recent = {}, cutoff = Date.now() - 45 * 60000;
@@ -3326,6 +3354,8 @@
     if (drill === "waiting") { box.hidden = false; loadWaiting(); renderWaitingDrill(box); return; }
     if (drill === "tickets") { box.hidden = false; loadAbandons(false); renderTicketDrill(box); return; }
     if (drill === "agentcalls") { box.hidden = false; loadAbandons(false); renderCallDrill(box, "agentcalls:" + drillAgent); return; }
+    if (drill === "agentout") { box.hidden = false; loadAbandons(false); renderCallDrill(box, "agentout:" + drillAgent); return; }
+    if (drill === "agentfu" || drill === "agentew") { box.hidden = false; box.removeAttribute("data-kind"); renderAgentTickets(box, drill + ":" + drillAgent); return; }
     if (drill === "shortcalls" || drill === "answered") { box.hidden = false; loadAbandons(false); renderCallDrill(box, drill); return; }
     box.removeAttribute("data-kind");
     if (drill === "abandoned") { box.hidden = false; loadAbandons(false); renderAbandonDrill(box); return; }
@@ -3734,7 +3764,8 @@
     if (wrapEl) inlineBox.style.width = Math.max(320, wrapEl.clientWidth - 14) + "px";
     row.parentNode.insertBefore(inlineTr, row.nextSibling);
     if (inline.kind === "status") renderStatusLog(inlineBox, { id: inline.id, name: inline.name, mode: "changes" });
-    else { renderCallDrill(inlineBox, "agentcalls:" + inline.name, inline.fresh); inline.fresh = false; }
+    else if (inline.kind === "fu") renderAgentTickets(inlineBox, "agentfu:" + inline.name);
+    else { renderCallDrill(inlineBox, (inline.kind === "out" ? "agentout:" : "agentcalls:") + inline.name, inline.fresh); inline.fresh = false; }
     var c = inlineBox.querySelector("[data-drill-close]");
     if (c) { c.removeAttribute("data-drill-close"); c.setAttribute("data-inline-close", ""); }
   }
@@ -3760,7 +3791,7 @@
     var same = inline && inline.kind === kind && rowKey(inline.id, inline.name) === rowKey(id, name);
     inline = same ? null : { kind: kind, id: id, name: name, fresh: true };
     if (inline) inlineBox.removeAttribute("data-kind");
-    if (inline && kind === "calls") loadAbandons(true);
+    if (inline && (kind === "calls" || kind === "out")) loadAbandons(true);
     render();
   }
   function hasSupTag(name) { var k = normName(name); return (CONFIG.SUPERVISOR_TAG || []).some(function (x) { return normName(x) === k; }); }
@@ -3921,11 +3952,12 @@
     if (ev.target.closest("[data-login-inline-close]")) { ev.preventDefault(); loginInline = null; render(); return; }
     var ins = ev.target.closest("#agentBody [data-status-log]");
     if (ins && !ins.closest(".inline-drill")) { ev.preventDefault(); toggleInline("status", ins.getAttribute("data-status-log"), ins.getAttribute("data-status-name")); return; }
-    var inc = ev.target.closest("#agentBody [data-agent-calls]");
+    var inc = ev.target.closest("#agentBody [data-agent-calls], #agentBody [data-agent-out], #agentBody [data-agent-fu]");
     if (inc && !inc.closest(".inline-drill")) {
       ev.preventDefault();
       var crow = inc.closest("tr[data-arow]"), ckey = crow ? crow.getAttribute("data-arow") : "";
-      toggleInline("calls", ckey.indexOf("id:") === 0 ? ckey.slice(3) : "", inc.getAttribute("data-agent-calls"));
+      var ikind = inc.hasAttribute("data-agent-out") ? "out" : (inc.hasAttribute("data-agent-fu") ? "fu" : "calls");
+      toggleInline(ikind, ckey.indexOf("id:") === 0 ? ckey.slice(3) : "", inc.getAttribute("data-agent-" + ikind));
       return;
     }
     if (ev.target.closest("a.alert[href='#esPanel']")) $("esPanel").open = true;   // jump to the ES section, unfolded
@@ -3946,6 +3978,14 @@
       return;
     }
     // Calls number in the Agents table: that agent's calls today, with recordings.
+    var ao = ev.target.closest("[data-agent-out], [data-agent-fu], [data-agent-ew]");
+    if (ao) {
+      ev.preventDefault();
+      var ak = ao.hasAttribute("data-agent-out") ? "out" : (ao.hasAttribute("data-agent-fu") ? "fu" : "ew");
+      drillAgent = ao.getAttribute("data-agent-" + ak); drill = "agent" + ak;
+      if (ak === "out") loadAbandons(true);
+      render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return;
+    }
     var ac = ev.target.closest("[data-agent-calls]");
     if (ac) { ev.preventDefault(); drillAgent = ac.getAttribute("data-agent-calls"); drill = "agentcalls"; loadAbandons(true); render(); $("kpiDrill").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     // Queue card: toggle the queue filter.
