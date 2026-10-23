@@ -379,7 +379,6 @@
           <div><div class="board-h low">Bottom 5</div><div id="boardLow"></div></div>
         </div>
         <div id="boardAll" hidden><div class="board-h">Everyone, ranked</div><div id="boardAllList"></div></div>
-        <div id="boardEmail"></div>
         <div class="tiny muted" style="margin-top:6px">Fixed 100-point scorecard (100 = every part met; hover a score for its breakdown): <b>Ready 30</b> (Available, Engaged or Transition; full at 85%+, none at 50%), <b>no RNA 15</b> (1 RNA = 7, 2+ = 0), <b>on-time start 12</b> (confirmed 5-15 min late = 6, more = 0; unconfirmed counts as on time), <b>lunch within the hour 8</b> (5-15 min over = 4, more = 0; timed from when they actually went), <b>tickets 15</b> (−5 for each Zendesk / ES ticket still waiting on them after the end of their next shift, −10 if 2+ days past that; the number in brackets = waiting on them now; click for the list), <b>ES escalations 10</b> (ES 30d: Jira ES tickets they created ÷ Zendesk tickets assigned to them, last 30 days; full points at or below the team's rate, none at double it; under 20 tickets = not judged), <b>CSAT 10</b> (CSAT 60d: good ÷ (good + bad) Zendesk satisfaction ratings on their tickets, last 60 days; full points at or above the help-desk rate, none at 70%; under 5 ratings = not judged). Calls and talk time are shown but don't score: agents can't control how many calls they're offered. <b>Email work counts in their favor:</b> time in Zendesk Email Support (or online) while RingCX shows them not ready or logged out counts as Ready, and <b>Email/Webform</b> shows the email and webform tickets assigned to them today (picked from New (unassigned) or given to them), with how many they worked (publicly replied to or solved). Tickets created from calls are left out, so nothing is counted twice. Grades: 90+ green, 75-89 normal, 60-74 yellow, under 60 red. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet. <b>Email Team</b> (email-only agents) is scored the same way from their Zendesk statuses, which the server records every minute: Ready = Email Support or online, and <b>pickup speed 15</b> replaces RNA (full points unless a ticket in Email::New (unassigned) waited over 30 min while they were ready).</div>
         <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Busy (yellow), Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
       </div>
@@ -445,7 +444,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.76<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.77<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
     </main>
   </section>
@@ -2687,11 +2686,18 @@
       });
     });
     // Anyone RingCX saw that day is a phone agent (on the call scorecard, or soon to be), not an email-only one.
-    var phone = (onCallBoard || []).concat(Object.keys(hist.agents).map(function (id) { return hist.agents[id].name; }).filter(Boolean));
+    // Roster (Smartsheet) people are phone agents too, even before their first RingCX login of the day.
+    var phone = (onCallBoard || []).concat(Object.keys(hist.agents).map(function (id) { return hist.agents[id].name; }).filter(Boolean))
+      .concat((pto.schedule || []).map(function (x) { return x.name; }));
     who = who.filter(function (n) {
-      var k = normName(n), single = k.indexOf(" ") < 0;   // Zendesk shows some people by first name only ("SHARIK")
+      var k = normName(n), words = k.split(" "), single = words.length < 2;   // Zendesk shows some people by first name only ("SHARIK")
       if (CONFIG.EMAIL_AGENTS.some(function (e) { return normName(e) === k; })) return true;
-      return !phone.some(function (c) { return waitIsFor(c, { name: n, email: "" }) || normName(c) === k || (single && normName(c).split(" ")[0] === k); });
+      // Zendesk can shorten the surname ("Leah de" = Leah De Asis): every Zendesk word in the phone name counts as a match.
+      return !phone.some(function (c) {
+        var cw = normName(c).split(" ");
+        return waitIsFor(c, { name: n, email: "" }) || normName(c) === k || (single && cw[0] === k) ||
+          (!single && words.every(function (w) { return cw.indexOf(w) >= 0; }));
+      });
     });
     who.forEach(function (who) {
       var k = normName(who), logged = 0, ready = 0, slow = 0, first = null, firstUnsure = false, lunch = [], cur = null, now = "offline";
@@ -2727,40 +2733,16 @@
       var esr = esFor(who), csr = csatFor(who);
       parts.es = esr ? esr.pts : 10;
       parts.csat = csr ? csr.pts : 10;
-      out.push({ name: who, email: true, work: workFor(who), esr: esr, score: parts.ready + parts.pickup + parts.start + parts.lunch + (tk ? tk.pts : 15) + parts.es + parts.csat, parts: parts, tk: tk, csat: csr,
+      out.push({ name: who, email: true, work: workFor(who), esr: esr, answered: 0, perHr: null, talk: null, outbound: outboundCount(who), followups: followupsFor(who), score: parts.ready + parts.pickup + parts.start + parts.lunch + (tk ? tk.pts : 15) + parts.es + parts.csat, parts: parts, tk: tk, csat: csr,
         ready: share, readyMs: ready, slowMs: slow, login: logged / 1000, first: first, firstUnsure: firstUnsure, start: start, lateMin: lateMin,
         lunchOver: over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(over) : 0, lunchLvl: ll, lunchFrom: L ? L.from : null, now: now });
     });
     return out.sort(function (a, b) { return b.score - a.score; });
   }
-  function emailTableHtml(list, asOf, ctx) {
-    if (!list) return "<div class='muted tiny'>Email Team: no Zendesk status data for this day (recording started Fri 10/16).</div>";
-    return "<div class='board-h' style='margin-top:14px'>Email Team <span class='muted tiny' style='font-weight:400'>scored from Zendesk statuses · pickup = Email::New (unassigned) waiting over " + CONFIG.EMAIL_PICKUP_MIN + " min while they were ready</span></div>" +
-      // Same column order as the phone table (Fred, 2026-10-16): Email/Webform, Tickets/hr, then status (phone: Talk),
-      // Slow pickup (phone: RNA), Ready, First online (phone: Start), Lunch, Tickets, ES 30d, Logged in.
-      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Non-call tickets (email + webform) assigned to them, and how many they worked'>Email/Webform</th><th class='num' title='All tickets they took per hour logged in to Zendesk: email/webform tickets taken (plus any calls)'>Tickets/hr</th><th>Zendesk status</th><th class='num'>Slow pickup</th><th class='num'>Ready</th><th class='num'>First online</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
-      (list.map(function (r, i) {
-        var p = r.parts, tip = "Ready " + p.ready + "/30" + (r.ready == null ? " (under 30 min logged in)" : "") + " · Pickup " + p.pickup + "/15 · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · Tickets " + (p.tickets == null ? "15/15 (not loaded)" : p.tickets + "/15") + " · ES escalations " + p.es + "/10 · CSAT " + p.csat + "/10. Fixed scale: 100 = every part met.";
-        var startTxt = r.first === null ? "<span class='muted'>–</span>" : (r.firstUnsure ? "≤ " : "") + fmtClock(r.first) +
-          (r.lateMin ? " <span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "'>" + fmtShort(r.lateMin * 60) + " late</span>" : (r.start !== null ? " <span class='muted tiny' title='Scheduled " + clockOf(r.start) + (r.firstUnsure ? "; online before the server started checking, so not counted" : "") + "'>" + (r.firstUnsure ? "?" : "ok") + "</span>" : ""));
-        return "<tr data-brow='" + esc(normName(r.name)) + "'><td class='num'>" + (i + 1) + "</td><td>" + esc(r.name) + "</td>" +
-          "<td class='num' title='" + esc(tip) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
-          "<td class='num'>" + workCell(r, ctx !== "today") + "</td>" +
-          "<td class='num'>" + tookPerHr(r) + "</td>" +
-          "<td>" + esc(r.now) + "</td>" +
-          "<td class='num'>" + (r.slowMs ? "<span class='warmn' title='Ready time while a New (unassigned) ticket had waited over " + CONFIG.EMAIL_PICKUP_MIN + " min'>" + fmtDur(r.slowMs / 1000) + "</span>" : "<span class='muted'>0</span>") + "</td>" +
-          "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
-          "<td class='num'>" + startTxt + "</td>" +
-          "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch status ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
-          "<td class='num'>" + ticketCell(r) + "</td>" + "<td class='num'>" + esCell(r) + "</td>" + "<td class='num'>" + csatCell(r) + "</td>" +
-          "<td class='num'>" + fmtDur(r.login) + "</td></tr>" +
-          (tkOpen[ctx + "|" + normName(r.name)] ? "<tr class='inline-drill'><td colspan='14'><div class='inline-box'>" + ticketListHtml(r, asOf) + "</div></td></tr>" : "");
-      }).join("") || "<tr><td colspan='14' class='muted'>No email agents logged in to Zendesk.</td></tr>") + "</tbody></table></div>";
-  }
   function scoreGrade(s) { return s >= 90 ? "good" : (s >= 75 ? "" : (s >= 60 ? "warmn" : "hot")); }
   function scoreTitle(r) {
     var p = r.parts;
-    return "Ready " + p.ready + "/30" + (r.ready == null ? " (not enough time watched yet)" : "") + " · RNA " + p.rna + "/15 · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · Tickets " +
+    return "Ready " + p.ready + "/30" + (r.ready == null ? " (not enough time watched yet)" : "") + (r.email ? " · Pickup " + p.pickup + "/15" : " · RNA " + p.rna + "/15") + " · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · Tickets " +
       (p.tickets == null ? "15/15 (not loaded yet)" : p.tickets + "/15") + " · ES escalations " + p.es + "/10 · CSAT " + p.csat + "/10. Fixed scale: 100 = every part met.";
   }
   function ticketCell(r) {
@@ -2788,6 +2770,23 @@
       }).join("") || "<tr><td colspan='6' class='muted'>Nothing waiting on them.</td></tr>") + "</tbody></table></div>";
   }
 
+  // Email Team rows share the ranked board (2026-10-23). They have no queue calls, so Calls/hr and Talk show "–";
+  // the RNA column shows their slow pickup (Email::New waiting over EMAIL_PICKUP_MIN while they were ready), the
+  // email scorecard's 15 points in place of RNA; Start is their first time online in Zendesk.
+  function emailTag(r) {
+    return r.email ? " <span class='chip info' title='Email Team: scored from Zendesk statuses" + (r.now ? " · Zendesk now: " + esc(r.now) : "") + "'>Email</span>" : "";
+  }
+  function emailRnaCell(r) {
+    var tip = "Email Team: slow pickup, ready time while a New (unassigned) ticket had waited over " + CONFIG.EMAIL_PICKUP_MIN + " min (counts in place of RNA)";
+    return r.slowMs ? "<span class='warmn' title='" + esc(tip) + "'>" + fmtDur(r.slowMs / 1000) + "</span>" : "<span class='muted' title='" + esc(tip) + "'>0</span>";
+  }
+  function emailStartCell(r) {
+    if (r.first === null) return "<span class='muted'>–</span>";
+    var tip = "First online in Zendesk " + fmtClock(r.first) + (r.start !== null ? " · scheduled " + clockOf(r.start) : "") + (r.firstUnsure ? " · online before the server started checking, so not counted" : "");
+    if (r.lateMin) return "<span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "' title='" + esc(tip) + "'>" + fmtShort(r.lateMin * 60) + " late</span>";
+    return "<span class='muted' title='" + esc(tip) + "'>" + (r.firstUnsure ? "?" : "ok") + "</span>";
+  }
+  var dash = "<span class='muted'>–</span>";
   function boardRows() {
     var calls = callIndex();   // "Last, First" -> { uiis, talk }
     var people = {};
@@ -2853,22 +2852,24 @@
 
   function renderBoard() {
     if (!$("boardTop")) return;
-    var rows = boardRows();
+    var phoneRows = boardRows();
+    var rows = phoneRows.concat((emailRows(phoneRows.map(function (r) { return r.name; })) || []).filter(function (r) { return inQueue(r.name); }))
+      .sort(function (a, b) { return b.score - a.score || (b.answered || 0) - (a.answered || 0); });
     // Top 5 / Bottom 5 rank agents only (Fred, 2026-10-14); supervisors still appear in "Show all".
     var ranked = rows.filter(function (r) { return !r.sup; });
     var top = ranked.slice(0, 5), low = ranked.length > 5 ? ranked.slice(-Math.min(5, ranked.length - 5)).reverse() : [];
     function table(list, startRank, dir, total) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them today, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them today, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr data-brow='" + esc(normName(r.name)) + "'><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
-            "<td>" + esc(r.name) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+            "<td>" + esc(r.name) + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
             "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
             "<td class='num'>" + callsCell(r.name, r.answered, r.outbound, r.followups) + "</td>" +
-            "<td class='num'>" + r.perHr.toFixed(1) + "</td>" +
-            "<td class='num'>" + workCell(r) + "</td>" + "<td class='num'>" + tookPerHr(r) + "</td>" + "<td class='num'>" + fmtDur(r.talk) + "</td>" +
-            "<td class='num'>" + (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0") + "</td>" +
+            "<td class='num'>" + (r.email ? dash : r.perHr.toFixed(1)) + "</td>" +
+            "<td class='num'>" + workCell(r) + "</td>" + "<td class='num'>" + tookPerHr(r) + "</td>" + "<td class='num'>" + (r.email ? dash : fmtDur(r.talk)) + "</td>" +
+            "<td class='num'>" + (r.email ? emailRnaCell(r) : (r.rna ? "<span class='" + (r.rna >= 2 ? "hot" : "warmn") + "'>" + r.rna + "</span>" : "0")) + "</td>" +
             "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
-            "<td class='num'>" + (r.lateMin ? "<span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "' title='First login " + Math.round(r.lateMin) + " min after scheduled start (confirmed)'>" + fmtShort(r.lateMin * 60) + " late</span>"
+            "<td class='num'>" + (r.email ? emailStartCell(r) : r.lateMin ? "<span class='" + (r.lateMin >= CONFIG.LOGIN_LATE_CRIT_MIN ? "hot" : "warmn") + "' title='First login " + Math.round(r.lateMin) + " min after scheduled start (confirmed)'>" + fmtShort(r.lateMin * 60) + " late</span>"
               : "<span class='muted' title='" + (r.lateConf && r.lateConf !== "confirmed" ? "First login not confirmed (see Logins today), so not counted" : "On time, or no schedule") + "'>" + (r.lateConf && r.lateConf !== "confirmed" ? "?" : "ok") + "</span>") + "</td>" +
             "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
             "<td class='num'>" + ticketCell(r) + "</td>" + "<td class='num'>" + esCell(r) + "</td>" + "<td class='num'>" + csatCell(r) + "</td>" +
@@ -2883,7 +2884,6 @@
     $("boardAllBtn").textContent = showAll ? "Top 5 / Bottom 5" : "Show all (" + rows.length + ")";
     if (showAll) $("boardAllList").innerHTML = table(rows, 1, 1);
     else { $("boardTop").innerHTML = table(top, 1, 1); $("boardLow").innerHTML = table(low, 0, -1, ranked.length); }
-    $("boardEmail").innerHTML = waits.avail || waits.at ? emailTableHtml(emailRows(rows.map(function (r) { return r.name; })), Date.now(), "today") : "";
     placeBoardInline();
     $("boardSub").textContent = rows.length + " ranked" + (abandons.at ? " · calls as of " + fmtClock(abandons.at) : "") + " · logged-in time and RNA " + trackedLabel();
   }
@@ -3011,7 +3011,8 @@
     if (yd.err[ymd]) { $("ydBody").innerHTML = "<span class='muted'>Couldn't load " + esc(ymdLabel(ymd)) + " (" + esc(yd.err[ymd]) + "). Use ◂ ▸ to try again.</span>"; $("ydSub").textContent = ""; return; }
     if (!d) { $("ydBody").innerHTML = "<span class='muted'>Open this section to load it.</span>"; return; }
     if (d.empty) { $("ydBody").innerHTML = "<span class='muted'>No snapshots for " + esc(ymdLabel(ymd)) + " (nobody logged in, or before the server started tracking).</span>"; $("ydSub").textContent = ""; return; }
-    var rows = d.rows.filter(function (r) { return inQueue(r.name); });
+    var rows = d.rows.concat(d.email || []).filter(function (r) { return inQueue(r.name); })
+      .sort(function (a, b) { return b.score - a.score || (b.answered || 0) - (a.answered || 0); });
     var agents = rows.filter(function (r) { return !r.sup; }), sups = rows.filter(function (r) { return r.sup; });
     var partial = d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000;
     $("ydSub").textContent = (partial ? "partial day: the server only tracked from " + fmtClock(d.from) + " (calls are the whole day; Ready, lunch and logins only from then)" : "tracked " + fmtClock(d.from) + " to " + fmtClock(d.to)) +
@@ -3025,12 +3026,12 @@
     }
     function rowHtml(r, rank) {
       var k = normName(r.name), open = !!yd.open[ymd + "|" + k];
-      return "<tr" + (open ? " class='flag-warn'" : "") + "><td class='num'>" + (rank || "") + "</td><td><a href='#' data-yd-agent='" + esc(k) + "' title='Show this day&#39;s status changes, with Zendesk / Jira activity for each'>" + (open ? "▾ " : "▸ ") + esc(r.name) + "</a>" + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+      return "<tr" + (open ? " class='flag-warn'" : "") + "><td class='num'>" + (rank || "") + "</td><td><a href='#' data-yd-agent='" + esc(k) + "' title='Show this day&#39;s status changes, with Zendesk / Jira activity for each'>" + (open ? "▾ " : "▸ ") + esc(r.name) + "</a>" + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
-        "<td class='num'>" + callsCell(r.name, r.answered, r.outbound, r.followups, true) + "</td><td class='num'>" + r.perHr.toFixed(1) + "</td><td class='num'>" + workCell(r, true) + "</td><td class='num'>" + tookPerHr(r) + "</td><td class='num'>" + fmtDur(r.talk) + "</td>" +
-        "<td class='num'>" + rnaCell(r.rna) + "</td>" +
+        "<td class='num'>" + callsCell(r.name, r.answered, r.outbound, r.followups, true) + "</td><td class='num'>" + (r.email ? dash : r.perHr.toFixed(1)) + "</td><td class='num'>" + workCell(r, true) + "</td><td class='num'>" + tookPerHr(r) + "</td><td class='num'>" + (r.email ? dash : fmtDur(r.talk)) + "</td>" +
+        "<td class='num'>" + (r.email ? emailRnaCell(r) : rnaCell(r.rna)) + "</td>" +
         "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
-        "<td class='num'>" + startCell(r) + "</td>" +
+        "<td class='num'>" + (r.email ? emailStartCell(r) : startCell(r)) + "</td>" +
         "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
         "<td class='num'>" + ticketCell(r) + "</td>" + "<td class='num'>" + esCell(r) + "</td>" + "<td class='num'>" + csatCell(r) + "</td>" +
         "<td class='num'>" + fmtDur(r.login) + "</td></tr>" +
@@ -3041,10 +3042,10 @@
     $("ydBody").innerHTML =
       "<div class='tiny' style='margin:4px 0 8px'><b>" + d.answered + "</b> queue calls answered · <b>" + d.abandoned + "</b> abandoned · <b>" + fmtDur(d.talk) + "</b> talk · " +
         agents.length + " agents scored" + (best ? " · best: <b>" + esc(best.name) + "</b>" : "") + "</div>" +
-      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them that day, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num'>RNA</th><th class='num'>Ready</th><th class='num'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='Non-call tickets (email + webform) assigned to them that day, and how many they worked. Tickets created from calls are left out.'>Email/Webform</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES, last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
       (agents.map(function (r, i) { return rowHtml(r, i + 1); }).join("") || "<tr><td colspan='16' class='muted'>Nobody to score that day.</td></tr>") +
       (sups.length ? "<tr><td colspan='16' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
-      "</tbody></table></div>" + emailTableHtml(d.email, d.to + 60000, ymd);
+      "</tbody></table></div>" + (d.email ? "" : "<div class='muted tiny'>No Zendesk status data for the Email Team that day (recording started Fri 10/16).</div>");
   }
   // One person's whole finished day: every status change (newest first) plus logouts, each with the same
   // Zendesk / Jira Activity dropdown as today's drill-down. Nothing is highlighted: there is no "last 60 min".
@@ -3770,7 +3771,7 @@
     var gone = function () { if (boardTr.parentNode) boardTr.parentNode.removeChild(boardTr); };
     if (!boardInline) return gone();
     var k = normName(boardInline.name);
-    var row = [].filter.call(document.querySelectorAll("#boardTop tr[data-brow], #boardLow tr[data-brow], #boardAllList tr[data-brow], #boardEmail tr[data-brow]"), function (tr) {
+    var row = [].filter.call(document.querySelectorAll("#boardTop tr[data-brow], #boardLow tr[data-brow], #boardAllList tr[data-brow]"), function (tr) {
       return tr.getAttribute("data-brow") === k && tr.offsetParent !== null;
     })[0];
     if (!row) return gone();
@@ -4015,8 +4016,7 @@
     if (bc) { ev.preventDefault(); boardInline = null; render(); return; }
     var bl = ev.target.closest("#boardTop [data-agent-calls], #boardTop [data-agent-out], #boardTop [data-agent-fu], #boardTop [data-agent-ew], " +
       "#boardLow [data-agent-calls], #boardLow [data-agent-out], #boardLow [data-agent-fu], #boardLow [data-agent-ew], " +
-      "#boardAllList [data-agent-calls], #boardAllList [data-agent-out], #boardAllList [data-agent-fu], #boardAllList [data-agent-ew], " +
-      "#boardEmail [data-agent-calls], #boardEmail [data-agent-out], #boardEmail [data-agent-fu], #boardEmail [data-agent-ew]");
+      "#boardAllList [data-agent-calls], #boardAllList [data-agent-out], #boardAllList [data-agent-fu], #boardAllList [data-agent-ew]");
     if (bl && !bl.closest(".inline-drill")) {
       ev.preventDefault();
       var bk = ["calls", "out", "fu", "ew"].filter(function (x) { return bl.hasAttribute("data-agent-" + x); })[0];
