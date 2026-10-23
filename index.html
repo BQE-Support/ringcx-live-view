@@ -239,6 +239,17 @@
   details.collapsible:not([open]) > summary { margin-bottom: 0; }
   details.panel ul { color: var(--ink-2); line-height: 1.55; padding-left: 18px; }
   footer { text-align: center; color: var(--ink-3); font-size: 11px; margin-top: 4px; }
+  dialog.week-report { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+    padding: 18px 20px; width: min(1180px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+  dialog.week-report::backdrop { background: rgba(12,18,32,0.55); }
+  .wr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .wr-sub { font-family: var(--serif); font-size: 15px; margin: 16px 0 4px; }
+  .wr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .wr-table th, .wr-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+  .wr-table th:first-child, .wr-table td:first-child { text-align: left; }
+  .wr-table td.wrap { white-space: normal; text-align: left; }
+  .wr-table th { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  .wr-foot { color: var(--ink-3); font-size: 12px; margin-top: 10px; line-height: 1.45; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -294,6 +305,7 @@
           </label>
           <span id="filterTag" class="filter-tag" hidden></span>
           <button id="refreshBtn" class="btn" title="Refresh now">Refresh</button>
+          <button id="reportBtn" class="btn" title="Team numbers and agent score summaries for the last 5 working days, ready to copy">Report</button>
           <button id="snapshotBtn" class="btn" title="Download the main numbers as a time-stamped spreadsheet (CSV)">Snapshot</button>
           <button id="themeBtn" class="btn" title="Toggle light/dark">Theme</button>
           <span id="viewerTag" class="snapshot-tag" hidden></span>
@@ -444,8 +456,15 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.78<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.79<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
+      <dialog class="week-report" id="weekReport">
+        <div class="wr-head">
+          <h2 class="section-title" id="weekReportTitle" style="margin:0">Report</h2>
+          <div><button type="button" class="btn" id="weekReportCopy">Copy report</button> <button type="button" class="btn" id="weekReportClose">Close</button></div>
+        </div>
+        <div id="weekReportBody"></div>
+      </dialog>
     </main>
   </section>
 </div>
@@ -2987,27 +3006,172 @@
     var ymd = ptYmd(yd.back);
     if (yd.cache[ymd] || yd.loading || !session || !CONFIG.SUPABASE_URL) { renderDay(); return; }
     yd.loading = true; delete yd.err[ymd]; renderDay();
-    try {
-      if (tokenNearExpiry()) await refreshToken();
-      var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/history?day=" + ymd, { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
-      var j = await r.json().catch(function () { return {}; });
-      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
-      var from = Date.parse(ptMidnightIsoOf(ymd)), to = Date.parse(ptMidnightIsoOf(ptYmd(yd.back - 1)));
-      var csv = await api("reportsStreaming", {
-        reportType: "GLOBAL_CALL_TYPE_DELIMITED",
-        reportCriteria: { criteriaType: "GLOBAL_CALL_TYPE_CRITERIA", startDate: ptMidnightIsoOf(ymd), endDate: ptMidnightIsoOf(ptYmd(yd.back - 1)), containGates: true, containAgents: true, includeNoAnswers: true }
-      });
-      var calls = parseCsv(csv).filter(function (c) {
-        var t = etMs(c.call_start_dts);
-        return CONFIG.HIDDEN_QUEUES.indexOf(c.source_name) < 0 && (!isFinite(t) || (t >= from && t < to));
-      }).map(function (c) { c.source_name = queueLabel(c.source_name); return c; });
-      // Ticket checks started 2026-10-16; a day before that (or a failed load) scores tickets as full marks.
-      var dayWaits = null;
-      try { dayWaits = await fetchWaits(ymd); if (!dayWaits.rows.length) dayWaits.rows = null; } catch (e) { dayWaits = null; }
-      yd.cache[ymd] = scoreDay(ymd, j.fields || [], j.polls || [], calls, dayWaits);
-    } catch (e) { yd.err[ymd] = e.message; }
+    try { await buildDay(yd.back); } catch (e) { yd.err[ymd] = e.message; }
     finally { yd.loading = false; renderDay(); }
   }
+  // One finished day, rebuilt from the server's snapshots + that day's call report + ticket checks (cached in yd.cache).
+  async function buildDay(back) {
+    var ymd = ptYmd(back);
+    if (yd.cache[ymd]) return yd.cache[ymd];
+    if (tokenNearExpiry()) await refreshToken();
+    var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/history?day=" + ymd, { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+    var j = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+    var from = Date.parse(ptMidnightIsoOf(ymd)), to = Date.parse(ptMidnightIsoOf(ptYmd(back - 1)));
+    var csv = await api("reportsStreaming", {
+      reportType: "GLOBAL_CALL_TYPE_DELIMITED",
+      reportCriteria: { criteriaType: "GLOBAL_CALL_TYPE_CRITERIA", startDate: ptMidnightIsoOf(ymd), endDate: ptMidnightIsoOf(ptYmd(back - 1)), containGates: true, containAgents: true, includeNoAnswers: true }
+    });
+    var calls = parseCsv(csv).filter(function (c) {
+      var t = etMs(c.call_start_dts);
+      return CONFIG.HIDDEN_QUEUES.indexOf(c.source_name) < 0 && (!isFinite(t) || (t >= from && t < to));
+    }).map(function (c) { c.source_name = queueLabel(c.source_name); return c; });
+    // Ticket checks started 2026-10-16; a day before that (or a failed load) scores tickets as full marks.
+    var dayWaits = null;
+    try { dayWaits = await fetchWaits(ymd); if (!dayWaits.rows.length) dayWaits.rows = null; } catch (e) { dayWaits = null; }
+    yd.cache[ymd] = scoreDay(ymd, j.fields || [], j.polls || [], calls, dayWaits);
+    return yd.cache[ymd];
+  }
+
+  // ---------------- Report (2026-10-23): like Payroll Watch's, with agent score summaries ----------------
+  // The last 5 working days (Mon-Fri, today left out) the server still keeps snapshots for (8 days), each scored
+  // exactly like Previous days. Team numbers per day, then each agent's average score, per-day scores, lowest day
+  // and the scorecard part they lose the most points on. Copy report gives the same as plain text.
+  var PART_MAX = [["ready", "Ready", 30], ["rna", "RNA", 15], ["pickup", "Pickup", 15], ["start", "Start", 12], ["lunch", "Lunch", 8], ["tickets", "Tickets", 15], ["es", "ES", 10], ["csat", "CSAT", 10]];
+  var report = { loading: false, data: null };
+  function reportDays() {
+    var out = [];
+    for (var b = 1; b <= 7 && out.length < 5; b++) { var ymd = ptYmd(b), wd = new Date(ymd + "T12:00:00Z").getUTCDay(); if (wd >= 1 && wd <= 5) out.push({ back: b, ymd: ymd }); }
+    return out.reverse();
+  }
+  function reportData(days) {
+    var people = {}, team = [];
+    days.forEach(function (x) {
+      var d = x.d, rows = d && !d.empty ? d.rows.concat(d.email || []).filter(function (r) { return !r.sup; }) : [];
+      var scores = rows.map(function (r) { return r.score; });
+      team.push({ ymd: x.ymd, missing: !d || d.empty, answered: d && !d.empty ? d.answered : null, abandoned: d && !d.empty ? d.abandoned : null, talk: d && !d.empty ? d.talk : null,
+        outbound: rows.reduce(function (t, r) { return t + (r.outbound || 0); }, 0), scored: rows.length,
+        avg: scores.length ? scores.reduce(function (t, v) { return t + v; }, 0) / scores.length : null });
+      rows.forEach(function (r) {
+        var k = normName(r.name), p = people[k] || (people[k] = { name: r.name, email: !!r.email, days: {}, lost: {}, answered: 0, outbound: 0, took: 0, late: 0, longLunch: 0 });
+        p.days[x.ymd] = r.score; p.email = p.email || !!r.email;
+        p.answered += r.answered || 0; p.outbound += r.outbound || 0;
+        if (r.work) p.took += (r.work.tookEmail || 0) + (r.work.tookWeb || 0);
+        if (r.lateMin) p.late++;
+        if (r.lunchOver) p.longLunch++;
+        PART_MAX.forEach(function (pm) {
+          if (!r.parts || r.parts[pm[0]] === undefined) return;
+          var got = r.parts[pm[0]] === null ? pm[2] : r.parts[pm[0]];
+          p.lost[pm[1]] = (p.lost[pm[1]] || 0) + (pm[2] - got);
+        });
+      });
+    });
+    var agents = Object.keys(people).map(function (k) {
+      var p = people[k], ds = Object.keys(p.days), n = ds.length;
+      p.n = n; p.avg = ds.reduce(function (t, y) { return t + p.days[y]; }, 0) / n;
+      var low = ds.sort(function (a, b) { return p.days[a] - p.days[b]; })[0]; p.low = { ymd: low, score: p.days[low] };
+      var worst = Object.keys(p.lost).sort(function (a, b) { return p.lost[b] - p.lost[a]; })[0];
+      p.worst = worst && p.lost[worst] / n >= 1 ? { part: worst, perDay: p.lost[worst] / n } : null;
+      return p;
+    }).sort(function (a, b) { return b.avg - a.avg || b.n - a.n; });
+    return { days: days.map(function (x) { return x.ymd; }), team: team, agents: agents };
+  }
+  function dayShort(ymd) { var d = new Date(ymd + "T12:00:00Z"); return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()] + " " + (d.getUTCMonth() + 1) + "/" + d.getUTCDate(); }
+  var REPORT_TEAM = [
+    ["Queue calls answered", function (t) { return t.answered; }],
+    ["Abandoned", function (t) { return t.abandoned; }],
+    ["Abandon rate", function (t) { return t.answered === null || !(t.answered + t.abandoned) ? null : Math.round(t.abandoned / (t.answered + t.abandoned) * 100) + "%"; }],
+    ["Talk time", function (t) { return t.talk === null ? null : fmtDur(t.talk); }],
+    ["Outbound calls", function (t) { return t.missing ? null : t.outbound; }],
+    ["People scored", function (t) { return t.missing ? null : t.scored; }],
+    ["Average score", function (t) { return t.avg === null ? null : Math.round(t.avg); }]
+  ];
+  function teamTotal(label, team) {
+    var ok = team.filter(function (t) { return !t.missing; });
+    if (!ok.length) return null;
+    var sum = function (f) { return ok.reduce(function (s, t) { return s + (t[f] || 0); }, 0); };
+    if (label === "Queue calls answered") return sum("answered");
+    if (label === "Abandoned") return sum("abandoned");
+    if (label === "Abandon rate") { var a = sum("answered"), b = sum("abandoned"); return a + b ? Math.round(b / (a + b) * 100) + "%" : null; }
+    if (label === "Talk time") return fmtDur(sum("talk"));
+    if (label === "Outbound calls") return sum("outbound");
+    if (label === "People scored") return null;
+    var sc = ok.filter(function (t) { return t.avg !== null; });
+    return sc.length ? Math.round(sc.reduce(function (s, t) { return s + t.avg; }, 0) / sc.length) : null;
+  }
+  function renderReport() {
+    var R = report.data, body = $("weekReportBody");
+    $("weekReportTitle").textContent = "Report: " + dayShort(R.days[0]) + " to " + dayShort(R.days[R.days.length - 1]);
+    var v = function (x) { return x === null || x === undefined ? "<span class='muted'>n/a</span>" : esc(String(x)); };
+    var html = "<div class='wr-sub'>Team, day by day</div><div class='table-wrap'><table class='wr-table'><thead><tr><th></th>" +
+      R.days.map(function (y) { return "<th>" + esc(dayShort(y)) + "</th>"; }).join("") + "<th>All days</th></tr></thead><tbody>" +
+      REPORT_TEAM.map(function (row) {
+        return "<tr><td>" + esc(row[0]) + "</td>" + R.team.map(function (t) { return "<td>" + v(row[1](t)) + "</td>"; }).join("") + "<td><b>" + v(teamTotal(row[0], R.team)) + "</b></td></tr>";
+      }).join("") + "</tbody></table></div>";
+    html += "<div class='wr-sub'>Agent scores</div><div class='table-wrap'><table class='wr-table'><thead><tr><th>Agent</th><th>Average</th>" +
+      R.days.map(function (y) { return "<th>" + esc(dayShort(y)) + "</th>"; }).join("") +
+      "<th>Days</th><th>Lowest day</th><th>Loses most on</th><th>In/Out</th><th>Email</th><th>Late starts</th><th>Long lunches</th></tr></thead><tbody>" +
+      (R.agents.map(function (p) {
+        return "<tr><td>" + esc(p.name) + (p.email ? " <span class='chip info'>Email</span>" : "") + "</td>" +
+          "<td><b class='" + scoreGrade(p.avg) + "'>" + Math.round(p.avg) + "</b></td>" +
+          R.days.map(function (y) { var sc = p.days[y]; return "<td>" + (sc === undefined ? "<span class='muted'>–</span>" : "<span class='" + scoreGrade(sc) + "'>" + Math.round(sc) + "</span>") + "</td>"; }).join("") +
+          "<td>" + p.n + "</td><td>" + (p.n > 1 ? Math.round(p.low.score) + " <span class='muted tiny'>" + esc(dayShort(p.low.ymd)) + "</span>" : "<span class='muted'>–</span>") + "</td>" +
+          "<td>" + (p.worst ? esc(p.worst.part) + " <span class='muted tiny'>-" + p.worst.perDay.toFixed(1) + "/day</span>" : "<span class='muted'>nothing</span>") + "</td>" +
+          "<td>" + (p.email ? "<span class='muted'>–</span>" : p.answered + "/" + p.outbound) + "</td><td>" + (p.took || "<span class='muted'>0</span>") + "</td>" +
+          "<td>" + (p.late ? "<span class='warmn'>" + p.late + "</span>" : "<span class='muted'>0</span>") + "</td>" +
+          "<td>" + (p.longLunch ? "<span class='warmn'>" + p.longLunch + "</span>" : "<span class='muted'>0</span>") + "</td></tr>";
+      }).join("") || "<tr><td colspan='12' class='muted'>Nobody scored on these days.</td></tr>") + "</tbody></table></div>";
+    var missing = R.team.filter(function (t) { return t.missing; }).map(function (t) { return dayShort(t.ymd); });
+    html += "<div class='wr-foot'>Working days only (Monday to Friday, Pacific), today left out. The server keeps 8 days of snapshots, so this covers at most the last 5 working days. " +
+      "Scores use the same fixed 100-point card as the board (hover a score there for its parts); supervisors and managers are left out. " +
+      "Loses most on = the scorecard part with the most points lost per day worked (Ready 30, RNA or email Pickup 15, Start 12, Lunch 8, Tickets 15, ES 10, CSAT 10). " +
+      "In/Out = queue calls answered / outbound calls dialed. Email = email and webform tickets taken. Late starts and long lunches count days." +
+      (missing.length ? " No snapshots for " + esc(missing.join(", ")) + "." : "") + "</div>";
+    body.innerHTML = html;
+  }
+  function reportText() {
+    var R = report.data, lines = ["RingCX Live View report, " + dayShort(R.days[0]) + " to " + dayShort(R.days[R.days.length - 1]) + " (" + R.days.length + " working days)", "", "Team"];
+    REPORT_TEAM.forEach(function (row) {
+      var tot = teamTotal(row[0], R.team), per = R.team.map(function (t) { var x = row[1](t); return dayShort(t.ymd).split(" ")[0] + " " + (x === null ? "n/a" : x); }).join(", ");
+      lines.push("- " + row[0] + ": " + (tot === null ? "" : tot + " (") + per + (tot === null ? "" : ")"));
+    });
+    lines.push("", "Agent scores (average over the days they worked)");
+    R.agents.forEach(function (p) {
+      lines.push("- " + p.name + (p.email ? " (Email)" : "") + ": " + Math.round(p.avg) + " average over " + p.n + " day" + (p.n === 1 ? "" : "s") +
+        (p.n > 1 ? ", lowest " + Math.round(p.low.score) + " on " + dayShort(p.low.ymd) : "") +
+        (p.worst ? ", loses most on " + p.worst.part + " (" + p.worst.perDay.toFixed(1) + " points a day)" : "") +
+        (p.email ? ", " + p.took + " email tickets taken" : ", " + p.answered + " calls answered, " + p.outbound + " outbound") +
+        (p.late ? ", " + p.late + " late start" + (p.late === 1 ? "" : "s") : "") + (p.longLunch ? ", " + p.longLunch + " long lunch" + (p.longLunch === 1 ? "" : "es") : ""));
+    });
+    return lines.join("\n");
+  }
+  async function openReport() {
+    var dlg = $("weekReport"); if (!dlg.open) dlg.showModal();
+    if (report.data) { renderReport(); return; }
+    if (report.loading) return;
+    report.loading = true;
+    var days = reportDays();
+    try {
+      for (var i = 0; i < days.length; i++) {
+        $("weekReportTitle").textContent = "Report";
+        $("weekReportBody").innerHTML = "<div class='muted' style='padding:12px 0'>Rebuilding " + esc(dayShort(days[i].ymd)) + " (" + (i + 1) + " of " + days.length + ") from the server's snapshots…</div>";
+        try { days[i].d = await buildDay(days[i].back); } catch (e) { days[i].d = null; }
+      }
+      report.data = reportData(days); report.day = ptYmd(0);
+      renderReport();
+    } catch (e) { $("weekReportBody").innerHTML = "<div class='muted'>Couldn't build the report: " + esc(e.message) + "</div>"; }
+    finally { report.loading = false; }
+  }
+  $("reportBtn").addEventListener("click", function () { if (report.day !== ptYmd(0)) report.data = null; openReport(); });
+  $("weekReportClose").addEventListener("click", function () { $("weekReport").close(); });
+  $("weekReport").addEventListener("click", function (e) { if (e.target === this) this.close(); });
+  $("weekReportCopy").addEventListener("click", function () {
+    if (!report.data) return;
+    var btn = this, text = reportText();
+    function flash(ok) { btn.textContent = ok ? "Copied!" : "Copy failed"; setTimeout(function () { btn.textContent = "Copy report"; }, 1800); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { flash(true); }).catch(function () { flash(false); });
+    else { try { var ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; btn.closest("dialog").appendChild(ta); ta.select(); var ok = document.execCommand("copy"); ta.remove(); flash(ok); } catch (err) { flash(false); } }
+  });
   function renderDay() {
     var ymd = ptYmd(yd.back), d = yd.cache[ymd];
     $("ydSum").textContent = "(" + ymdLabel(ymd) + ")";   // the day being viewed, not always yesterday (Fred, 2026-10-19)
