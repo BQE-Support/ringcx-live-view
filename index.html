@@ -888,7 +888,7 @@
           actRow(log.name, x.t, x.back, false);
       }
       // A brief change between refreshes: they left this status and came back at x.t, so the row is the stretch
-      // after they came back, with its own Activity (2026-10-27: Alberto's 9:25 solve fell in an uncovered 9:00-9:30).
+      // after they came back, with its own Activity (2026-10-27: a 9:25 solve fell in an uncovered 9:00-9:30).
       if (x.hidden) lasted = (i === 0 && newestIsNow ? count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>"
         : fmtDur(Math.max(0, ((i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t) - x.t) / 1000))) + " <span class='muted' title='They left this status briefly between two refreshes and came back at this time'>(back after a brief change)</span>";
       else if (i === 0 && newestIsNow) lasted = count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>";
@@ -899,7 +899,7 @@
       return "<tr class='" + (hit ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + (i === 0 && newestIsNow ? "<b>" + esc(statusName(x.tl, x.tb)) + "</b>" : esc(statusName(x.tl, x.tb))) + "</td><td>" + tags + "</td><td class='num'>" + lasted + "</td><td>" + actCell(log.name, x.t, until, live) + "</td></tr>" +
         actRow(log.name, x.t, until, live);
     });
-    // RNA rings as their own lines, in time order with the statuses (Fred, 2026-10-27: anything that counts against
+    // RNA rings as their own lines, in time order with the statuses (2026-10-27: anything that counts against
     // an agent has to show here).
     var rings = rnaRings(h), nRna = rings.filter(function (r) { return r.counted; }).length;
     rows = rows.map(function (html, i) { return { t: ev[i].t, html: html }; }).concat(rnaRowsHtml(rings, 5))
@@ -2565,7 +2565,7 @@
   // As of asOf: tickets that were still waiting after their deadline (-5 each; -10 if still waiting 2+ days past it)
   // and how many are waiting on them right now.
   // ES ticket the assignee updated in Jira (comment, field change, work logged) on the day being scored: the server
-  // marks x.touched when a check that day saw it (zdwatch). Fred, 2026-10-27: not late, even without a status change.
+  // marks x.touched when a check that day saw it (zdwatch). 2026-10-27: not late, even without a status change.
   function esWorkedThatDay(x) { return x.src === "es" && !!x.touched; }
   function ticketTimeliness(name, asOf) {
     if (!waits.rows) return null;
@@ -2720,7 +2720,7 @@
     var asOf = hist.endAt || Date.now(), polls = av.polls, out = [];
     var wd = new Date(ymdOfMs(asOf) + "T12:00:00Z").getUTCDay();
     // Only the named Email Team is ranked (2026-10-27). Anyone else online in Zendesk used to be added too, which
-    // ranked a new Zendesk user (Mehak Bhat) who isn't on the team. Add new email agents to CONFIG.EMAIL_AGENTS.
+    // ranked a new Zendesk user who isn't on the team. Add new email agents to CONFIG.EMAIL_AGENTS.
     var who = CONFIG.EMAIL_AGENTS.slice();
     // Anyone RingCX saw that day is a phone agent (on the call scorecard, or soon to be), not an email-only one.
     // Roster (Smartsheet) people are phone agents too, even before their first RingCX login of the day.
@@ -3380,7 +3380,7 @@
   // ---------------- RNA rings (2026-10-27) ----------------
   // Each rise in RingCX's RNA count (h.rnaEv, from observe) is matched to that ring's call report row: the agent as
   // connected_name with 0s talk, connected between the two refreshes. A ring RingCX ended itself (SYSTEM, while it
-  // rang, no recording) is listed but not counted against the agent (Fred, 2026-10-27: Kayla's 7:11 ring, dropped
+  // rang, no recording) is listed but not counted against the agent (2026-10-27: a 7:11 ring, dropped
   // after 7s). Every RNA shows as its own line in the status changes, counted or not.
   var rnaMemo = {};
   function rnaRings(h) {
