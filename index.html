@@ -391,7 +391,7 @@
           <div><div class="board-h low">Bottom 5</div><div id="boardLow"></div></div>
         </div>
         <div id="boardAll" hidden><div class="board-h">Everyone, ranked</div><div id="boardAllList"></div></div>
-        <div class="tiny muted" style="margin-top:6px">Fixed 100-point scorecard (100 = every part met; hover a score for its breakdown): <b>Ready 30</b> (Available, Engaged or Transition; full at 85%+, none at 50%), <b>no RNA 15</b> (1 RNA = 7, 2+ = 0), <b>on-time start 12</b> (confirmed 5-15 min late = 6, more = 0; unconfirmed counts as on time), <b>lunch within the hour 8</b> (5-15 min over = 4, more = 0; timed from when they actually went), <b>tickets 15</b> (−5 for each Zendesk / ES ticket still waiting on them after the end of their next shift, −10 if 2+ days past that; the number in brackets = waiting on them now; click for the list), <b>ES escalations 10</b> (ES 30d: Jira ES tickets they created ÷ Zendesk tickets assigned to them, last 30 days; full points at or below the team's rate, none at double it; under 20 tickets = not judged), <b>CSAT 10</b> (CSAT 60d: good ÷ (good + bad) Zendesk satisfaction ratings on their tickets, last 60 days; full points at or above the help-desk rate, none at 70%; under 5 ratings = not judged). Calls and talk time are shown but don't score: agents can't control how many calls they're offered. <b>Email work counts in their favor:</b> time in Zendesk Email Support (or online) while RingCX shows them not ready or logged out counts as Ready, and <b>Email/Fol</b> shows the new email and webform tickets they took today (picked from New (unassigned) or given to them) / follow-ups (email and webform tickets they publicly replied to or solved without taking them today). Tickets created from calls are left out, so nothing is counted twice. Grades: 90+ green, 75-89 normal, 60-74 yellow, under 60 red. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet. <b>Email Team</b> (email-only agents) is scored the same way from their Zendesk statuses, which the server records every minute: Ready = Email Support or online, and <b>pickup speed 15</b> replaces RNA (full points unless a ticket in Email::New (unassigned) waited over 30 min while they were ready).</div>
+        <div class="tiny muted" style="margin-top:6px">Fixed 100-point scorecard (100 = every part met; hover a score for its breakdown): <b>Ready 30</b> (Available, Engaged or Transition; full at 85%+, none at 50%), <b>no RNA 15</b> (1 RNA = 7, 2+ = 0), <b>on-time start 12</b> (confirmed 5-15 min late = 6, more = 0; unconfirmed counts as on time), <b>lunch within the hour 8</b> (5-15 min over = 4, more = 0; timed from when they actually went), <b>tickets 15</b> (−5 for each Zendesk / ES ticket still waiting on them after the end of their next shift, −10 if 2+ days past that; an ES ticket they updated in Jira that day isn't late; the number in brackets = waiting on them now; click for the list), <b>ES escalations 10</b> (ES 30d: Jira ES tickets they created ÷ Zendesk tickets assigned to them, last 30 days; full points at or below the team's rate, none at double it; under 20 tickets = not judged), <b>CSAT 10</b> (CSAT 60d: good ÷ (good + bad) Zendesk satisfaction ratings on their tickets, last 60 days; full points at or above the help-desk rate, none at 70%; under 5 ratings = not judged). Calls and talk time are shown but don't score: agents can't control how many calls they're offered. <b>Email work counts in their favor:</b> time in Zendesk Email Support (or online) while RingCX shows them not ready or logged out counts as Ready, and <b>Email/Fol</b> shows the new email and webform tickets they took today (picked from New (unassigned) or given to them) / follow-ups (email and webform tickets they publicly replied to or solved without taking them today). Tickets created from calls are left out, so nothing is counted twice. Grades: 90+ green, 75-89 normal, 60-74 yellow, under 60 red. Ranks everyone who answered queue calls today, plus agents logged in 1h+ with no calls yet. <b>Email Team</b> (email-only agents) is scored the same way from their Zendesk statuses, which the server records every minute: Ready = Email Support or online, and <b>pickup speed 15</b> replaces RNA (full points unless a ticket in Email::New (unassigned) waited over 30 min while they were ready).</div>
         <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all the logged-in time this browser watched them today. Busy (yellow), Break, Lunch and Away time count against it. Example: watched for 4 hours, 3 of them Available or Engaged = 75%. It shows "–" until someone has been watched for 30 minutes, and until then it counts as 50% in the score. It only covers time while this page was open, so opening the dashboard at the start of the day gives the most complete number.</div>
       </div>
 
@@ -456,7 +456,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.81<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.83<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -579,7 +579,7 @@
   var STORE_KEY = "rcxLiveView.session.v1";
   var PKCE_KEY = "rcxLiveView.pkce.v1";
   var UI_KEY = "rcxLiveView.ui.v1";
-  var HIST_KEY = "rcxLiveView.history.v1";
+  var HIST_KEY = "rcxLiveView.history.v2";   // v2 (5.82): RNA rings are recorded; the server history refills the day
 
   // ---------------- small helpers ----------------
   function $(id) { return document.getElementById(id); }
@@ -887,22 +887,31 @@
         return "<tr class='muted'><td>" + fmtClock(x.t) + "</td><td><i>Logged out</i></td><td></td><td class='num' title='Back at " + fmtClock(x.back) + "'>" + fmtDur(Math.max(0, (x.back - x.t) / 1000)) + "</td><td>" + actCell(log.name, x.t, x.back, false) + "</td></tr>" +
           actRow(log.name, x.t, x.back, false);
       }
-      if (x.hidden) lasted = "brief";
+      // A brief change between refreshes: they left this status and came back at x.t, so the row is the stretch
+      // after they came back, with its own Activity (2026-10-27: Alberto's 9:25 solve fell in an uncovered 9:00-9:30).
+      if (x.hidden) lasted = (i === 0 && newestIsNow ? count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>"
+        : fmtDur(Math.max(0, ((i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t) - x.t) / 1000))) + " <span class='muted' title='They left this status briefly between two refreshes and came back at this time'>(back after a brief change)</span>";
       else if (i === 0 && newestIsNow) lasted = count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>";
       else lasted = fmtDur(Math.max(0, ((i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t) - x.t) / 1000));
       var recent = x.t >= cutoff && !isCallCycle(x), exit = x.t >= cutoff && isExit(x);
       var tags = (recent ? "<span class='chip info'>Changes" + (x.hidden ? " ×2" : "") + "</span>" : "") + (exit ? " <span class='chip warn'>Left Avail</span>" : "");
       var hit = exitsMode ? exit : recent;
-      return "<tr class='" + (hit ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + (i === 0 && newestIsNow ? "<b>" + esc(statusName(x.tl, x.tb)) + "</b>" : esc(statusName(x.tl, x.tb))) + "</td><td>" + tags + "</td><td class='num'>" + lasted + "</td><td>" + (x.hidden ? "" : actCell(log.name, x.t, until, live)) + "</td></tr>" +
-        (x.hidden ? "" : actRow(log.name, x.t, until, live));
-    }).join("");
-    var what = exitsMode ? nExits + " time" + (nExits === 1 ? "" : "s") + " left Available in the last 60 min (highlighted)"
-      : nChanges + " change" + (nChanges === 1 ? "" : "s") + " in the last 60 min (highlighted)";
+      return "<tr class='" + (hit ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + (i === 0 && newestIsNow ? "<b>" + esc(statusName(x.tl, x.tb)) + "</b>" : esc(statusName(x.tl, x.tb))) + "</td><td>" + tags + "</td><td class='num'>" + lasted + "</td><td>" + actCell(log.name, x.t, until, live) + "</td></tr>" +
+        actRow(log.name, x.t, until, live);
+    });
+    // RNA rings as their own lines, in time order with the statuses (Fred, 2026-10-27: anything that counts against
+    // an agent has to show here).
+    var rings = rnaRings(h), nRna = rings.filter(function (r) { return r.counted; }).length;
+    rows = rows.map(function (html, i) { return { t: ev[i].t, html: html }; }).concat(rnaRowsHtml(rings, 5))
+      .sort(function (x, y) { return y.t - x.t; }).map(function (x) { return x.html; }).join("");
+    var what = (exitsMode ? nExits + " time" + (nExits === 1 ? "" : "s") + " left Available in the last 60 min (highlighted)"
+      : nChanges + " change" + (nChanges === 1 ? "" : "s") + " in the last 60 min (highlighted)") +
+      (rings.length ? " · " + nRna + " RNA" + (rings.length > nRna ? " (" + (rings.length - nRna) + " more not counted)" : "") : "");
     box.innerHTML = "<div class='section-title'>Status changes today: " + esc(log.name) + " <span class='sub'>" + what + " · " + nReal + " in all · " + esc(trackedLabel()) + "</span>" +
       "<button class='btn close' data-drill-close style='margin-left:auto'>Close</button></div>" +
       "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Status</th><th>Counted in</th><th class='num'>Lasted</th><th>Zendesk / Jira</th></tr></thead><tbody>" +
       (nowRow + rows || "<tr><td colspan='5' class='muted'>No status changes recorded today.</td></tr>") + "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>Highlighted rows are the ones behind the number you clicked. \"Changes\" counts status changes in the last 60 minutes (a brief change between refreshes counts twice: out and back). Taking calls (Available, Engaged and Transition back and forth) is never counted. \"Left Avail\" counts moves from Available to anything except a call. Each row is the status they were in from that time; \"Lasted\" is how long they stayed in it. The row below shows what they came from. Grey \"Logged out\" rows are logouts of a few minutes or more (not counted as changes; hover the time to see when they came back). Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
+      "<div class='tiny muted' style='margin-top:6px'>Highlighted rows are the ones behind the number you clicked. \"Changes\" counts status changes in the last 60 minutes (a brief change between refreshes counts twice: out and back). Taking calls (Available, Engaged and Transition back and forth) is never counted. \"Left Avail\" counts moves from Available to anything except a call. Each row is the status they were in from that time; \"Lasted\" is how long they stayed in it. The row below shows what they came from. Grey \"Logged out\" rows are logouts of a few minutes or more (not counted as changes; hover the time to see when they came back). Red \"RNA\" rows are rings they didn't answer, from RingCX's RNA count, with the caller and what happened to the call from the call report; a ring RingCX dropped itself while it rang is shown grey as \"Not counted\" and doesn't count in the RNA number or the score. Exact status names are recorded from version 5.1 on; earlier changes show the general type.</div>";
   }
 
   // ---------------- Snapshot: download the main numbers as a time-stamped CSV ----------------
@@ -1594,6 +1603,13 @@
       var b = isOnCall(a) ? "ONCALL" : base(a);
       var label = stateLabel(a);
       var h = hist.agents[id] || (hist.agents[id] = { ev: [] });
+      // RNA rings (2026-10-27): RingCX's RNA count is a day total, so each rise between two refreshes is a ring this
+      // agent didn't answer. Kept so the status list can show each one (rnaRings() matches it to the call report).
+      // end = when their status timer restarted after the ring, if it did between the two refreshes.
+      var rnaNow = a.rna || 0;
+      if (rnaNow > (h.rna || 0)) {
+        h.rnaEv = (h.rnaEv || []).concat([{ lo: h.rna == null ? null : (h.lastSeen || null), hi: fetchedAt, end: start > (h.lastSeen || 0) ? start : null, n: rnaNow - (h.rna || 0) }]);
+      }
       if (h.label != null) {
         if (label !== h.label) {
           h.ev.push({ t: start, fb: h.base, tb: b, fl: h.label, tl: label });   // fl/tl = exact status names
@@ -2490,7 +2506,7 @@
     var h = hist.agents[String(a.agentId)] || {}, login = 0, rna = 0;
     Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna = Math.max(rna, h.sessions[k].rna || 0); });
     login = Math.max(login, a.loggedInDuration || a.loginTime || 0);
-    rna = Math.max(rna, a.rna || 0);
+    rna = Math.max(0, Math.max(rna, a.rna || 0) - rnaExcused(h));   // rings RingCX dropped itself don't count (2026-10-27)
     var c = callIndex()[lastFirst(fullName(a))];
     var reportCalls = c ? Object.keys(c.uiis).length : 0;
     return { login: login, rna: rna, calls: Math.max(reportCalls, a.callsHandled || 0), talk: Math.max(c ? c.talk : 0, a.totalTalkTime || 0) };
@@ -2548,6 +2564,9 @@
   function onHoldCounts(x, asOf) { return !/^On Hold/.test(String(x.label || "")) || ymdOfMs(asOf) >= ONHOLD_FROM; }
   // As of asOf: tickets that were still waiting after their deadline (-5 each; -10 if still waiting 2+ days past it)
   // and how many are waiting on them right now.
+  // ES ticket the assignee updated in Jira (comment, field change, work logged) on the day being scored: the server
+  // marks x.touched when a check that day saw it (zdwatch). Fred, 2026-10-27: not late, even without a status change.
+  function esWorkedThatDay(x) { return x.src === "es" && !!x.touched; }
   function ticketTimeliness(name, asOf) {
     if (!waits.rows) return null;
     var mine = waits.rows.filter(function (x) { return x.entered && waitIsFor(name, x); });
@@ -2556,6 +2575,7 @@
       if (!onHoldCounts(x, asOf)) return;
       var dl = shiftDeadline(name, x.entered);
       if (dl > asOf || x.last < dl) return;   // not due yet, or handled before the deadline
+      if (esWorkedThatDay(x)) return;   // an ES ticket they updated that day isn't late, even if its status didn't change (2026-10-27)
       var bad = Math.min(x.last, asOf) - dl > 2 * 86400000;
       late.push({ x: x, dl: dl, bad: bad }); pen += bad ? 10 : 5;
     });
@@ -2699,17 +2719,9 @@
     var f = av.fields || [], iName = f.indexOf("name"), iStatus = f.indexOf("status");
     var asOf = hist.endAt || Date.now(), polls = av.polls, out = [];
     var wd = new Date(ymdOfMs(asOf) + "T12:00:00Z").getUTCDay();
-    var who = CONFIG.EMAIL_AGENTS.slice(), seenWho = {};
-    who.forEach(function (n) { seenWho[normName(n)] = 1; });
-    polls.forEach(function (p) {
-      (p.a || []).forEach(function (r) {
-        var n = String(r[iName] || ""), k = normName(n);
-        if (!n || seenWho[k] || CONFIG.EMAIL_READY.indexOf(String(r[iStatus])) < 0) return;
-        seenWho[k] = 1;
-        if (isLoginExcluded(n) || isSupervisorName(n, false)) return;
-        who.push(n);
-      });
-    });
+    // Only the named Email Team is ranked (2026-10-27). Anyone else online in Zendesk used to be added too, which
+    // ranked a new Zendesk user (Mehak Bhat) who isn't on the team. Add new email agents to CONFIG.EMAIL_AGENTS.
+    var who = CONFIG.EMAIL_AGENTS.slice();
     // Anyone RingCX saw that day is a phone agent (on the call scorecard, or soon to be), not an email-only one.
     // Roster (Smartsheet) people are phone agents too, even before their first RingCX login of the day.
     var phone = (onCallBoard || []).concat(Object.keys(hist.agents).map(function (id) { return hist.agents[id].name; }).filter(Boolean))
@@ -2789,6 +2801,7 @@
       (list.map(function (x) {
         var l = lateKeys[x.src + x.id], dl = shiftDeadline(r.name, x.entered), still = x.last >= asOf - 15 * 60000;
         var res = !onHoldCounts(x, asOf) ? "<span class='muted'>On Hold counts from " + esc(ymdLabel(ONHOLD_FROM)) + "</span>"
+          : !l && esWorkedThatDay(x) && dl <= asOf ? "<span class='good' title='Past its deadline, but they updated it in Jira this day, so it isn&#39;t counted late'>updated that day (not late)</span>"
           : l ? "<span class='" + (l.bad ? "hot" : "warmn") + "'>" + (still ? "late, still waiting" : "handled late") + "</span>" : (still ? (dl > asOf ? "<span class='muted'>due " + fmtClock(dl) + "</span>" : "") : "<span class='good'>handled in time</span>");
         return "<tr" + (l ? " class='flag-warn'" : "") + "><td><a href='" + (x.src === "es" ? es + esc(x.id) : zd + esc(x.id)) + "' target='_blank' rel='noopener'>" + (x.src === "es" ? esc(x.id) : "#" + esc(x.id)) + " ↗</a></td>" +
           "<td>" + esc(x.label) + "</td><td>" + esc(ymdLabel(ymdOfMs(x.entered))) + " " + fmtClock(x.entered) + "</td><td>" + esc(ymdLabel(ymdOfMs(dl))) + " " + fmtClock(dl) + "</td><td>" + res + "</td><td class='wrap'>" + esc(x.subject || "") + "</td></tr>";
@@ -2819,7 +2832,7 @@
       var h = hist.agents[id]; if (!h.name) return;
       var login = 0, rna = 0;
       Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna = Math.max(rna, h.sessions[k].rna || 0); });
-      people[h.name] = { id: id, name: h.name, sup: h.sup, login: login, rna: rna, ready: h.readySec || 0, seen: h.seenSec || 0 };
+      people[h.name] = { id: id, name: h.name, sup: h.sup, login: login, rna: Math.max(0, rna - rnaExcused(h)), ready: h.readySec || 0, seen: h.seenSec || 0 };
     });
     // Live session values are fresher than history for anyone logged in right now.
     data.agents.forEach(function (a) {
@@ -2995,7 +3008,7 @@
         else if (r.connected_name) { answered++; talk += +r.connected_duration || 0; }
       });
       var byName = {};   // that day's history per person, for the status / activity drill-downs
-      Object.keys(hist.agents).forEach(function (id) { var h = hist.agents[id]; if (h.name) byName[normName(h.name)] = h; });
+      Object.keys(hist.agents).forEach(function (id) { var h = hist.agents[id]; if (h.name) { h.rings = rnaRings(h); byName[normName(h.name)] = h; } });   // rings: matched to that day's calls while they're swapped in
       return { rows: rows, email: emailRows(rows.map(function (r) { return r.name; })), answered: answered, abandoned: abandoned, talk: talk, from: t0, to: t1, byName: byName };
     } finally {
       hist = saved.hist; abandons = saved.abandons; data.agents = saved.agents; loginByName = saved.loginByName; intervalSec = saved.intervalSec; waits = saved.waits;
@@ -3328,11 +3341,13 @@
       if (x.gap) return "<tr class='muted'><td>" + fmtClock(x.t) + "</td><td><i>Logged out</i></td><td class='num' title='Back at " + fmtClock(x.back) + "'>" + fmtDur(Math.max(0, (x.back - x.t) / 1000)) + "</td><td>" + actCell(name, x.t, x.back, false) + "</td></tr>" + actRow(name, x.t, x.back, false);
       var until = i === 0 ? Math.max(end, x.t) : ev[i - 1].t;
       return "<tr><td>" + fmtClock(x.t) + "</td><td>" + esc(statusName(x.tl, x.tb)) + (isCallCycle(x) ? "" : " <span class='chip info'>change</span>") + "</td><td class='num'>" + fmtDur(Math.max(0, (until - x.t) / 1000)) + (i === 0 ? " <span class='muted tiny'>(to last seen)</span>" : "") + "</td><td>" + actCell(name, x.t, until, false) + "</td></tr>" + actRow(name, x.t, until, false);
-    }).join("");
+    });
+    rows = rows.map(function (html, i) { return { t: ev[i].t, html: html }; }).concat(rnaRowsHtml(h.rings || [], 4))   // RNA rings (2026-10-27)
+      .sort(function (x, y) { return y.t - x.t; }).map(function (x) { return x.html; }).join("");
     return "<div class='section-title' style='font-size:15px'>Status changes: " + esc(name) + " <span class='sub'>" + ymdLabel(ptYmd(yd.back)) + " · " + nChanges + " status change" + (nChanges === 1 ? "" : "s") + " (taking calls not counted) · last seen " + fmtClock(end) + "</span></div>" +
       "<div class='table-wrap'><table><thead><tr><th>Time (PT)</th><th>Status</th><th class='num'>Lasted</th><th>Zendesk / Jira</th></tr></thead><tbody>" +
       (rows || "<tr><td colspan='4' class='muted'>No status changes recorded that day.</td></tr>") + "</tbody></table></div>" +
-      "<div class='tiny muted' style='margin-top:6px'>\"change\" marks the ones that count as status changes (not taking calls). Grey \"Logged out\" rows are logouts of a few minutes or more. Activity shows the Zendesk / Jira work during that status.</div>";
+      "<div class='tiny muted' style='margin-top:6px'>\"change\" marks the ones that count as status changes (not taking calls). Grey \"Logged out\" rows are logouts of a few minutes or more. \"RNA\" rows are rings they didn't answer; one RingCX dropped itself shows \"Not counted\". Activity shows the Zendesk / Jira work during that status.</div>";
   }
   function renderDayIfOpen() { if (yd.cache[ptYmd(yd.back)] && $("ydPanel").open) renderDay(); }
   yd.open = {};
@@ -3361,6 +3376,70 @@
   function hungUpRinging(r) {
     return r.source_type === "ACD-INBOUND" && r.call_result === "CONNECTED" && !(+r.connected_duration) &&
       (r.call_term_party === "CALLER" || r.call_term_party === "SYSTEM") && !r.recording_url;   // SYSTEM/DROP too (RingCX counts it, 2026-10-15)
+  }
+  // ---------------- RNA rings (2026-10-27) ----------------
+  // Each rise in RingCX's RNA count (h.rnaEv, from observe) is matched to that ring's call report row: the agent as
+  // connected_name with 0s talk, connected between the two refreshes. A ring RingCX ended itself (SYSTEM, while it
+  // rang, no recording) is listed but not counted against the agent (Fred, 2026-10-27: Kayla's 7:11 ring, dropped
+  // after 7s). Every RNA shows as its own line in the status changes, counted or not.
+  var rnaMemo = {};
+  function rnaRings(h) {
+    if (!h || !h.rnaEv || !h.rnaEv.length) return [];
+    if (rnaMemo.at !== abandons.at) rnaMemo = { at: abandons.at };
+    var key = (h.agentId || h.name) + "|" + h.rnaEv.length;
+    if (rnaMemo[key]) return rnaMemo[key];
+    var me = normName(h.name), rows = {}, used = {}, out = [];
+    (abandons.all || []).forEach(function (r) {
+      var u = String(r.UII || "").replace(/^'/, "");
+      if (u && !rows[u] && r.connected_name && normName(firstLast(r.connected_name)) === me && !(+r.connected_duration)) rows[u] = r;
+    });
+    var cands = Object.keys(rows).map(function (u) { return { u: u, r: rows[u], t: etMs(rows[u].connected_dts) }; }).filter(function (c) { return isFinite(c.t); });
+    h.rnaEv.forEach(function (e) {
+      var lo = e.lo == null ? -Infinity : e.lo - 90000, hi = e.hi + 30000, near = e.end || e.hi;
+      for (var i = 0; i < e.n; i++) {
+        var best = null;
+        cands.forEach(function (c) {
+          if (!used[c.u] && c.t >= lo && c.t <= hi && (!best || Math.abs(c.t - near) < Math.abs(best.t - near))) best = c;
+        });
+        if (best) used[best.u] = 1;
+        out.push(rnaRing(e, best, h));
+      }
+    });
+    out.sort(function (x, y) { return x.t - y.t; });
+    rnaMemo[key] = out;
+    return out;
+  }
+  function rnaRing(e, c, h) {
+    var ring = { t: e.end || e.hi, counted: true, sec: null, uii: "", from: "", queue: "",
+      what: e.lo == null ? "Before tracking started; not found in the call report"
+        : Date.now() - e.hi < 5 * 60000 ? "Not in the call report yet (it refreshes every 2 min)"
+        : "No matching ring in the call report (it lists only the first agent a call reached)" };
+    if (!c) return ring;
+    var r = c.r, end = etMs(r.call_end_dts);
+    ring.t = c.t; ring.uii = c.u; ring.from = fmtPhone(r.ANI); ring.queue = r.source_name || "";
+    if (hungUpRinging(r)) {
+      ring.sec = isFinite(end) ? Math.max(0, Math.round((end - c.t) / 1000)) : null;
+      if (r.call_term_party === "SYSTEM") { ring.counted = false; ring.what = "RingCX dropped the call while it rang"; }
+      else ring.what = "Caller hung up while it rang";
+      return ring;
+    }
+    // Who took it next: another agent the live data showed on this call (hist.callGates).
+    var others = Object.keys((hist.callGates || {})[c.u] || {}).filter(function (id) { return id !== String(h.agentId) && hist.agents[id] && hist.agents[id].name; });
+    if (others.length) ring.what = "Went to " + others.map(function (id) { return hist.agents[id].name; }).join(", ");
+    else if (r.recording_url || (+r.call_duration || 0) - (+r.queue_time || 0) > 30) ring.what = "Went to another agent";
+    else ring.what = "Call ended after the ring (" + String(r.call_term_party || "?").toLowerCase() + ")";
+    return ring;
+  }
+  // RNAs that count against the agent: RingCX's day total minus the rings it dropped itself.
+  function rnaExcused(h) { return rnaRings(h).filter(function (r) { return !r.counted; }).length; }
+  function rnaRowsHtml(rings, cols) {
+    return rings.map(function (r) {
+      var bits = [r.queue, r.from ? "from " + r.from : "", r.what].filter(Boolean).join(" · ");
+      return { t: r.t, html: "<tr class='" + (r.counted ? "flag-crit" : "muted") + "'><td>" + fmtClock(r.t) + "</td><td><b>RNA</b>: rang, not answered" + (bits ? " <span class='muted'>· " + esc(bits) + "</span>" : "") + "</td>" +
+        (cols === 5 ? "<td>" + (r.counted ? "<span class='chip crit'>RNA</span>" : "<span class='chip info'>Not counted</span>") + "</td>" : "") +
+        "<td class='num' title='How long it rang (known when the call ended while ringing)'>" + (r.sec != null ? fmtDur(r.sec) : "–") + "</td><td>" +
+        (cols === 4 ? (r.counted ? "<span class='chip crit'>RNA</span>" : "<span class='chip info'>Not counted</span>") : "") + "</td></tr>" };
+    });
   }
   // Abandons: queue wait; hung up while ringing: the whole call (queue wait + ring time).
   function abandonWaitSec(r) { return hungUpRinging(r) ? (+r.call_duration || 0) : (+r.queue_time || 0); }
@@ -3979,7 +4058,7 @@
       var k = normName(h.name); if (live[k] || isSupervisorName(h.name, h.sup)) return;
       var login = 0, rna = 0;
       Object.keys(h.sessions).forEach(function (s) { login += h.sessions[s].login; rna = Math.max(rna, h.sessions[s].rna || 0); });
-      out[k] = { id: id, name: h.name, lastSeen: h.lastSeen || null, login: Math.max(login, h.dayLogin || 0), rna: rna, calls: 0, talk: 0, avail: h.availSec || 0 };
+      out[k] = { id: id, name: h.name, lastSeen: h.lastSeen || null, login: Math.max(login, h.dayLogin || 0), rna: Math.max(0, rna - rnaExcused(h)), calls: 0, talk: 0, avail: h.availSec || 0 };
     });
     Object.keys(calls).forEach(function (ln) {
       var p = ln.split(", "), name = ((p[1] || "") + " " + p[0]).trim(), k = normName(name);
