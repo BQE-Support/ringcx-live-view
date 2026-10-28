@@ -3161,11 +3161,22 @@
   // color only) through the dayscores function. The Agent View shows each agent just their own row. Only the score
   // keeps its hover (the parts); the other cells' notes are left out.
   var LIVE_CLASSES = ["hot", "warmn", "good", "muted"];
+  // A cell as text pieces with their color ({ s: [{ t, c }] }), so "6/0/3" keeps only its "/0" grey, like the board.
   function liveCell(html, keepTip) {
     var t = document.createElement("table"); t.innerHTML = "<tr>" + html + "</tr>";
-    var td = t.querySelector("td"), cls = "";
-    [].some.call(td.querySelectorAll("[class]"), function (el) { return LIVE_CLASSES.some(function (c) { if (el.classList.contains(c)) { cls = c; return true; } }); });
-    var o = { t: td.textContent.replace(/\s+/g, " ").trim(), c: cls };
+    var td = t.querySelector("td"), segs = [], walk = document.createTreeWalker(td, NodeFilter.SHOW_TEXT), n;
+    while ((n = walk.nextNode())) {
+      var txt = n.nodeValue.replace(/\s+/g, " "), el = n.parentElement, c = "";
+      for (; el && el !== td; el = el.parentElement) {
+        var hit = LIVE_CLASSES.filter(function (x) { return el.classList.contains(x); })[0];
+        if (hit) { c = hit; break; }
+      }
+      if (segs.length && segs[segs.length - 1].c === c) segs[segs.length - 1].t += txt; else segs.push({ t: txt, c: c });
+    }
+    while (segs.length && !segs[0].t.trim()) segs.shift();   // blank pieces only at the ends; inner ones are spaces ("ok (2)")
+    while (segs.length && !segs[segs.length - 1].t.trim()) segs.pop();
+    if (segs.length) { segs[0].t = segs[0].t.replace(/^\s+/, ""); segs[segs.length - 1].t = segs[segs.length - 1].t.replace(/\s+$/, ""); }
+    var o = { s: segs };
     if (keepTip && td.title) o.tip = td.title.replace(/\.?\s*Fixed scale:.*$/, "");   // the parts only
     return o;
   }
