@@ -478,7 +478,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.87<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.88<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -1798,6 +1798,9 @@
   async function poll() {
     clearTimeout(pollTimer);
     if (document.hidden) { setStatus("paused", "Paused while hidden"); return; }
+    // Polling stalled while the tab stayed visible (laptop asleep, throttled window): no visibilitychange fires,
+    // so refill the gap from the server's snapshots here, or lunches inside it are lost (2026-10-29).
+    if (hist.lastPoll && Date.now() - hist.lastPoll > 3 * 60 * 1000) await loadHistory(true);
     try {
       var res = await Promise.all([api("realTimeData/agent"), api("realTimeData/inbound")]);
       // Hidden queues are dropped right here, so they never reach cards, tiles, alerts or totals.
