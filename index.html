@@ -478,7 +478,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.89<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 5.90<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -594,6 +594,13 @@
     LOGIN_EXCLUDE: ["Erasmo Robles", "Ricardo Andrade"],
     // L2s' logins are shown only to managers (Fred, 2026-10-15). L2 list confirmed by Fred (the roster tier lookup was out of date).
     MANAGER_IDS: ["3299715", "3301145", "3301139"],   // Fred, Ricardo, Erasmo
+    NOT_RANKED_IDS: ["3301130"],                      // never ranked in Performance or Previous days
+    // New scorecard preview (2026-10-30): shown beside the current score to managers only, until it replaces it.
+    SCORE_V2_PREVIEW: true,
+    ES2_FULL: 0.06, ES2_ZERO: 0.15,                   // ES rate: full 5 at or below, 0 at or above
+    VOL_LONG_CALL_SEC: 1200,                          // talk past this on one call comes out of the logged-in time
+    VOL_MIN_LOGIN_SEC: 7200,                          // under 2 logged-in hours = not judged
+    VOL_MIN_PEERS: 2,                                 // an hour with fewer peers logged in is left out
     ROLLBACK_IDS: ["3299715"],
     HARVEST_IDS: ["3299715"],    // who gets the Harvest theme on the Theme button (trial, 2026-10-27)   // who sees "Roll back" beside the version (the rollback function checks too)
     L2_LOGINS_MANAGERS_ONLY: ["Adnan Bakshi", "Daniel Suyo", "Joel Cazares", "Paulina Leal", "Salvador Rojas"]   // Fred 2026-10-15; Peter counts as L1
@@ -1624,6 +1631,7 @@
     if (!contiguous) hist.watchStart = fetchedAt;
     var prevPoll = hist.lastPoll || 0;
     hist.lastPoll = fetchedAt;
+    var hourNow = Math.floor(ptMinOf(fetchedAt) / 60);   // Pacific hour, for the Volume score's logged-in time per hour
     agents.forEach(function (a) {
       var id = String(a.agentId);
       var asOf = Date.parse(a.lastUpdate) || fetchedAt;
@@ -1659,6 +1667,7 @@
       if (h.lastSeen) {
         var gap = Math.min((fetchedAt - h.lastSeen) / 1000, 3 * intervalSec);
         h.seenSec = (h.seenSec || 0) + gap;
+        (h.seenHr = h.seenHr || {})[hourNow] = (h.seenHr[hourNow] || 0) + gap;
         if (h.base === "AVAILABLE" || h.base === "ONCALL") h.readySec = (h.readySec || 0) + gap;
         if (h.base === "AVAILABLE") h.availSec = (h.availSec || 0) + gap;   // Agents table "Avail today"
       }
@@ -2473,8 +2482,8 @@
         (out[r.connected_name] = out[r.connected_name] || {})[r.UII] = 1;
       });
       function credit(name, uii, talk, ptMin) {
-        var c = map[name] || (map[name] = { uiis: {}, talk: 0, first: null });
-        if (!c.uiis[uii]) { c.uiis[uii] = 1; c.talk += talk; }
+        var c = map[name] || (map[name] = { uiis: {}, talk: 0, first: null, calls: [] });
+        if (!c.uiis[uii]) { c.uiis[uii] = 1; c.talk += talk; c.calls.push([ptMin, talk]); }   // calls: [Pacific minute, talk sec] for Volume
         if (ptMin !== null && ptMin >= 0 && (c.first === null || ptMin < c.first)) c.first = ptMin;
       }
       (abandons.all || []).forEach(function (r) {
@@ -2556,12 +2565,12 @@
     var j = await r.json().catch(function () { return {}; });
     if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
     var f = j.fields || [];
-    return { rows: (j.tickets || []).map(function (row) { var o = {}; f.forEach(function (k, i) { o[k] = row[i]; }); return o; }), avail: j.avail || null, work: j.work || null, es: j.esRates || null, csat: j.csatRates || null };
+    return { rows: (j.tickets || []).map(function (row) { var o = {}; f.forEach(function (k, i) { o[k] = row[i]; }); return o; }), avail: j.avail || null, work: j.work || null, workTimed: !!j.workTimed, es: j.esRates || null, csat: j.csatRates || null };
   }
   async function loadWaits() {
     if (waits.loading || !session || !CONFIG.SUPABASE_URL) return;
     waits.loading = true;
-    try { var w = await fetchWaits(""); waits.rows = w.rows; waits.avail = w.avail; waits.work = w.work; waits.es = w.es; waits.csat = w.csat; waits.at = Date.now(); waits.err = null; }
+    try { var w = await fetchWaits(""); waits.rows = w.rows; waits.avail = w.avail; waits.work = w.work; waits.workTimed = w.workTimed; waits.es = w.es; waits.csat = w.csat; waits.at = Date.now(); waits.err = null; }
     catch (e) { waits.err = e.message; }
     finally { waits.loading = false; if (data.fetchedAt) render(); }
   }
@@ -2636,6 +2645,117 @@
     var pct = n >= min ? good / n : null;
     var pts = pct === null || !team || team <= floor ? 10 : (pct >= team ? 10 : (pct <= floor ? 0 : 10 * (pct - floor) / (team - floor)));
     return { good: good, bad: bad, n: n, pct: pct, team: team, floor: floor, min: min, pts: Math.round(pts), since: c.since };
+  }
+  // ---------------- new scorecard (preview, 2026-10-30) ----------------
+  // Ready 25, RNA / pickup 10, start 12, lunch 8, ticket timeliness 20, ES 5, Volume 10, CSAT 10. Worked out beside the
+  // current score and shown to managers only (CONFIG.SCORE_V2_PREVIEW) until it replaces it.
+  // Ticket timeliness: share of their due tickets that were late. A ticket is "owned" once (however many snapshots or
+  // statuses it had that day) once its deadline passed; it adds 2 to "late" when 2+ days past (1 otherwise); the late
+  // share is capped at 100%, so the part never goes below 0. The deadline restarts when the ticket was given to them
+  // (assigned). An ES ticket counts as handled that day only for a comment or status change by them (touched2).
+  function ticketTimeliness2(name, asOf) {
+    if (!waits.rows) return null;
+    var byT = {};
+    waits.rows.forEach(function (x) {
+      if (!x.entered || !waitIsFor(name, x) || !onHoldCounts(x, asOf)) return;
+      var dl = shiftDeadline(name, Math.max(x.entered, x.assigned || 0));
+      if (dl > asOf) return;   // not due yet
+      var late = x.last >= dl && !(x.src === "es" && x.touched2);
+      var bad = late && Math.min(x.last, asOf) - dl > 2 * 86400000, w = late ? (bad ? 2 : 1) : 0;
+      var k = x.src + "|" + x.id, o = byT[k];
+      if (!o || w > o.w) byT[k] = { x: x, dl: dl, w: w, bad: bad };
+    });
+    var list = Object.keys(byT).map(function (k) { return byT[k]; });
+    var lateW = list.reduce(function (s, o) { return s + o.w; }, 0), owned = list.length;
+    var share = Math.min(1, lateW / Math.max(owned, 5));
+    var late = list.filter(function (o) { return o.w; });
+    return { pts: Math.round(20 * (1 - share)), owned: owned, lateW: lateW, late: late, bad: late.filter(function (o) { return o.bad; }).length };
+  }
+  // ES: weighted count (zdwatch esWeighted: Feature Request / Migration left out, Workaround / Cannot Reproduce /
+  // By Design half) over Zendesk tickets, 30 days. 5 at or below ES2_FULL, 0 at or above ES2_ZERO; under minTickets2 = full.
+  function es2For(name) {
+    var e = waits.es; if (!e || !e.rows || !e.minTickets2) return null;   // saved before the weighted count existed
+    var hits = e.rows.filter(function (r) { return waitIsFor(name, { name: r[0], email: r[1] }); });
+    var w = hits.reduce(function (s, r) { return s + (+r[4] || 0); }, 0), tickets = Math.max.apply(null, hits.map(function (r) { return +r[3] || 0; }).concat([0]));
+    var rate = tickets >= e.minTickets2 ? w / tickets : null, lo = CONFIG.ES2_FULL, hi = CONFIG.ES2_ZERO;
+    var pts = rate === null ? 5 : (rate <= lo ? 5 : (rate >= hi ? 0 : 5 * (hi - rate) / (hi - lo)));
+    return { w: w, tickets: tickets, rate: rate, pts: Math.round(pts), min: e.minTickets2 };
+  }
+  // Volume: units = calls answered with talk time + email/webform tickets taken + tickets solved they didn't take
+  // (zdwatch "volume" list, each with its time). Expected = for each Pacific hour they were logged in, their logged-in
+  // minutes x the other agents' units per logged-in minute that hour (same group: phone or Email Team). Talk past
+  // VOL_LONG_CALL_SEC on one call comes out of the logged-in minutes. Hours with under VOL_MIN_PEERS peers are left
+  // out of both sides. 10 at or above expected, 0 at half of it. Under 2 logged-in hours, or a day without take /
+  // solve times (before 2026-10-31), = not judged (full points).
+  function volume2(rows) {
+    var work = waits.work || [];
+    rows.forEach(function (r) {
+      var mins = {}, units = {};
+      Object.keys(r.seenHr || {}).forEach(function (h) { mins[h] = r.seenHr[h] / 60; });
+      (r.calls || []).forEach(function (c) {
+        if (c[0] === null || c[0] < 0) return;
+        if (c[1] > 0) units[Math.floor(c[0] / 60)] = (units[Math.floor(c[0] / 60)] || 0) + 1;
+        var extra = (c[1] - CONFIG.VOL_LONG_CALL_SEC) / 60, m = c[0] + CONFIG.VOL_LONG_CALL_SEC / 60;
+        while (extra > 0) {
+          var h = Math.floor(m / 60), take = Math.min(extra, (h + 1) * 60 - m);
+          if (mins[h]) mins[h] = Math.max(0, mins[h] - take);
+          extra -= take; m += take;
+        }
+      });
+      var seen = {};
+      work.filter(function (w) { return waitIsFor(r.name, { name: w[0], email: w[1] }); }).forEach(function (w) {
+        (w[9] || []).forEach(function (u) {
+          if (seen[u[0]]) return; seen[u[0]] = 1;
+          var h = Math.floor(ptMinOf(u[2] * 1000) / 60); units[h] = (units[h] || 0) + 1;
+        });
+      });
+      r.vmins = mins; r.vunits = units;
+    });
+    rows.forEach(function (r) {
+      if (!waits.workTimed) { r.vol2 = { pts: null, why: "Take and solve times aren't recorded for this day yet" }; return; }
+      if ((r.login || 0) < CONFIG.VOL_MIN_LOGIN_SEC) { r.vol2 = { pts: null, why: "Under " + CONFIG.VOL_MIN_LOGIN_SEC / 3600 + " logged-in hours" }; return; }
+      var actual = 0, expected = 0;
+      Object.keys(r.vmins).forEach(function (h) {
+        if (!(r.vmins[h] > 0)) return;
+        var peers = rows.filter(function (o) { return o !== r && !o.sup && o.vmins[h] > 0; });
+        if (peers.length < CONFIG.VOL_MIN_PEERS) return;
+        var pu = peers.reduce(function (s, o) { return s + (o.vunits[h] || 0); }, 0), pm = peers.reduce(function (s, o) { return s + o.vmins[h]; }, 0);
+        expected += pu / pm * r.vmins[h]; actual += r.vunits[h] || 0;
+      });
+      if (!(expected > 0)) { r.vol2 = { pts: null, why: "No hours with enough peers to compare" }; return; }
+      var ratio = actual / expected;
+      r.vol2 = { pts: Math.round(10 * Math.max(0, Math.min(1, (ratio - 0.5) / 0.5))), ratio: ratio, actual: actual, expected: expected };
+    });
+  }
+  function applyV2(rows, asOf) {
+    if (!CONFIG.SCORE_V2_PREVIEW) return;
+    rows.forEach(function (r) {
+      var p = r.parts || {}, v = {};
+      v.ready = r.ready == null ? 25 : Math.round(25 * Math.max(0, Math.min(1, (r.ready - 0.5) / 0.35)));
+      v.rna = r.email ? Math.round(r.readyMs ? 10 * (1 - (r.slow2Ms || 0) / r.readyMs) : 10) : (r.rna === 0 ? 10 : (r.rna === 1 ? 5 : 0));
+      v.start = p.start; v.lunch = p.lunch; v.csat = p.csat;
+      r.tk2 = ticketTimeliness2(r.name, asOf); v.tickets = r.tk2 ? r.tk2.pts : 20;
+      r.es2 = es2For(r.name); v.es = r.es2 ? r.es2.pts : 5;
+      r.v2 = { parts: v };
+    });
+    volume2(rows);
+    rows.forEach(function (r) {
+      var v = r.v2.parts; v.vol = r.vol2 && r.vol2.pts != null ? r.vol2.pts : 10;
+      r.v2.score = v.ready + v.rna + v.start + v.lunch + v.tickets + v.es + v.vol + v.csat;
+    });
+  }
+  function v2Th() { return CONFIG.SCORE_V2_PREVIEW && isManagerViewer() ? "<th class='num' title='New scorecard (preview, managers only): Ready 25, RNA/pickup 10, Start 12, Lunch 8, Tickets 20, ES 5, Volume 10, CSAT 10. Hover a number for the parts.'>New</th>" : ""; }
+  function v2Cell(r) {
+    if (!(CONFIG.SCORE_V2_PREVIEW && isManagerViewer())) return "";
+    if (!r.v2) return "<td class='num'>" + dash + "</td>";
+    var v = r.v2.parts, t = r.tk2, e = r.es2, vo = r.vol2 || {};
+    var tip = "New score " + r.v2.score + " (current " + Math.round(r.score) + "). Ready " + v.ready + "/25 · " + (r.email ? "Pickup " : "RNA ") + v.rna + "/10 · Start " + v.start + "/12 · Lunch " + v.lunch + "/8 · " +
+      "Tickets " + v.tickets + "/20" + (t ? " (" + t.owned + " due, " + t.late.length + " late" + (t.bad ? ", " + t.bad + " of them 2+ days late and counted twice" : "") + "; at least 5 due counted)" : " (not loaded)") + " · " +
+      "ES " + v.es + "/5" + (e ? (e.rate === null ? " (under " + e.min + " tickets, not judged)" : " (" + (e.rate * 100).toFixed(1) + "% weighted, " + e.w + " of " + e.tickets + ")") : " (weighted count not built yet)") + " · " +
+      "Volume " + v.vol + "/10" + (vo.pts == null ? " (" + (vo.why || "not judged") + ")" : " (" + vo.actual + " done vs " + vo.expected.toFixed(1) + " expected, " + Math.round(vo.ratio * 100) + "%)") + " · " +
+      "CSAT " + v.csat + "/10.";
+    var d = r.v2.score - Math.round(r.score);
+    return "<td class='num' title='" + esc(tip) + "'><b class='" + scoreGrade(r.v2.score) + "'>" + r.v2.score + "</b> <span class='muted tiny'>" + (d > 0 ? "+" : "") + d + "</span></td>";
   }
   function csatCell(r) {
     var c = r.csat;
@@ -2774,16 +2894,26 @@
     });
     who.forEach(function (who) {
       var k = normName(who), logged = 0, ready = 0, slow = 0, first = null, firstUnsure = false, lunch = [], cur = null, now = "offline";
+      // New scorecard: logged-in time per Pacific hour (Volume), and pickup counted only once the oldest New ticket
+      // has waited EMAIL_PICKUP_MIN of THIS agent's ready time (overnight piles and pre-login waits don't count).
+      var seenHr = {}, slow2 = 0, qOld = null, qAcc = 0;
       polls.forEach(function (p, i) {
         var ts = Date.parse(p.ts), next = i + 1 < polls.length ? Date.parse(polls[i + 1].ts) : Math.min(asOf, ts + 60000);
         var step = Math.max(0, Math.min(next - ts, 3 * 60000));   // a gap in the checks credits at most 3 min
         var row = (p.a || []).filter(function (r) { return normName(r[iName]) === k; })[0];
         var st = row ? String(row[iStatus]) : "offline";
         if (i === polls.length - 1) now = st;
-        if (st !== "offline") { logged += step; if (first === null) { first = ts; firstUnsure = i === 0; } }
+        if (st !== "offline") {
+          logged += step; if (first === null) { first = ts; firstUnsure = i === 0; }
+          var hr = p.hr != null ? p.hr : (p.hr = Math.floor(ptMinOf(ts) / 60));   // cached on the poll: every agent reads it
+          seenHr[hr] = (seenHr[hr] || 0) + step / 1000;
+        }
+        var q = p.q, oldest = q && q[0] > 0 && q[1] ? q[1] : null;
+        if (oldest !== qOld) { qOld = oldest; qAcc = 0; }
         if (CONFIG.EMAIL_READY.indexOf(st) >= 0) {
           ready += step;
-          var q = p.q; if (q && q[0] > 0 && q[1] && ts - q[1] > CONFIG.EMAIL_PICKUP_MIN * 60000) slow += step;
+          if (oldest && ts - oldest > CONFIG.EMAIL_PICKUP_MIN * 60000) slow += step;
+          if (oldest) { if (qAcc >= CONFIG.EMAIL_PICKUP_MIN * 60000) slow2 += step; qAcc += step; }
         }
         if (st === "Lunch") { if (cur && ts - cur.to <= 3 * 60000) cur.to = ts + step; else { cur = { from: ts, to: ts + step }; lunch.push(cur); } }
       });
@@ -2808,8 +2938,10 @@
       parts.csat = csr ? csr.pts : 10;
       out.push({ name: who, email: true, work: workFor(who), esr: esr, answered: 0, perHr: null, talk: null, outbound: outboundCount(who), followups: followupsFor(who), score: parts.ready + parts.pickup + parts.start + parts.lunch + (tk ? tk.pts : 15) + parts.es + parts.csat, parts: parts, tk: tk, csat: csr,
         ready: share, readyMs: ready, slowMs: slow, login: logged / 1000, first: first, firstUnsure: firstUnsure, start: start, lateMin: lateMin,
-        lunchOver: over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(over) : 0, lunchLvl: ll, lunchFrom: L ? L.from : null, now: now });
+        lunchOver: over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(over) : 0, lunchLvl: ll, lunchFrom: L ? L.from : null, now: now,
+        seenHr: seenHr, slow2Ms: slow2, calls: [] });
     });
+    applyV2(out, asOf);
     return out.sort(function (a, b) { return b.score - a.score; });
   }
   function scoreGrade(s) { return s >= 90 ? "good" : (s >= 75 ? "" : (s >= 60 ? "warmn" : "hot")); }
@@ -2887,6 +3019,7 @@
       p.login = Math.max(p.login, (hist.agents[p.id] || {}).dayLogin || 0);
       p.sup = isSupervisorName(n, p.sup);   // by name too: a history entry can miss the flag
       if ((CONFIG.MANAGER_IDS || []).indexOf(String(p.id)) >= 0) return;   // managers are never ranked
+      if ((CONFIG.NOT_RANKED_IDS || []).indexOf(String(p.id)) >= 0) return;
       var eligible = answered > 0 || (p.onDuty !== false && !p.sup && p.login >= CONFIG.BOARD_MIN_LOGIN_SEC);
       if (!eligible || p.login < 60) return;
       var perHr = answered / (p.login / 3600);
@@ -2918,10 +3051,12 @@
       parts.es = esr ? esr.pts : 10;
       parts.csat = csr ? csr.pts : 10;
       var score = parts.ready + parts.rna + parts.start + parts.lunch + (tk ? tk.pts : 15) + parts.es + parts.csat;
-      out.push({ name: n, sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: ready, login: p.login, score: score, parts: parts, tk: tk, esr: esr, csat: csr,
+      out.push({ name: n, id: p.id, seenHr: (hist.agents[p.id] || {}).seenHr || {}, calls: c.calls || [],
+        sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: ready, login: p.login, score: score, parts: parts, tk: tk, esr: esr, csat: csr,
         work: workFor(n), emailCreditSec: credit.ready, outbound: outboundCount(n), followups: followupsFor(n),
         lunchOver: L && L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(L.over) : 0, lunchLvl: ll, lateMin: lateMin, lateConf: lg.conf || null });
     });
+    applyV2(out, hist.endAt || Date.now());   // peers for Volume = every phone agent that day, before the queue filter
     return out.filter(function (r) { return inQueue(r.name); }).sort(function (a, b) { return b.score - a.score || b.answered - a.answered; });
   }
 
@@ -2952,13 +3087,13 @@
     var ranked = rows.filter(function (r) { return !r.sup; });
     var top = ranked.slice(0, 5), low = ranked.length > 5 ? ranked.slice(-Math.min(5, ranked.length - 5)).reverse() : [];
     function table(list, startRank, dir, total) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took today / follow-ups (email and webform tickets they replied to or solved without taking them today). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle (Fixed and GAL ticket not counted), last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th>" + v2Th() + "<th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took today / follow-ups (email and webform tickets they replied to or solved without taking them today). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>Start</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle (Fixed and GAL ticket not counted), last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr data-brow='" + esc(normName(r.name)) + "'><td class='num'>" + (dir > 0 ? startRank + i : total - i) + "</td>" +
             "<td>" + esc(r.name) + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
-            boardCells(r).join("") + "</tr>" +
-            (tkOpen["today|" + normName(r.name)] ? "<tr class='inline-drill'><td colspan='16'><div class='inline-box'>" + ticketListHtml(r, Date.now()) + "</div></td></tr>" : "");
-        }).join("") || "<tr><td colspan='16' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
+            boardCells(r).map(function (c, j) { return j === 0 ? c + v2Cell(r) : c; }).join("") + "</tr>" +   // the preview sits right after Score
+            (tkOpen["today|" + normName(r.name)] ? "<tr class='inline-drill'><td colspan='17'><div class='inline-box'>" + ticketListHtml(r, Date.now()) + "</div></td></tr>" : "");
+        }).join("") || "<tr><td colspan='17' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
         "</tbody></table></div>";
     }
     // "Show all" swaps Top 5 / Bottom 5 for one full ranked list (choice remembered in this browser).
@@ -3025,7 +3160,7 @@
   function scoreDay(ymd, fields, polls, calls, dayWaits) {
     if (!polls.length) return { empty: true };
     var saved = { hist: hist, abandons: abandons, agents: data.agents, loginByName: loginByName, intervalSec: intervalSec, waits: waits };
-    waits = { rows: dayWaits && dayWaits.rows, avail: dayWaits && dayWaits.avail, work: dayWaits && dayWaits.work, es: dayWaits && dayWaits.es, csat: dayWaits && dayWaits.csat };   // that day's server checks (null = not tracked yet that day)
+    waits = { rows: dayWaits && dayWaits.rows, avail: dayWaits && dayWaits.avail, work: dayWaits && dayWaits.work, workTimed: !!(dayWaits && dayWaits.workTimed), es: dayWaits && dayWaits.es, csat: dayWaits && dayWaits.csat };   // that day's server checks (null = not tracked yet that day)
     try {
       intervalSec = 60;   // the snapshots' cadence
       var t0 = Date.parse(polls[0].ts), t1 = Date.parse(polls[polls.length - 1].ts);
@@ -3391,7 +3526,7 @@
     function rowHtml(r, rank) {
       var k = normName(r.name), open = !!yd.open[ymd + "|" + k];
       return "<tr" + (open ? " class='flag-warn'" : "") + "><td class='num'>" + (rank || "") + "</td><td><a href='#' data-yd-agent='" + esc(k) + "' title='Show this day&#39;s status changes, with Zendesk / Jira activity for each'>" + (open ? "▾ " : "▸ ") + esc(r.name) + "</a>" + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
-        "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" +
+        "<td class='num' title='" + esc(scoreTitle(r)) + "'><b class='" + scoreGrade(r.score) + "'>" + Math.round(r.score) + "</b></td>" + v2Cell(r) +
         "<td class='num'>" + callsCell(r.name, r.answered, r.outbound, r.followups, true) + "</td><td class='num'>" + (r.email ? dash : r.perHr.toFixed(1)) + "</td><td class='num'>" + workCell(r, true) + "</td><td class='num'>" + tookPerHr(r) + "</td><td class='num'>" + (r.email ? dash : fmtDur(r.talk)) + "</td>" +
         "<td class='num'>" + (r.email ? emailRnaCell(r) : rnaCell(r.rna)) + "</td>" +
         "<td class='num'>" + (r.ready == null ? "<span class='muted'>–</span>" : Math.round(r.ready * 100) + "%") + "</td>" +
@@ -3399,16 +3534,16 @@
         "<td class='num'>" + (r.lunchOver ? "<span class='" + (r.lunchLvl === "crit" ? "hot" : "warmn") + "' title='Lunch ran " + r.lunchOver + " min over the hour'>+" + r.lunchOver + "m</span>" : "<span class='muted'>ok</span>") + "</td>" +
         "<td class='num'>" + ticketCell(r) + "</td>" + "<td class='num'>" + esCell(r) + "</td>" + "<td class='num'>" + csatCell(r) + "</td>" +
         "<td class='num'>" + fmtDur(r.login) + "</td></tr>" +
-        (tkOpen[ymd + "|" + k] ? "<tr class='inline-drill'><td colspan='16'><div class='inline-box'>" + ticketListHtml(r, d.to + 60000) + "</div></td></tr>" : "") +
-        (open ? "<tr class='inline-drill'><td colspan='16'><div class='inline-box'>" + dayLogHtml(d.byName[k], r.name) + "</div></td></tr>" : "");
+        (tkOpen[ymd + "|" + k] ? "<tr class='inline-drill'><td colspan='17'><div class='inline-box'>" + ticketListHtml(r, d.to + 60000) + "</div></td></tr>" : "") +
+        (open ? "<tr class='inline-drill'><td colspan='17'><div class='inline-box'>" + dayLogHtml(d.byName[k], r.name) + "</div></td></tr>" : "");
     }
     var best = agents[0];
     $("ydBody").innerHTML =
       "<div class='tiny' style='margin:4px 0 8px'><b>" + d.answered + "</b> queue calls answered · <b>" + d.abandoned + "</b> abandoned · <b>" + fmtDur(d.talk) + "</b> talk · " +
         agents.length + " agents scored" + (best ? " · best: <b>" + esc(best.name) + "</b>" : "") + "</div>" +
-      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took that day / follow-ups (email and webform tickets they replied to or solved without taking them that day). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle (Fixed and GAL ticket not counted), last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
-      (agents.map(function (r, i) { return rowHtml(r, i + 1); }).join("") || "<tr><td colspan='16' class='muted'>Nobody to score that day.</td></tr>") +
-      (sups.length ? "<tr><td colspan='16' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
+      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num'>Score</th>" + v2Th() + "<th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took that day / follow-ups (email and webform tickets they replied to or solved without taking them that day). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='All tickets they took per logged-in hour: calls answered + email/webform tickets taken (one count, nothing counted twice)'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>First login</th><th class='num'>Lunch</th><th class='num'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle (Fixed and GAL ticket not counted), last 30 days (hover for counts and the team rate)'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      (agents.map(function (r, i) { return rowHtml(r, i + 1); }).join("") || "<tr><td colspan='17' class='muted'>Nobody to score that day.</td></tr>") +
+      (sups.length ? "<tr><td colspan='17' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
       "</tbody></table></div>" + (d.email ? "" : "<div class='muted tiny'>No Zendesk status data for the Email Team that day (recording started Fri 10/16).</div>");
   }
   // One person's whole finished day: every status change (newest first) plus logouts, each with the same
