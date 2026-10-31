@@ -480,7 +480,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 6.0<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 6.2<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -537,7 +537,9 @@
     LUNCH_PENALTY_CRIT: 10,
     LATE_PENALTY_WARN: 5,                            // Performance points lost for a confirmed late first login (5+ min)
     LATE_PENALTY_CRIT: 10,                           // ...15+ min                         // ...for a red one
-    REVIEW_SNOOZE_MIN: 60,                          // a supervisor review hides a watch entry this long (Fred)
+    REVIEW_SNOOZE_MIN: 30,                          // "Silence 30 min" on the Call avoidance watch (2026-10-30; was a 60-min review)
+    // Who can silence the Call avoidance watch (note required): managers and L2s only (2026-10-30). Same list in "reviews".
+    SILENCE_IDS: ["3299715", "3301145", "3301139", "3301150", "3301140", "3301143", "3301144", "3301141"],   // Fred, Ricardo, Erasmo; Adnan, Daniel Suyo, Joel, Paulina, Salvador
     // People whose hours don't follow daylight saving: roster times + 1h while Pacific is on PDT (Fred).
     NO_DST: ["Andrea Lopez"],
     SHIFT_HOURS: 9,                                 // roster has no shift end: assume 8h work + 1h lunch
@@ -906,19 +908,23 @@
       var before = ev.filter(function (x) { return x.t <= g.from; })[0];
       ev.push({ t: g.from, gap: true, back: g.to, fl: before ? statusName(before.tl, before.tb) : "…", tl: "Logged out" });
     });
+    // Still logged out (missing from the latest refresh): gaps are only recorded when they come back, so without
+    // this the last status before the logout kept showing as live (2026-10-30: April "Engaged 3:05 (now)" at 5:54).
+    var nowMs = Date.now();
+    var outNow = h.lastSeen && (hist.lastPoll || 0) - h.lastSeen > 30000;
+    if (outNow) ev.push({ t: h.lastSeen, gap: true, back: nowMs, open: true, tl: "Logged out" });
     ev.sort(function (x, y) { return y.t - x.t; });
     // The newest change normally IS the current status; show it live instead of a separate "now" row.
-    var newestIsNow = h.label && ev.length && Math.abs(h.start - ev[0].t) < 60000;
-    var nowMs = Date.now();
-    var nowRow = h.label && !newestIsNow ? "<tr><td>" + fmtClock(h.start) + "</td><td><b>" + esc(h.label) + "</b> (now)</td><td></td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td><td>" + actCell(log.name, h.start, nowMs, true) + "</td></tr>" +
+    var newestIsNow = !outNow && h.label && ev.length && Math.abs(h.start - ev[0].t) < 60000;
+    var nowRow = h.label && !newestIsNow && !outNow ? "<tr><td>" + fmtClock(h.start) + "</td><td><b>" + esc(h.label) + "</b> (now)</td><td></td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td><td>" + actCell(log.name, h.start, nowMs, true) + "</td></tr>" +
       actRow(log.name, h.start, nowMs, true) : "";
     var rows = ev.map(function (x, i) {
       var lasted;
       // The window this status covered: until the next change (or now / the current status's start).
       var live = i === 0 && (newestIsNow || !h.label), until = i === 0 ? (live ? nowMs : h.start) : ev[i - 1].t;
       if (x.gap) {
-        return "<tr class='muted'><td>" + fmtClock(x.t) + "</td><td><i>Logged out</i></td><td></td><td class='num' title='Back at " + fmtClock(x.back) + "'>" + fmtDur(Math.max(0, (x.back - x.t) / 1000)) + "</td><td>" + actCell(log.name, x.t, x.back, false) + "</td></tr>" +
-          actRow(log.name, x.t, x.back, false);
+        return "<tr class='muted'><td>" + fmtClock(x.t) + "</td><td><i>Logged out</i></td><td></td><td class='num'" + (x.open ? ">" : " title='Back at " + fmtClock(x.back) + "'>") + fmtDur(Math.max(0, (x.back - x.t) / 1000)) + (x.open ? " (now)" : "") + "</td><td>" + actCell(log.name, x.t, x.back, !!x.open) + "</td></tr>" +
+          actRow(log.name, x.t, x.back, !!x.open);
       }
       // A brief change between refreshes: they left this status and came back at x.t, so the row is the stretch
       // after they came back, with its own Activity (2026-10-27: a 9:25 solve fell in an uncovered 9:00-9:30).
@@ -3244,18 +3250,33 @@
   // ---- saved days (dayscores function): each finished working day's scores, so weeks can be compared ----
   // The server keeps agent snapshots for 8 days only. Boards save each finished working day once (a record of the team
   // numbers and every agent's score), and the Report reads those records for anything older.
+  // Every Performance column for one row, so saved days can be averaged later (baseline, 2026-10-30).
+  function dayStatsOf(r) {
+    var w = r.work || {}, ew = w.ewList || [], tk = r.tk, e = r.es2, c = r.csat, u = r.tph || {};
+    var rd = function (x, n) { return x === null || x === undefined || !isFinite(x) ? null : Math.round(x * Math.pow(10, n)) / Math.pow(10, n); };
+    return {
+      inb: r.answered || 0, out: r.outbound || 0, fol: r.followups == null ? null : r.followups,
+      took: (w.tookEmail || 0) + (w.tookWeb || 0), efol: ew.filter(function (t) { return !t[2] && (t[3] || t[4]); }).length,
+      callsHr: r.email ? null : rd(r.perHr, 2), tph: rd(u.rate, 2), talk: r.email ? null : Math.round(r.talk || 0),
+      rna: r.email ? null : (r.rna || 0), slowMin: r.email ? Math.round((r.slow2Ms || 0) / 60000) : null,
+      ready: rd(r.ready, 3), lateMin: r.lateMin ? Math.round(r.lateMin) : 0, lunchOver: r.lunchOver || 0,
+      tkLate: tk ? tk.late.length : null, tkDue: tk ? tk.owned : null,
+      es: e && e.rate !== null ? rd(e.rate, 4) : null, csat: c && c.pct !== null ? rd(c.pct, 4) : null, csatN: c ? c.n : null,
+      login: Math.round(r.login || 0)
+    };
+  }
   function dayRecord(ymd, d) {
     if (!d || d.empty) return null;
     var rows = d.rows.concat(d.email || []).filter(function (r) { return !r.sup; });
     var scores = rows.filter(function (r) { return !r.unranked; }).map(function (r) { return r.score; });
     return {
-      v: 7, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
+      v: 8, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
       team: { answered: d.answered, abandoned: d.abandoned, talk: Math.round(d.talk), outbound: rows.reduce(function (t, r) { return t + (r.outbound || 0); }, 0),
         scored: rows.length, avg: scores.length ? scores.reduce(function (t, v) { return t + v; }, 0) / scores.length : null },
       agents: rows.map(function (r) {
         return { name: r.name, email: !!r.email, score: Math.round(r.score * 10) / 10, parts: r.parts || {}, answered: r.answered || 0, outbound: r.outbound || 0,
           took: r.work ? (r.work.tookEmail || 0) + (r.work.tookWeb || 0) : 0, late: r.lateMin ? 1 : 0, longLunch: r.lunchOver ? 1 : 0,
-          unranked: r.unranked ? String(r.unranked.reason || "").slice(0, 200) : undefined };
+          unranked: r.unranked ? String(r.unranked.reason || "").slice(0, 200) : undefined, s: dayStatsOf(r) };
       })
     };
   }
@@ -3277,7 +3298,7 @@
   async function saveMissingDays(have) {
     // v 6 = the current scorecard (Tickets/hr scored, straight-line Ready, handled tickets count, email aliases, 2026-10-30); days saved under older rules are rebuilt and saved
     // again while snapshots last.
-    var missing = workdaysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 7; });
+    var missing = workdaysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 8; });
     for (var i = 0; i < missing.length; i++) {
       var d = null;
       try { d = await buildDay(backOf(missing[i])); } catch (e) { d = null; }
@@ -3291,7 +3312,7 @@
   async function autoSaveDays() {
     var today = ptYmd(0);
     if (autoSave.running || autoSave.done === today || !session || !CONFIG.SUPABASE_URL || document.hidden) return;
-    var key = "rcxLiveView.daysSaved.v7";
+    var key = "rcxLiveView.daysSaved.v8";
     try { if (localStorage.getItem(key) === today) { autoSave.done = today; return; } } catch (e) {}
     autoSave.running = true;
     try {
@@ -3491,7 +3512,7 @@
       var j = await dayscoresApi("GET", "?from=" + W.prev.from + "&to=" + W.cur.to), recs = {};
       (j.days || []).forEach(function (x) { recs[String(x.day).slice(0, 10)] = x.data; });
       // Days still on the server but not saved yet, or saved under older scoring rules: rebuild and save them now.
-      var todo = W.cur.days.concat(W.prev.days).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 7) && backOf(y) >= 1 && backOf(y) <= 7; });
+      var todo = W.cur.days.concat(W.prev.days).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 8) && backOf(y) >= 1 && backOf(y) <= 7; });
       for (var i = 0; i < todo.length; i++) {
         body.innerHTML = "<div class='muted' style='padding:12px 0'>Rebuilding " + esc(dayShort(todo[i])) + " (" + (i + 1) + " of " + todo.length + ") from the server's snapshots…</div>";
         var d = null; try { d = await buildDay(backOf(todo[i])); } catch (e) { d = null; }
@@ -3998,17 +4019,26 @@
   }
 
   // ---------------- supervisor reviews of watch entries (Supabase "reviews" function) ----------------
-  // A review snoozes an entry for REVIEW_SNOOZE_MIN. If the agent is still flagged after that, they
-  // come back (with the earlier review shown). A NEW signal (different signature) brings them back at once.
+  // Silencing (2026-10-30; managers and L2s, note required): "Silence 30 min" hides the entry for REVIEW_SNOOZE_MIN, and
+  // a NEW signal (different signature) brings them back at once. "Silence for today" hides that agent from the watch
+  // for the rest of the day, whatever the signal. The length rides on the signature: "<sig>#30" or "<sig>#day".
+  // Reviews saved before this have no suffix and keep their old 60 minutes.
   var reviews = { list: [], at: 0, loading: false, err: null };
   var drafts = {};   // agentKey -> reason being typed
   function agentKeyOf(a) { return normName(fullName(a)); }
   function sigOf(x) { return x.w.reasons.map(function (r) { return r.kind || "x"; }).sort().join("|"); }
+  function silenceLen(r) { var s = String(r.signature || ""); return /#day$/.test(s) ? "day" : (/#30$/.test(s) ? CONFIG.REVIEW_SNOOZE_MIN : 60); }
+  function silenceBase(r) { return String(r.signature || "").replace(/#(day|30)$/, ""); }
+  function silenceUntil(r) {
+    var len = silenceLen(r);
+    return len === "day" ? Date.parse(ptMidnightIsoOf(ptYmd(-1))) : Date.parse(r.created_at) + len * 60000;
+  }
+  function canSilence() { return (CONFIG.SILENCE_IDS || []).indexOf(String(myAgentId() || "")) >= 0; }
   function reviewStateOf(x) {
     var key = agentKeyOf(x.a), sig = sigOf(x), now = Date.now();
     var mine = watchReviews().filter(function (r) { return r.agent_key === key; });
-    var snooze = mine.filter(function (r) { return r.signature === sig && now - Date.parse(r.created_at) < CONFIG.REVIEW_SNOOZE_MIN * 60000; })[0];
-    return { snoozed: !!snooze, until: snooze ? Date.parse(snooze.created_at) + CONFIG.REVIEW_SNOOZE_MIN * 60000 : 0, latest: mine[0] || null };
+    var snooze = mine.filter(function (r) { return now < silenceUntil(r) && (silenceLen(r) === "day" || silenceBase(r) === sig); })[0];
+    return { snoozed: !!snooze, until: snooze ? silenceUntil(snooze) : 0, day: !!(snooze && silenceLen(snooze) === "day"), latest: mine[0] || null };
   }
   async function reviewsApi(method, body) {
     if (tokenNearExpiry()) await refreshToken();
@@ -4079,7 +4109,7 @@
           .map(function (r) { var a1 = Date.parse(r.first), b1 = Date.parse(r.last); return "<div>" + esc(r.t) + " <span class='muted tiny'>" + fmtClock(a1) + (b1 - a1 > 120000 ? "–" + fmtClock(b1) : "") + "</span></div>"; }).join("");
         var fl = notesFor(f.agent_key);
         var notes = (fl.length ? "" : "<div class='warmn' style='margin-bottom:3px'>No notes left</div>") + noteCell("flag|" + f.agent_key, f.agent_name, fl.slice().reverse());
-        var status = x ? "<span class='chip " + (x.w.lvl === "crit" ? "crit" : "warn") + "'>Flagged now</span>" + (st && st.snoozed ? " <span class='muted tiny'>reviewed, snoozed until " + fmtClock(st.until) + "</span>" : "")
+        var status = x ? "<span class='chip " + (x.w.lvl === "crit" ? "crit" : "warn") + "'>Flagged now</span>" + (st && st.snoozed ? " <span class='muted tiny'>" + (st.day ? "silenced for today" : "silenced until " + fmtClock(st.until)) + "</span>" : "")
           : (a ? esc(stateLabel(a)) : "<span class='muted'>Logged out</span>");
         var first = Date.parse(f.first_at), last = Date.parse(f.last_at);
         return "<tr" + (x ? " class='flag-" + (x.w.lvl === "crit" ? "crit" : "warn") + "'" : "") + "><td>" + nameLink(a ? String(a.agentId) : "", f.agent_name) + "</td>" +
@@ -4092,13 +4122,14 @@
   function tellOthersReviewsChanged() {
     try { if (presence.channel) presence.channel.send({ type: "broadcast", event: "reviews", payload: {} }); } catch (x) {}
   }
-  async function saveReview(key) {
+  async function saveReview(key, len) {
     var x = (window.__watchByKey || {})[key], text = String(drafts[key] || "").trim();
     if (!x) return;
-    if (text.length < 3) { alert("Please write a short reason (at least 3 characters)."); return; }
+    if (!canSilence()) { alert("Only L2s and managers can silence the Call avoidance watch."); return; }
+    if (text.length < 3) { alert("Please write a note (at least 3 characters)."); return; }
     if (!startSaving("review:" + key)) return;
     try {
-      await reviewsApi("POST", { action: "add", agentKey: key, agentName: fullName(x.a), signature: sigOf(x), reason: text });
+      await reviewsApi("POST", { action: "add", agentKey: key, agentName: fullName(x.a), signature: sigOf(x) + (len === "day" ? "#day" : "#30"), reason: text });
       delete drafts[key]; await loadReviews(); tellOthersReviewsChanged();
     } catch (err) { alert("Couldn't save the review: " + err.message); }
     finally { doneSaving("review:" + key); }
@@ -4270,17 +4301,18 @@
     var typing = document.activeElement && document.activeElement.hasAttribute && document.activeElement.hasAttribute("data-review-input");
     $("watchPanel").hidden = !watch.length && !snoozed.length;   // only shown when someone is flagged
     $("watchSub").textContent = "status changes " + trackedLabel() +
-      (snoozed.length ? " · " + snoozed.length + " reviewed (snoozed)" : "");
+      (snoozed.length ? " · " + snoozed.length + " silenced" : "");
     window.__watchByKey = {};
     watch.concat(snoozed).forEach(function (x) { window.__watchByKey[agentKeyOf(x.a)] = x; });
     if (!typing) {
       $("watchBody").innerHTML = watch.map(function (x) {
         var a = x.a, w = x.w, nr = isNotReady(a) ? (a.stateTime || 0) : null, key = agentKeyOf(a), rv = x.review;
-        var prior = rv ? "<div class='tiny muted' style='margin-top:3px'>Reviewed " + fmtClock(Date.parse(rv.created_at)) + " by " + esc(rv.reviewer_name) + ": “" + esc(rv.reason) + "”</div>" : "";
-        var reviewCell = drafts[key] !== undefined
-          ? "<input class='search' data-review-input='" + esc(key) + "' maxlength='500' placeholder='Reason…' value='" + esc(drafts[key]) + "' style='min-width:180px'> " +
-            "<button class='btn' data-review-save='" + esc(key) + "'>Save</button> <button class='btn' data-review-cancel='" + esc(key) + "'>Cancel</button>"
-          : "<button class='btn' data-review-open='" + esc(key) + "'>Review</button>";
+        var prior = rv ? "<div class='tiny muted' style='margin-top:3px'>Silenced " + fmtClock(Date.parse(rv.created_at)) + " by " + esc(rv.reviewer_name) + ": “" + esc(rv.reason) + "”</div>" : "";
+        var reviewCell = !canSilence() ? ""
+          : drafts[key] !== undefined
+          ? "<input class='search' data-review-input='" + esc(key) + "' maxlength='500' placeholder='Note (required)…' value='" + esc(drafts[key]) + "' style='min-width:180px'> " +
+            "<button class='btn' data-review-save='" + esc(key) + "' data-review-len='30'>Silence 30 min</button> <button class='btn' data-review-save='" + esc(key) + "' data-review-len='day'>Silence for today</button> <button class='btn' data-review-cancel='" + esc(key) + "'>Cancel</button>"
+          : "<button class='btn' data-review-open='" + esc(key) + "'>Silence</button>";
         return "<tr class='flag-" + w.lvl + "'>" +
           "<td>" + esc(fullName(a)) + (hasSupTag(fullName(a)) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
           "<td>" + stateHtml(a) + "</td>" +
@@ -4291,16 +4323,16 @@
           "<td class='num'>" + (nr != null ? count(nr) : "–") + "</td>" +
           "<td class='wrap'>" + reviewCell + (a.offline ? "" : "<div style='margin-top:4px'>" + rcxLogoutLink(fullName(a)) + "</div>") + "</td>" +
           "</tr>";
-      }).join("") || "<tr><td colspan='8' class='muted'>Nobody needs attention right now. " + snoozed.length + " reviewed.</td></tr>";
+      }).join("") || "<tr><td colspan='8' class='muted'>Nobody needs attention right now. " + snoozed.length + " silenced.</td></tr>";
     }
     // Reviewed today
-    $("reviewedSum").textContent = "Reviewed today (" + watchReviews().length + ")" + (reviews.err ? " · couldn't load reviews: " + reviews.err : "");
+    $("reviewedSum").textContent = "Silenced today (" + watchReviews().length + ")" + (reviews.err ? " · couldn't load reviews: " + reviews.err : "");
     $("reviewedBody").innerHTML = watchReviews().map(function (r) {
-      var t = Date.parse(r.created_at), end = t + CONFIG.REVIEW_SNOOZE_MIN * 60000;
-      var status = Date.now() < end ? "Snoozed until " + fmtClock(end) + " (sooner if a new signal appears)" : "Snooze over";
+      var t = Date.parse(r.created_at), end = silenceUntil(r), day = silenceLen(r) === "day";
+      var status = day ? "Silenced for the rest of today" : (Date.now() < end ? "Silenced until " + fmtClock(end) + " (sooner if a new signal appears)" : "Silence over");
       return "<tr><td>" + fmtClock(t) + "</td><td>" + esc(r.agent_name) + "</td><td class='wrap'>" + esc(r.reason) + "</td><td>" + esc(r.reviewer_name) + "</td>" +
         "<td class='tiny muted'>" + esc(status) + "</td><td>" + (String(r.reviewer_id) === myAgentId() ? "<button class='btn' data-review-undo='" + r.id + "'>Undo</button>" : "") + "</td></tr>";
-    }).join("") || "<tr><td colspan='6' class='muted'>No reviews yet today.</td></tr>";
+    }).join("") || "<tr><td colspan='6' class='muted'>Nobody silenced yet today.</td></tr>";
   }
 
   var STATE_ORDER = { "st-red": 0, "st-green": 1, "st-yellow": 2, "st-grey": 3, "st-off": 4 };
@@ -4645,7 +4677,7 @@
     var rc = ev.target.closest("[data-review-cancel]");
     if (rc) { delete drafts[rc.getAttribute("data-review-cancel")]; if (document.activeElement) document.activeElement.blur(); render(); return; }
     var rs = ev.target.closest("[data-review-save]");
-    if (rs) { var sk2 = rs.getAttribute("data-review-save"); var inp2 = document.querySelector("[data-review-input='" + sk2.replace(/'/g, "\\'") + "']"); if (inp2) drafts[sk2] = inp2.value; if (document.activeElement) document.activeElement.blur(); saveReview(sk2); return; }
+    if (rs) { var sk2 = rs.getAttribute("data-review-save"); var inp2 = document.querySelector("[data-review-input='" + sk2.replace(/'/g, "\\'") + "']"); if (inp2) drafts[sk2] = inp2.value; if (document.activeElement) document.activeElement.blur(); saveReview(sk2, rs.getAttribute("data-review-len") || "30"); return; }
     var lo = ev.target.closest("[data-lnote-open]");
     if (lo) { var lk = lo.getAttribute("data-lnote-open"); drafts["login:" + lk] = ""; render(); var li = document.querySelector("[data-lnote-input='" + lk.replace(/'/g, "\'") + "']"); if (li) li.focus(); return; }
     var lc = ev.target.closest("[data-lnote-cancel]");
