@@ -485,7 +485,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 6.4<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 6.5<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -3378,6 +3378,52 @@
     if (keepTip && td.title) o.tip = td.title.replace(/\.?\s*Fixed scale:.*$/, "");   // the parts only
     return o;
   }
+  // Hover text for the agent's own scorecard (Agent View, 2026-10-30): their own numbers and points only. No group
+  // averages, help-desk rates or anyone else's work, unlike the supervisor hovers.
+  function agentTip(r, col) {
+    var p = r.parts || {}, w = r.work || {}, ew = w.ewList || [], u = r.tph || {}, tk = r.tk, e = r.es2, c = r.csat;
+    var efol = ew.filter(function (x) { return !x[2] && (x[3] || x[4]); }).length, took = (w.tookEmail || 0) + (w.tookWeb || 0);
+    var pl = function (n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); };
+    switch (col) {
+      case "Score":
+        return "Ready " + p.ready + "/25 · " + (r.email ? "Pickup " + p.pickup : "RNA " + p.rna) + "/10 · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · " +
+          "Tickets " + p.tickets + "/20 · Tickets/hr " + p.vol + "/10 · ES " + p.es + "/5 · CSAT " + p.csat + "/10 = " + Math.round(r.score) + " of 100.";
+      case "In/Out/Fol":
+        return r.email ? "" : pl(r.answered || 0, "queue call") + " answered · " + pl(r.outbound || 0, "outbound call") + " · " +
+          (r.followups == null ? "follow-ups not loaded" : pl(r.followups, "follow-up") + " (earlier call tickets you replied to or solved today)") + ".";
+      case "Calls/hr":
+        return r.email ? "" : pl(r.answered || 0, "queue call") + " answered in " + fmtDur(r.login) + " logged in.";
+      case "Email/Fol":
+        return pl(took, "email or webform ticket") + " you took today · " + pl(efol, "follow-up") + " (email and webform tickets you replied to or solved without taking them today).";
+      case "Tickets/hr":
+        return (u.total || 0) + " tickets in " + fmtDur(r.login) + ": " + (u.calls || 0) + " calls + " + (u.taken || 0) + " email/webform taken + " + (u.fol || 0) + " follow-ups. " +
+          (u.pts == null ? "Not judged yet (under 2 logged-in hours): 10/10." : p.vol + "/10 points.");
+      case "Talk":
+        return r.email ? "" : "Talk time on your answered calls today.";
+      case "RNA":
+        return r.email ? "Ready time while the oldest New (unassigned) ticket had already waited 30 min of your ready time: " + Math.round((r.slow2Ms || 0) / 60000) + " min. " + p.pickup + "/10 points."
+          : pl(r.rna || 0, "call") + " missed or declined. 0 = 10 points, 1 = 5, 2 or more = 0. " + p.rna + "/10.";
+      case "Ready":
+        return r.ready == null ? "Not judged until you've been logged in 30 minutes." :
+          Math.round(r.ready * 100) + "% of your logged-in time (Lunch and Break left out) was " + (r.email ? "Email Support or online" : "Available, Engaged or Transition") + ". 25 × " + Math.round(r.ready * 100) + "% = " + p.ready + "/25.";
+      case "Start":
+        return r.lateMin ? "First login " + Math.round(r.lateMin) + " min after your scheduled start. 5-15 min late = 6/12, more = 0. " + p.start + "/12." : "On time. " + p.start + "/12.";
+      case "Lunch":
+        return r.lunchOver ? "Lunch ran " + r.lunchOver + " min over the hour. 5-14 min over = 4/8, 15 or more = 0. " + p.lunch + "/8." : "Within the hour. " + p.lunch + "/8.";
+      case "Tickets":
+        return !tk ? "" : pl(tk.late.length, "late ticket") + " of " + tk.owned + " due or handled" + (tk.badN ? " (" + tk.badN + " 2+ days late, counted twice)" : "") +
+          ". 20 × (1 − late ÷ due, at least 5 due) = " + p.tickets + "/20. " + tk.waiting + " waiting on you now.";
+      case "ES 30d":
+        return !e ? "" : (e.rate === null ? "Under " + e.min + " tickets in 30 days: not judged, 5/5." :
+          e.w + " counted ES escalations of " + e.tickets + " tickets, last 30 days = " + (e.rate * 100).toFixed(1) + "%. 6% or less = 5 points, 15% or more = 0. " + p.es + "/5.");
+      case "CSAT 60d":
+        return !c ? "" : (c.pct === null ? "Under " + c.min + " ratings in 60 days: not judged, 10/10." :
+          c.good + " good and " + c.bad + " bad ratings, last 60 days = " + Math.round(c.pct * 100) + "%. 70% or lower = 0 points. " + p.csat + "/10.");
+      case "Logged in":
+        return "Your logged-in time today.";
+    }
+    return "";
+  }
   var liveSave = { at: 0, busy: false };
   async function saveLiveScores() {
     if (liveSave.busy || Date.now() - liveSave.at < 3 * 60000 || !session || !CONFIG.SUPABASE_URL || !dataFresh() || !abandons.all || !waits.rows) return;
@@ -3386,7 +3432,7 @@
       var phone = boardRows();
       var rows = phone.concat(emailRows(phone.map(function (r) { return r.name; })) || []).filter(function (r) { return !r.sup; });
       var agents = rows.map(function (r) {
-        return { name: r.name, cells: boardCells(r).map(function (h, i) { return liveCell(h, i === 0); }), tickets: ticketExport(r, Date.now()) };
+        return { name: r.name, cells: boardCells(r).map(function (h, i) { var o = liveCell(h, false), tip = agentTip(r, BOARD_COLS[i]); if (tip) o.tip = tip; return o; }), tickets: ticketExport(r, Date.now()) };
       });
       await dayscoresApi("POST", "", { live: { day: ptYmd(0), data: { cols: BOARD_COLS, agents: agents } } });
       liveSave.at = Date.now();
