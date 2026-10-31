@@ -418,7 +418,7 @@
           <div><div class="board-h low">Bottom 5</div><div id="boardLow"></div></div>
         </div>
         <div id="boardAll" hidden><div class="board-h">Everyone, ranked</div><div id="boardAllList"></div></div>
-        <div class="tiny muted" style="margin-top:6px">100-point scorecard (100 = every part met; hover a score for its breakdown): <b>Ready 25</b> (Available, Engaged or Transition, out of logged-in time not counting Lunch and Break; 25 &times; that share, so 0% = 0 and 100% = 25), <b>no RNA 10</b> (1 RNA = 5, 2+ = 0), <b>on-time start 12</b> (confirmed 5-15 min late = 6, more = 0; unconfirmed counts as on time), <b>lunch within the hour 8</b> (5-15 min over = 4, more = 0; timed from when they actually went), <b>tickets 20</b> (Zendesk / ES tickets that came due (end of their next shift after the ticket started waiting, or after it was given to them): 20 &times; (1 &minus; late &divide; due or handled), counting at least 5; each ticket counts once, a ticket 2+ days late counts as 2 late, and the part never goes below 0; an ES ticket they commented on or moved in Jira that day isn&#39;t late; the number in brackets = waiting on them now; click for the list), <b>Tickets/hr 10</b> (calls answered + email/webform tickets taken + follow-ups (tickets they publicly replied to or solved without taking them today), per logged-in hour, compared with their group&#39;s average today (phone agents, or the Email Team); full at or above the average, none at half of it; under 2 logged-in hours = not judged), <b>ES escalations 5</b> (ES 30d: Jira ES tickets they created that L3 sent back as something L1 could handle &divide; Zendesk tickets assigned to them, last 30 days; Duplicate, Clarification and CloudOps count 1, Workaround, Cannot Reproduce and By Design count half, Fixed, GAL ticket, Feature Request and Migration don&#39;t count; full at 6% or less, none at 15%; under 30 tickets = not judged), <b>CSAT 10</b> (CSAT 60d: good &divide; (good + bad) Zendesk satisfaction ratings on their tickets, last 60 days; full at or above the help-desk rate, none at 70%; under 5 ratings = not judged). <b>Phone agents&#39; Ready is RingCX time only</b> (their Zendesk status doesn&#39;t add to it). <b>Email/Fol</b> shows the new email and webform tickets they took today (picked from New (unassigned) or given to them) / follow-ups (email and webform tickets they publicly replied to or solved without taking them today). Tickets created from calls are left out, so nothing is counted twice. Grades: 90+ green, 65-89 white, 45-64 yellow, 0-44 red. Ranks everyone who answered a queue call or worked a ticket today (took, replied to or solved one), plus anyone logged in 1h+. <b>Email Team</b> (email-only agents) is scored the same way from their Zendesk statuses, which the server records every minute: Ready = Email Support or online (Lunch and Break left out), and <b>pickup speed 10</b> replaces RNA (ready time while the oldest ticket in Email::New (unassigned) had already waited 30 min of their own ready time costs points).</div>
+        <div class="tiny muted" style="margin-top:6px">100-point scorecard (100 = every part met; hover a score for its breakdown): <b>Ready 25</b> (Available, Engaged or Transition, out of logged-in time not counting Lunch and Break; 25 &times; that share, so 0% = 0 and 100% = 25), <b>no RNA 10</b> (1 RNA = 5, 2+ = 0), <b>on-time start 5</b> (confirmed 5-14 min late = 3, more = 0; unconfirmed counts as on time), <b>lunch within the hour 5</b> (5-14 min over = 3, more = 0; timed from when they actually went), <b>tickets 23</b> (Zendesk / ES tickets that came due (end of their next shift after the ticket started waiting, or after it was given to them): 23 &times; (1 &minus; late &divide; due or handled), counting at least 5; each ticket counts once, a ticket 2+ days late counts as 2 late, and the part never goes below 0; an ES ticket they commented on or moved in Jira that day isn&#39;t late; the number in brackets = waiting on them now; click for the list), <b>Tickets/hr 15</b> (calls answered + email/webform tickets taken + follow-ups (tickets they publicly replied to or solved without taking them today), per logged-in hour, compared with their group&#39;s average today (phone agents, or the Email Team); full at or above the average, none at half of it; under 2 logged-in hours = not judged), <b>ES escalations 5</b> (ES 30d: Jira ES tickets they created that L3 sent back as something L1 could handle &divide; Zendesk tickets assigned to them, last 30 days; Duplicate, Clarification and CloudOps count 1, Workaround, Cannot Reproduce and By Design count half, Fixed, GAL ticket, Feature Request and Migration don&#39;t count; full at 6% or less, none at 15%; under 30 tickets = not judged), <b>CSAT 12</b> (CSAT 60d: good &divide; (good + bad) Zendesk satisfaction ratings on their tickets, last 60 days; full at or above the help-desk rate, none at 70%; under 5 ratings = not judged). <b>Phone agents&#39; Ready is RingCX time only</b> (their Zendesk status doesn&#39;t add to it). <b>Email/Fol</b> shows the new email and webform tickets they took today (picked from New (unassigned) or given to them) / follow-ups (email and webform tickets they publicly replied to or solved without taking them today). Tickets created from calls are left out, so nothing is counted twice. Grades: 90+ green, 65-89 white, 45-64 yellow, 0-44 red. Ranks everyone who answered a queue call or worked a ticket today (took, replied to or solved one), plus anyone logged in 1h+. <b>Email Team</b> (email-only agents) is scored the same way from their Zendesk statuses, which the server records every minute: Ready = Email Support or online (Lunch and Break left out), and <b>pickup speed 10</b> replaces RNA (ready time while the oldest ticket in Email::New (unassigned) had already waited 30 min of their own ready time costs points).</div>
         <div class="tiny muted" style="margin-top:4px"><b>Ready</b> = the share of time an agent spent <b>Available or Engaged</b> (ready for a call or on one), out of all their logged-in time today (the server records it every minute). Busy (yellow) and Away time count against it; Lunch and Break time are left out. Example: watched for 4 hours, 30 min of it on lunch, 3 hours Available or Engaged = 3 of 3.5 hours = 86%. It shows "–" until someone has been logged in for 30 minutes, and until then Ready isn't judged (full points).</div>
       </div>
 
@@ -466,11 +466,11 @@
             <ul>
               <li><b>Ready, 25:</b> share of logged-in time (not counting Lunch and Break) Available, Engaged or in Transition. Points = 25 &times; that share: 0% scores 0, 100% scores 25, in proportion between. Full points until 30 minutes have been watched.</li>
               <li><b>No RNA, 10:</b> 1 RNA = 5, 2 or more = 0. Email Team: pickup speed instead.</li>
-              <li><b>On-time start, 12:</b> a confirmed first login 5-15 min after the roster start = 6, later = 0. Unconfirmed first logins count as on time.</li>
-              <li><b>Lunch within the hour, 8:</b> 5-15 min over = 4, more = 0.</li>
-              <li><b>Tickets, 20:</b> tickets waiting on them (Zendesk assigned and Open, or On Hold with no due date or a passed one; ES "Awaiting info" or "Resolved to L1") must be handled by the end of their first shift that starts after the ticket got into that state, or after it was given to them. Points = 20 &times; (1 &minus; late &divide; tickets that came due or that they handled), with at least 5 counted. Handling a ticket before its deadline counts in their favor. Each ticket counts once; one still waiting 2+ days past its deadline counts as 2 late; the part never goes below 0. The server checks every 10 minutes. Click the Tickets cell for the list with links.</li>
-              <li><b>Tickets/hr, 10:</b> calls answered + email/webform tickets taken + follow-ups, per logged-in hour, compared with their group's average today (phone agents, or the Email Team). Full at or above the average, none at half of it, in proportion between. Under 2 logged-in hours isn't judged.</li>
-              <li><b>ES escalations, 5</b> and <b>CSAT, 10:</b> see the notes under Performance today.</li>
+              <li><b>On-time start, 5:</b> a confirmed first login 5-14 min after the roster start = 3, later = 0. Unconfirmed first logins count as on time.</li>
+              <li><b>Lunch within the hour, 5:</b> 5-14 min over = 3, more = 0.</li>
+              <li><b>Tickets, 23:</b> tickets waiting on them (Zendesk assigned and Open, or On Hold with no due date or a passed one; ES "Awaiting info" or "Resolved to L1") must be handled by the end of their first shift that starts after the ticket got into that state, or after it was given to them. Points = 23 &times; (1 &minus; late &divide; tickets that came due or that they handled), with at least 5 counted. Handling a ticket before its deadline counts in their favor. Each ticket counts once; one still waiting 2+ days past its deadline counts as 2 late; the part never goes below 0. The server checks every 10 minutes. Click the Tickets cell for the list with links.</li>
+              <li><b>Tickets/hr, 15:</b> calls answered + email/webform tickets taken + follow-ups, per logged-in hour, compared with their group's average today (phone agents, or the Email Team). Full at or above the average, none at half of it, in proportion between. Under 2 logged-in hours isn't judged.</li>
+              <li><b>ES escalations, 5</b> and <b>CSAT, 12:</b> see the notes under Performance today.</li>
             </ul>
             Grades: 90+ green, 65-89 white, 45-64 yellow, 0-44 red. Hover a score for its breakdown. Top 5 and Bottom 5 rank agents only. Supervisors (including Victor Guadarrama) are scored too, but they appear only in "Show all", with a Supervisor tag.
             Calls answered and talk time come from RingCX's call report for the whole day, refreshed every 5 minutes. Logged-in time, RNA and Available/Engaged time come from RingCX's live data, which only covers each person's current login session. This browser adds them up across logins, but only for what it saw while open. Open the page at the start of the day for the most accurate ranking. People who logged out before the page started tracking can't be ranked, because their logged-in time is unknown. Supervisors who answered queue calls are included.</li>
@@ -485,7 +485,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 6.7<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 6.8<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -2661,10 +2661,11 @@
     var n = good + bad, min = c.minRatings || 5, floor = c.floor || 0.7, team = c.teamPct;
     var pct = n >= min ? good / n : null;
     var pts = pct === null || !team || team <= floor ? 10 : (pct >= team ? 10 : (pct <= floor ? 0 : 10 * (pct - floor) / (team - floor)));
-    return { good: good, bad: bad, n: n, pct: pct, team: team, floor: floor, min: min, pts: Math.round(pts), since: c.since };
+    return { good: good, bad: bad, n: n, pct: pct, team: team, floor: floor, min: min, pts: Math.round(pts), frac: pts / 10, since: c.since };
   }
   // ---------------- the scorecard (2026-10-30; replaces the v5.62 card) ----------------
-  // Ready 25, RNA / pickup 10, start 12, lunch 8, ticket timeliness 20, Tickets/hr 10, ES 5, CSAT 10 = 100.
+  // Ready 25, RNA / pickup 10, start 5, lunch 5, ticket timeliness 23, Tickets/hr 15, ES 5, CSAT 12 = 100 (weights 2026-10-30).
+  var W = { ready: 25, rna: 10, start: 5, lunch: 5, tickets: 23, vol: 15, es: 5, csat: 12 };
   // Ticket timeliness: share of their due or handled tickets that were late. A ticket is "owned" once (however many
   // snapshots or statuses it had that day) once its deadline passed or they handled it; it adds 2 to "late" when 2+ days past (1 otherwise); the late
   // share is capped at 100%, so the part never goes below 0. The deadline restarts when the ticket was given to them
@@ -2690,7 +2691,7 @@
     var lateW = list.reduce(function (s, o) { return s + o.w; }, 0), owned = list.length;
     var share = Math.min(1, lateW / Math.max(owned, 5));
     var late = list.filter(function (o) { return o.w; });
-    return { pts: Math.round(20 * (1 - share)), owned: owned, lateW: lateW, late: late, badN: late.filter(function (o) { return o.bad; }).length,
+    return { pts: Math.round(W.tickets * (1 - share)), owned: owned, lateW: lateW, late: late, badN: late.filter(function (o) { return o.bad; }).length,
       mine: mine, waiting: mine.filter(function (x) { return x.last >= asOf - 15 * 60000; }).length };
   }
   // ES: weighted count (zdwatch esWeighted: Feature Request / Migration left out, Workaround / Cannot Reproduce /
@@ -2725,7 +2726,7 @@
       if ((r.login || 0) < CONFIG.TPH_MIN_LOGIN_SEC) { u.pts = null; u.why = "Under " + CONFIG.TPH_MIN_LOGIN_SEC / 3600 + " logged-in hours: not judged, full points"; return; }
       if (!waits.work) { u.pts = null; u.why = "Email/webform work not loaded yet: not judged"; return; }
       if (!(avg > 0)) { u.pts = null; u.why = "No group average yet: not judged"; return; }
-      u.pts = Math.round(10 * Math.max(0, Math.min(1, (u.rate / avg - 0.5) / 0.5)));
+      u.pts = Math.round(W.vol * Math.max(0, Math.min(1, (u.rate / avg - 0.5) / 0.5)));
     });
   }
   // Puts the scorecard on each row: r.score, r.parts (ready, rna or pickup, start, lunch, tickets, es, vol, csat),
@@ -2737,14 +2738,17 @@
       v.ready = r.ready == null ? 25 : Math.round(25 * Math.max(0, Math.min(1, r.ready)));   // straight line: 0% = 0, 100% = 25 (2026-10-30)
       if (r.email) v.pickup = Math.round(r.readyMs ? 10 * (1 - (r.slow2Ms || 0) / r.readyMs) : 10);
       else v.rna = r.rna === 0 ? 10 : (r.rna === 1 ? 5 : 0);
-      v.start = p.start; v.lunch = p.lunch; v.csat = p.csat;
-      r.tk = ticketTimeliness2(r.name, asOf); v.tickets = r.tk ? r.tk.pts : 20;
+      // Start and lunch keep their rules (on time / 5-14 min / 15+), scaled to 5 points each: full, half (3), none.
+      v.start = p.start === 12 ? W.start : (p.start === 6 ? 3 : 0);
+      v.lunch = p.lunch === 8 ? W.lunch : (p.lunch === 4 ? 3 : 0);
+      v.csat = r.csat && r.csat.frac != null ? Math.round(W.csat * r.csat.frac) : W.csat;
+      r.tk = ticketTimeliness2(r.name, asOf); v.tickets = r.tk ? r.tk.pts : W.tickets;
       r.es2 = es2For(r.name); v.es = r.es2 ? r.es2.pts : 5;
       r.parts = v;
     });
     tph2(rows);
     rows.forEach(function (r) {
-      var v = r.parts; v.vol = r.tph && r.tph.pts != null ? r.tph.pts : 10;   // "vol": the key saved days use
+      var v = r.parts; v.vol = r.tph && r.tph.pts != null ? r.tph.pts : W.vol;   // "vol": the key saved days use
       r.score = v.ready + (r.email ? v.pickup : v.rna) + v.start + v.lunch + v.tickets + v.es + v.vol + v.csat;
     });
   }
@@ -2752,7 +2756,7 @@
     var c = r.csat;
     if (!c) return "<span class='muted' title='Not loaded yet'>–</span>";
     var tip = c.good + " good, " + c.bad + " bad rating" + (c.bad === 1 ? "" : "s") + " since " + ymdLabel(c.since) + (c.team ? "; help desk " + Math.round(c.team * 100) + "%" : "") +
-      (c.pct === null ? ". Under " + c.min + " ratings: not enough to judge, full points." : ". " + c.pts + "/10 points (full at or above the help-desk rate, none at " + Math.round(c.floor * 100) + "%).");
+      (c.pct === null ? ". Under " + c.min + " ratings: not enough to judge, full points." : ". " + (r.parts && r.parts.csat != null ? r.parts.csat : c.pts) + "/12 points (full at or above the help-desk rate, none at " + Math.round(c.floor * 100) + "%).");
     if (c.pct === null) return "<span class='muted' title='" + esc(tip) + "'>" + (c.n ? c.n + " rated" : "n/a") + "</span>";
     var cls = c.pct <= c.floor ? "hot" : (c.team && c.pct < c.team ? "warmn" : "good");
     return "<span class='" + cls + "' title='" + esc(tip) + "'>" + Math.round(c.pct * 100) + "%</span> <span class='muted tiny'>(" + c.n + ")</span>";
@@ -2836,7 +2840,7 @@
     if (u.hrs < 0.25 || (!waits.work && !u.calls)) return "<span class='muted'>–</span>";
     var tip = u.total + " tickets in " + fmtDur(r.login) + ": " + u.calls + " calls + " + u.taken + " email/webform taken + " + u.fol + " follow-ups. " +
       (r.email ? "Email Team" : "Phone agents") + " average today: " + (u.avg || 0).toFixed(1) + "/hr. " +
-      (u.pts == null ? (u.why || "Not judged") + "." : u.pts + "/10 points (full at or above the average, none at half of it).");
+      (u.pts == null ? (u.why || "Not judged") + "." : u.pts + "/15 points (full at or above the average, none at half of it).");
     var cls = u.pts == null ? "" : (u.pts === 0 ? "hot" : (u.pts < 10 ? "warmn" : ""));
     return "<span class='" + cls + "' title='" + esc(tip) + "'>" + u.rate.toFixed(1) + "</span>";
   }
@@ -2942,10 +2946,10 @@
   function scoreGrade(s) { return s >= 90 ? "good" : (s >= 65 ? "" : (s >= 45 ? "warmn" : "hot")); }   // 90+ green, 65-89 white, 45-64 yellow, 0-44 red (2026-10-30)
   function scoreTitle(r) {
     var p = r.parts, tk = r.tk, e = r.es2, v = r.tph || {};
-    return "Ready " + p.ready + "/25" + (r.ready == null ? " (not enough time watched yet)" : "") + (r.email ? " · Pickup " + p.pickup + "/10" : " · RNA " + p.rna + "/10") + " · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · " +
-      "Tickets " + p.tickets + "/20" + (tk ? " (" + tk.late.length + " late of " + tk.owned + " due or handled" + (tk.badN ? ", " + tk.badN + " 2+ days late counted twice" : "") + ")" : " (not loaded yet)") + " · " +
-      "Tickets/hr " + p.vol + "/10" + (v.pts == null ? " (not judged)" : " (" + (v.rate || 0).toFixed(1) + " vs group " + (v.avg || 0).toFixed(1) + ")") + " · " +
-      "ES " + p.es + "/5" + (e && e.rate !== null ? " (" + (e.rate * 100).toFixed(1) + "%)" : "") + " · CSAT " + p.csat + "/10. 100 = every part met.";
+    return "Ready " + p.ready + "/25" + (r.ready == null ? " (not enough time watched yet)" : "") + (r.email ? " · Pickup " + p.pickup + "/10" : " · RNA " + p.rna + "/10") + " · Start " + p.start + "/5 · Lunch " + p.lunch + "/5 · " +
+      "Tickets " + p.tickets + "/23" + (tk ? " (" + tk.late.length + " late of " + tk.owned + " due or handled" + (tk.badN ? ", " + tk.badN + " 2+ days late counted twice" : "") + ")" : " (not loaded yet)") + " · " +
+      "Tickets/hr " + p.vol + "/15" + (v.pts == null ? " (not judged)" : " (" + (v.rate || 0).toFixed(1) + " vs group " + (v.avg || 0).toFixed(1) + ")") + " · " +
+      "ES " + p.es + "/5" + (e && e.rate !== null ? " (" + (e.rate * 100).toFixed(1) + "%)" : "") + " · CSAT " + p.csat + "/12. 100 = every part met.";
   }
   function ticketCell(r) {
     var t = r.tk;
@@ -3126,7 +3130,7 @@
     rows = rows.filter(function (r) { return !r.unranked; }).concat(rows.filter(function (r) { return r.unranked; }));   // not ranked today: last, no number
     var top = ranked.slice(0, 5), low = ranked.length > 5 ? ranked.slice(-Math.min(5, ranked.length - 5)).reverse() : [];
     function table(list, startRank, dir, total) {
-      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num' title='100-point scorecard: Ready 25, RNA (Email Team: pickup) 10, Start 12, Lunch 8, Tickets 20, Tickets/hr 10, ES 5, CSAT 10. Hover a score for its parts.'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took today / follow-ups (email and webform tickets they replied to or solved without taking them today). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='Scored (10 points): calls answered + email/webform tickets taken + follow-ups, per logged-in hour, compared with their group&#39;s average today (phone agents or Email Team). Full at or above the average, none at half of it.'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>Start</th><th class='num'>Lunch</th><th class='num' title='Tickets past their deadline out of the tickets that came due or that they handled (the number in brackets = waiting on them now; click for the list)'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle, weighted (Workaround, Cannot Reproduce and By Design count half; Fixed, GAL ticket, Feature Request and Migration don&#39;t count), last 30 days'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num' title='100-point scorecard: Ready 25, RNA (Email Team: pickup) 10, Start 5, Lunch 5, Tickets 23, Tickets/hr 15, ES 5, CSAT 12. Hover a score for its parts.'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took today / follow-ups (email and webform tickets they replied to or solved without taking them today). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='Scored (10 points): calls answered + email/webform tickets taken + follow-ups, per logged-in hour, compared with their group&#39;s average today (phone agents or Email Team). Full at or above the average, none at half of it.'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>Start</th><th class='num'>Lunch</th><th class='num' title='Tickets past their deadline out of the tickets that came due or that they handled (the number in brackets = waiting on them now; click for the list)'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle, weighted (Workaround, Cannot Reproduce and By Design count half; Fixed, GAL ticket, Feature Request and Migration don&#39;t count), last 30 days'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr data-brow='" + esc(normName(r.name)) + "'><td class='num'>" + (r.unranked ? "" : (dir > 0 ? startRank + i : total - i)) + "</td>" +
             "<td>" + esc(r.name) + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + unrankTag(r, true) + "</td>" +
@@ -3275,7 +3279,7 @@
   // The last 5 working days (Mon-Fri, today left out) the server still keeps snapshots for (8 days), each scored
   // exactly like Previous days. Team numbers per day, then each agent's average score, per-day scores, lowest day
   // and the scorecard part they lose the most points on. Copy report gives the same as plain text.
-  var PART_MAX = [["ready", "Ready", 25], ["rna", "RNA", 10], ["pickup", "Pickup", 10], ["start", "Start", 12], ["lunch", "Lunch", 8], ["tickets", "Tickets", 20], ["vol", "Tickets/hr", 10], ["es", "ES", 5], ["csat", "CSAT", 10]];
+  var PART_MAX = [["ready", "Ready", 25], ["rna", "RNA", 10], ["pickup", "Pickup", 10], ["start", "Start", 5], ["lunch", "Lunch", 5], ["tickets", "Tickets", 23], ["vol", "Tickets/hr", 15], ["es", "ES", 5], ["csat", "CSAT", 12]];
   function dayShort(ymd) { var d = new Date(ymd + "T12:00:00Z"); return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()] + " " + (d.getUTCMonth() + 1) + "/" + d.getUTCDate(); }
   var report = { loading: false, data: null };
   // ---- saved days (dayscores function): each finished working day's scores, so weeks can be compared ----
@@ -3301,7 +3305,7 @@
     var rows = d.rows.concat(d.email || []).filter(function (r) { return !r.sup; });
     var scores = rows.filter(function (r) { return !r.unranked; }).map(function (r) { return r.score; });
     return {
-      v: 8, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
+      v: 9, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
       team: { answered: d.answered, abandoned: d.abandoned, talk: Math.round(d.talk), outbound: rows.reduce(function (t, r) { return t + (r.outbound || 0); }, 0),
         scored: rows.length, avg: scores.length ? scores.reduce(function (t, v) { return t + v; }, 0) / scores.length : null },
       agents: rows.map(function (r) {
@@ -3329,7 +3333,7 @@
   async function saveMissingDays(have) {
     // v 6 = the current scorecard (Tickets/hr scored, straight-line Ready, handled tickets count, email aliases, 2026-10-30); days saved under older rules are rebuilt and saved
     // again while snapshots last.
-    var missing = workdaysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 8; });
+    var missing = workdaysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 9; });
     for (var i = 0; i < missing.length; i++) {
       var d = null;
       try { d = await buildDay(backOf(missing[i])); } catch (e) { d = null; }
@@ -3343,7 +3347,7 @@
   async function autoSaveDays() {
     var today = ptYmd(0);
     if (autoSave.running || autoSave.done === today || !session || !CONFIG.SUPABASE_URL || document.hidden) return;
-    var key = "rcxLiveView.daysSaved.v8";
+    var key = "rcxLiveView.daysSaved.v9";
     try { if (localStorage.getItem(key) === today) { autoSave.done = today; return; } } catch (e) {}
     autoSave.running = true;
     try {
@@ -3389,8 +3393,8 @@
     var pl = function (n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); };
     switch (col) {
       case "Score":
-        return "Ready " + p.ready + "/25 · " + (r.email ? "Pickup " + p.pickup : "RNA " + p.rna) + "/10 · Start " + p.start + "/12 · Lunch " + p.lunch + "/8 · " +
-          "Tickets " + p.tickets + "/20 · Tickets/hr " + p.vol + "/10 · ES " + p.es + "/5 · CSAT " + p.csat + "/10 = " + Math.round(r.score) + " of 100.";
+        return "Ready " + p.ready + "/25 · " + (r.email ? "Pickup " + p.pickup : "RNA " + p.rna) + "/10 · Start " + p.start + "/5 · Lunch " + p.lunch + "/5 · " +
+          "Tickets " + p.tickets + "/23 · Tickets/hr " + p.vol + "/15 · ES " + p.es + "/5 · CSAT " + p.csat + "/12 = " + Math.round(r.score) + " of 100.";
       case "In/Out/Fol":
         return r.email ? "" : pl(r.answered || 0, "queue call") + " answered · " + pl(r.outbound || 0, "outbound call") + " · " +
           (r.followups == null ? "follow-ups not loaded" : pl(r.followups, "follow-up") + " (earlier call tickets you replied to or solved today)") + ".";
@@ -3400,7 +3404,7 @@
         return pl(took, "email or webform ticket") + " you took today · " + pl(efol, "follow-up") + " (email and webform tickets you replied to or solved without taking them today).";
       case "Tickets/hr":
         return (u.total || 0) + " tickets in " + fmtDur(r.login) + ": " + (u.calls || 0) + " calls + " + (u.taken || 0) + " email/webform taken + " + (u.fol || 0) + " follow-ups. " +
-          (u.pts == null ? "Not judged yet (under 2 logged-in hours): 10/10." : p.vol + "/10 points.");
+          (u.pts == null ? "Not judged yet (under 2 logged-in hours): 15/15." : p.vol + "/15 points.");
       case "Talk":
         return r.email ? "" : "Talk time on your answered calls today.";
       case "RNA":
@@ -3410,18 +3414,18 @@
         return r.ready == null ? "Not judged until you've been logged in 30 minutes." :
           Math.round(r.ready * 100) + "% of your logged-in time (Lunch and Break left out) was " + (r.email ? "Email Support or online" : "Available, Engaged or Transition") + ". 25 × " + Math.round(r.ready * 100) + "% = " + p.ready + "/25.";
       case "Start":
-        return r.lateMin ? "First login " + Math.round(r.lateMin) + " min after your scheduled start. 5-15 min late = 6/12, more = 0. " + p.start + "/12." : "On time. " + p.start + "/12.";
+        return r.lateMin ? "First login " + Math.round(r.lateMin) + " min after your scheduled start. 5-14 min late = 3/5, more = 0. " + p.start + "/5." : "On time. " + p.start + "/5.";
       case "Lunch":
-        return r.lunchOver ? "Lunch ran " + r.lunchOver + " min over the hour. 5-14 min over = 4/8, 15 or more = 0. " + p.lunch + "/8." : "Within the hour. " + p.lunch + "/8.";
+        return r.lunchOver ? "Lunch ran " + r.lunchOver + " min over the hour. 5-14 min over = 3/5, 15 or more = 0. " + p.lunch + "/5." : "Within the hour. " + p.lunch + "/5.";
       case "Tickets":
         return !tk ? "" : pl(tk.late.length, "late ticket") + " of " + tk.owned + " due or handled" + (tk.badN ? " (" + tk.badN + " 2+ days late, counted twice)" : "") +
-          ". 20 × (1 − late ÷ due, at least 5 due) = " + p.tickets + "/20. " + tk.waiting + " waiting on you now.";
+          ". 23 × (1 − late ÷ due, at least 5 due) = " + p.tickets + "/23. " + tk.waiting + " waiting on you now.";
       case "ES 30d":
         return !e ? "" : (e.rate === null ? "Under " + e.min + " tickets in 30 days: not judged, 5/5." :
           e.w + " counted ES escalations of " + e.tickets + " tickets, last 30 days = " + (e.rate * 100).toFixed(1) + "%. 6% or less = 5 points, 15% or more = 0. " + p.es + "/5.");
       case "CSAT 60d":
-        return !c ? "" : (c.pct === null ? "Under " + c.min + " ratings in 60 days: not judged, 10/10." :
-          c.good + " good and " + c.bad + " bad ratings, last 60 days = " + Math.round(c.pct * 100) + "%. 70% or lower = 0 points. " + p.csat + "/10.");
+        return !c ? "" : (c.pct === null ? "Under " + c.min + " ratings in 60 days: not judged, 12/12." :
+          c.good + " good and " + c.bad + " bad ratings, last 60 days = " + Math.round(c.pct * 100) + "%. 70% or lower = 0 points. " + p.csat + "/12.");
       case "Logged in":
         return "Your logged-in time today.";
     }
@@ -3556,7 +3560,7 @@
     html += "<div class='wr-foot'>Weeks are Monday to Friday, Pacific; this week runs to yesterday (on a Monday the report compares last week with the week before). " +
       "Daily volumes are per-day averages over the days each week has, so a short week compares fairly. Scores use the same 100-point card as the board; supervisors and managers are left out. " +
       "Each finished day is saved once (boards do it automatically), because the server only keeps 8 days of agent snapshots. " +
-      "Lowest day, Loses most on (scorecard part with the most points lost per day: Ready 25, RNA or email Pickup 10, Start 12, Lunch 8, Tickets 20, Tickets/hr 10, ES 5, CSAT 10), In/Out (queue calls answered / outbound dialed), Email (email and webform tickets taken), late starts and long lunches are for this week." +
+      "Lowest day, Loses most on (scorecard part with the most points lost per day: Ready 25, RNA or email Pickup 10, Start 5, Lunch 5, Tickets 23, Tickets/hr 15, ES 5, CSAT 12), In/Out (queue calls answered / outbound dialed), Email (email and webform tickets taken), late starts and long lunches are for this week." +
       (gaps.length ? " No saved scores for " + esc(gaps.join(", ")) + " (before saving started, or no snapshots left)." : "") +
       (partial.length ? " Partial day (tracking started late): " + esc(partial.join(", ")) + "." : "") +
       (approxDays.length ? " ≈ Estimated: " + esc(approxDays.map(dayShort).join(", ")) + " were scored before the current scorecard and could only be converted from their saved points" +
@@ -3594,7 +3598,7 @@
       var j = await dayscoresApi("GET", "?from=" + W.prev.from + "&to=" + W.cur.to), recs = {};
       (j.days || []).forEach(function (x) { recs[String(x.day).slice(0, 10)] = x.data; });
       // Days still on the server but not saved yet, or saved under older scoring rules: rebuild and save them now.
-      var todo = W.cur.days.concat(W.prev.days).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 8) && backOf(y) >= 1 && backOf(y) <= 7; });
+      var todo = W.cur.days.concat(W.prev.days).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 9) && backOf(y) >= 1 && backOf(y) <= 7; });
       for (var i = 0; i < todo.length; i++) {
         body.innerHTML = "<div class='muted' style='padding:12px 0'>Rebuilding " + esc(dayShort(todo[i])) + " (" + (i + 1) + " of " + todo.length + ") from the server's snapshots…</div>";
         var d = null; try { d = await buildDay(backOf(todo[i])); } catch (e) { d = null; }
@@ -3656,7 +3660,7 @@
     $("ydBody").innerHTML =
       "<div class='tiny' style='margin:4px 0 8px'><b>" + d.answered + "</b> queue calls answered · <b>" + d.abandoned + "</b> abandoned · <b>" + fmtDur(d.talk) + "</b> talk · " +
         agents.filter(function (r) { return !r.unranked; }).length + " agents ranked" + (best ? " · best: <b>" + esc(best.name) + "</b>" : "") + "</div>" +
-      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num' title='100-point scorecard: Ready 25, RNA (Email Team: pickup) 10, Start 12, Lunch 8, Tickets 20, Tickets/hr 10, ES 5, CSAT 10. Hover a score for its parts.'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took that day / follow-ups (email and webform tickets they replied to or solved without taking them that day). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='Scored (10 points): calls answered + email/webform tickets taken + follow-ups, per logged-in hour, compared with their group&#39;s average today (phone agents or Email Team). Full at or above the average, none at half of it.'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>First login</th><th class='num'>Lunch</th><th class='num' title='Tickets past their deadline out of the tickets that came due or that they handled (the number in brackets = waiting on them now; click for the list)'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle, weighted (Workaround, Cannot Reproduce and By Design count half; Fixed, GAL ticket, Feature Request and Migration don&#39;t count), last 30 days'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
+      "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num' title='100-point scorecard: Ready 25, RNA (Email Team: pickup) 10, Start 5, Lunch 5, Tickets 23, Tickets/hr 15, ES 5, CSAT 12. Hover a score for its parts.'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took that day / follow-ups (email and webform tickets they replied to or solved without taking them that day). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='Scored (10 points): calls answered + email/webform tickets taken + follow-ups, per logged-in hour, compared with their group&#39;s average today (phone agents or Email Team). Full at or above the average, none at half of it.'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>First login</th><th class='num'>Lunch</th><th class='num' title='Tickets past their deadline out of the tickets that came due or that they handled (the number in brackets = waiting on them now; click for the list)'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle, weighted (Workaround, Cannot Reproduce and By Design count half; Fixed, GAL ticket, Feature Request and Migration don&#39;t count), last 30 days'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
       (agents.map(function (r, i) { return rowHtml(r, r.unranked ? "" : i + 1); }).join("") || "<tr><td colspan='17' class='muted'>Nobody to score that day.</td></tr>") +
       (sups.length ? "<tr><td colspan='17' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" + sups.map(function (r) { return rowHtml(r, ""); }).join("") : "") +
       "</tbody></table></div>" + (d.email ? "" : "<div class='muted tiny'>No Zendesk status data for the Email Team that day (recording started Fri 10/16).</div>");
