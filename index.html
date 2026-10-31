@@ -485,7 +485,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 6.8<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 6.9<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -546,7 +546,7 @@
     // Who can silence the Call avoidance watch (note required): managers and L2s only (2026-10-30). Same list in "reviews".
     SILENCE_IDS: ["3299715", "3301145", "3301139", "3301150", "3301140", "3301143", "3301144", "3301141"],   // Fred, Ricardo, Erasmo; Adnan, Daniel Suyo, Joel, Paulina, Salvador
     // People whose hours don't follow daylight saving: roster times + 1h while Pacific is on PDT (Fred).
-    NO_DST: ["Andrea Lopez"],
+    NO_DST: ["Andrea Lopez", "Victor Guadarrama"],
     SHIFT_HOURS: 9,                                 // roster has no shift end: assume 8h work + 1h lunch
     OFFLINE_MIN: 5,                                  // logged out this long during the shift = on the watch
     OFFLINE_CRIT_MIN: 30,                            // ...red after this
@@ -1050,6 +1050,25 @@
     var tz = (p.filter(function (x) { return x.type === "timeZoneName"; })[0] || {}).value || "";
     return /GMT-7\b/.test(tz);
   }
+  // Day-by-day start times (Pacific) for people whose hours change by weekday and aren't in the Support Roster's single
+  // Shift Start (2026-10-30). From the heatmap roster's per-day blocks, checked against their RingCX logins 10/22-10/30
+  // (Saturdays followed the logins: Sharik 11:17 PM, Danish 4:02 PM). Weekday 0 = Sunday; a missing day = day off.
+  // The times are Pacific daylight time; they work on India time, which has no DST, so in standard time (Nov to Mar)
+  // each start is an hour earlier. Used for ticket deadlines (end of their next shift) and on-time start.
+  var SHIFT_BLOCKS = {
+    "Sharik Parvaiz": { 5: "18:00", 6: "23:00", 0: "21:00", 1: "21:00", 2: "21:00" },
+    "Danish Manzoor": { 0: "19:00", 3: "21:00", 4: "21:00", 5: "23:00", 6: "16:00" }
+  };
+  function shiftBlocksFor(name) {
+    var k = normName(name), key = Object.keys(SHIFT_BLOCKS).filter(function (x) { return normName(x) === k; })[0];
+    return key ? SHIFT_BLOCKS[key] : null;
+  }
+  // Their start (Pacific minutes) on a weekday, null = day off. dst: whether Pacific is on daylight time that day.
+  function blockStart(blocks, wd, dst) {
+    var v = blocks[wd]; if (v == null) return null;
+    return +v.slice(0, 2) * 60 + +v.slice(3, 5) - (dst ? 0 : 60);
+  }
+  function ymdIsDST(ymd) { return /-07/.test(ptMidnightIsoOf(ymd).slice(-5)); }
   // Temporary schedules the roster doesn't show yet (Smartsheet can't be edited right now). Each lapses on its own
   // after "until" (Pacific date). Times are Pacific "HH:MM"; omit a field to keep the roster value.
   var SCHEDULE_OVERRIDES = {
@@ -1335,10 +1354,14 @@
     keys.forEach(function (k) { total += h.sessions[k].login || 0; lastSeen = Math.max(lastSeen, h.sessions[k].seen || 0); });
     lastSeen = Math.max(lastSeen, h.lastSeen || 0);   // last refresh that still had them logged in
     var start = s && s.shift !== null && s.days.indexOf(day) >= 0 ? s.shift : null;
+    var blocks = shiftBlocksFor(h.name);   // day-by-day shifts (Sharik, Danish)
+    if (blocks) start = blockStart(blocks, day, pacificIsDST());
     // Logged in through midnight: the shift's first login was the evening before (exact from loginDts).
     if (lastSeen && overnightKey(h, ymdOfMs(lastSeen))) {
       var ev = !hist.keepAll && eve.ymd === ptYmd(0) ? eve.map[normName(h.name)] : null;
       var f0 = ev ? ev.first : dtsMinutes(keys[0]) - 1440;
+      // Day-by-day shifts: the shift that started the evening before (minutes before today's midnight).
+      if (blocks) { var yb = blockStart(blocks, (day + 6) % 7, pacificIsDST()); start = yb === null ? null : yb - 1440; }
       return { keys: keys, first: f0, total: total, lastSeen: lastSeen, start: start, hidden: false, conf: "confirmed", eve: true,
         logins: keys.length + (ev ? ev.logins - 1 : 0), late: start !== null ? f0 - start : null };
     }
@@ -2605,12 +2628,13 @@
   // End of the first shift that starts after t (roster start + SHIFT_HOURS; skips days off and PTO). No roster row:
   // 8 AM Pacific, Monday to Friday.
   function shiftDeadline(name, t) {
-    var s = schedForLoose(name), start0 = ymdOfMs(t);
+    var s = schedForLoose(name), start0 = ymdOfMs(t), blocks = shiftBlocksFor(name);
     for (var i = 0; i < 21; i++) {
-      var ymd = addDaysYmd(start0, i), wd = new Date(ymd + "T12:00:00Z").getUTCDay();
-      if (s && s.shift !== null ? s.days.indexOf(wd) < 0 : (wd === 0 || wd === 6)) continue;
+      var ymd = addDaysYmd(start0, i), wd = new Date(ymd + "T12:00:00Z").getUTCDay(), startMin;
+      if (blocks) { startMin = blockStart(blocks, wd, ymdIsDST(ymd)); if (startMin === null) continue; }
+      else { if (s && s.shift !== null ? s.days.indexOf(wd) < 0 : (wd === 0 || wd === 6)) continue; startMin = s && s.shift !== null ? s.shift : 8 * 60; }
       if (onPtoDay(name, ymd)) continue;
-      var start = Date.parse(ptMidnightIsoOf(ymd)) + (s && s.shift !== null ? s.shift : 8 * 60) * 60000;
+      var start = Date.parse(ptMidnightIsoOf(ymd)) + startMin * 60000;
       if (start >= t) return start + CONFIG.SHIFT_HOURS * 3600000;
     }
     return t + 24 * 3600000;
