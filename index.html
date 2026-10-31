@@ -485,7 +485,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.0<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.1<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -3454,6 +3454,7 @@
   }
   function isWorkday(ymd) { var wd = new Date(ymd + "T12:00:00Z").getUTCDay(); return wd >= 1 && wd <= 5; }
   // Working days from..to (inclusive), oldest first.
+  function daysBetween(from, to) { var out = []; for (var y = from; y <= to; y = addDaysYmd(y, 1)) out.push(y); return out; }
   function workdaysBetween(from, to) { var out = []; for (var y = from; y <= to; y = addDaysYmd(y, 1)) if (isWorkday(y)) out.push(y); return out; }
   function backOf(ymd) { return Math.round((Date.parse(ptYmd(0) + "T12:00:00Z") - Date.parse(ymd + "T12:00:00Z")) / 86400000); }
   // Builds and saves any finished working day of the last 7 that isn't saved yet. Each board does this once a day,
@@ -3462,7 +3463,8 @@
   async function saveMissingDays(have) {
     // v 6 = the current scorecard (Tickets/hr scored, straight-line Ready, handled tickets count, email aliases, 2026-10-30); days saved under older rules are rebuilt and saved
     // again while snapshots last.
-    var missing = workdaysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 10; })
+    // Every day is saved, weekends too (2026-10-30): some people's shifts fall on Saturday or Sunday.
+    var missing = daysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 10; })
       .filter(function (y) { return !(Object.keys(SHIFT_BLOCKS).length && y === ptYmd(1) && shiftDayOf(Date.now()) < ptYmd(0)); });   // yesterday's overnight shift may still be running
     for (var i = 0; i < missing.length; i++) {
       var d = null;
@@ -3583,18 +3585,22 @@
   function reportWeeks() {
     var today = ptYmd(0), wd = new Date(today + "T12:00:00Z").getUTCDay(), mon = addDaysYmd(today, -(wd === 0 ? 6 : wd - 1));
     var cur = { from: mon, to: ptYmd(1) };
-    if (cur.to < cur.from || !workdaysBetween(cur.from, cur.to).length) cur = { from: addDaysYmd(mon, -7), to: addDaysYmd(mon, -3) };
-    var prev = { from: addDaysYmd(cur.from, -7), to: addDaysYmd(cur.from, -3) };
+    if (cur.to < cur.from || !workdaysBetween(cur.from, cur.to).length) cur = { from: addDaysYmd(mon, -7), to: addDaysYmd(mon, -1) };
+    var prev = { from: addDaysYmd(cur.from, -7), to: addDaysYmd(cur.from, -1) };
+    // days = Monday-Friday (team numbers and the day columns); all = every day, so weekend shifts count in agent scores.
     cur.days = workdaysBetween(cur.from, cur.to); prev.days = workdaysBetween(prev.from, prev.to);
+    cur.all = daysBetween(cur.from, cur.to); prev.all = daysBetween(prev.from, prev.to);
     return { cur: cur, prev: prev };
   }
-  function weekStats(days, recs) {
+  function weekStats(days, recs, allDays) {
     var have = days.filter(function (y) { return recs[y]; }), people = {};
     var tot = { answered: 0, abandoned: 0, talk: 0, outbound: 0 }, avgs = [];
     have.forEach(function (y) {
       var t = recs[y].team;
       tot.answered += t.answered || 0; tot.abandoned += t.abandoned || 0; tot.talk += t.talk || 0; tot.outbound += t.outbound || 0;
       if (t.avg !== null && t.avg !== undefined) avgs.push(t.avg);
+    });
+    (allDays || days).filter(function (y) { return recs[y]; }).forEach(function (y) {
       recs[y].agents.forEach(function (a) {
         if (a.unranked) return;   // not ranked that day: left out of the averages
         var k = normName(a.name), p = people[k] || (people[k] = { name: a.name, email: false, days: {}, lost: {}, answered: 0, outbound: 0, took: 0, late: 0, longLunch: 0 });
@@ -3642,7 +3648,7 @@
     var text = small ? "same" : fmt === "dur" ? (d > 0 ? "+" : "-") + fmtDur(Math.abs(d)) : fmt === "pct" ? (d > 0 ? "+" : "") + d.toFixed(1) + " pts" : (d > 0 ? "+" : "") + wkVal("n", d).replace("--", "-");
     return { text: text, cls: cls };
   }
-  function weekLabel(w) { return dayShort(w.days[0] || w.from) + " to " + dayShort(w.days[w.days.length - 1] || w.to); }
+  function weekLabel(w) { var d = w.all || w.days; return dayShort(d[0] || w.from) + " to " + dayShort(d[d.length - 1] || w.to); }
   function renderReport() {
     var R = report.data, cur = R.cur, prev = R.prev, v = function (x) { return x === null || x === undefined ? "<span class='muted'>n/a</span>" : esc(String(x)); };
     $("weekReportTitle").textContent = "Report: " + weekLabel(R.weeks.cur) + " vs " + weekLabel(R.weeks.prev);
@@ -3687,7 +3693,7 @@
       }).join("") || "<tr><td colspan='14' class='muted'>Nobody scored in these weeks.</td></tr>") + "</tbody></table></div>";
     var gaps = cur.days.concat(prev.days).filter(function (y) { return !R.recs[y]; }).map(dayShort);
     var partial = cur.days.concat(prev.days).filter(function (y) { return R.recs[y] && R.recs[y].partial; }).map(dayShort);
-    html += "<div class='wr-foot'>Weeks are Monday to Friday, Pacific; this week runs to yesterday (on a Monday the report compares last week with the week before). " +
+    html += "<div class='wr-foot'>Team numbers are Monday to Friday, Pacific; agent scores also count weekend shifts (the day count includes them). This week runs to yesterday (on a Monday the report compares last week with the week before). " +
       "Daily volumes are per-day averages over the days each week has, so a short week compares fairly. Scores use the same 100-point card as the board; supervisors and managers are left out. " +
       "Each finished day is saved once (boards do it automatically), because the server only keeps 8 days of agent snapshots. " +
       "Lowest day, Loses most on (scorecard part with the most points lost per day: Ready 25, RNA or email Pickup 10, Start 5, Lunch 5, Tickets 23, Tickets/hr 15, ES 5, CSAT 12), In/Out (queue calls answered / outbound dialed), Email (email and webform tickets taken), late starts and long lunches are for this week." +
@@ -3728,14 +3734,14 @@
       var j = await dayscoresApi("GET", "?from=" + W.prev.from + "&to=" + W.cur.to), recs = {};
       (j.days || []).forEach(function (x) { recs[String(x.day).slice(0, 10)] = x.data; });
       // Days still on the server but not saved yet, or saved under older scoring rules: rebuild and save them now.
-      var todo = W.cur.days.concat(W.prev.days).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 10) && backOf(y) >= 1 && backOf(y) <= 7; });
+      var todo = W.cur.all.concat(W.prev.all).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 10) && backOf(y) >= 1 && backOf(y) <= 7; });
       for (var i = 0; i < todo.length; i++) {
         body.innerHTML = "<div class='muted' style='padding:12px 0'>Rebuilding " + esc(dayShort(todo[i])) + " (" + (i + 1) + " of " + todo.length + ") from the server's snapshots…</div>";
         var d = null; try { d = await buildDay(backOf(todo[i])); } catch (e) { d = null; }
         var rec = dayRecord(todo[i], d);
         if (rec) { recs[todo[i]] = rec; try { await dayscoresApi("POST", "", { days: [{ day: todo[i], data: rec }] }); } catch (e) {} }
       }
-      report.data = { weeks: W, recs: recs, cur: weekStats(W.cur.days, recs), prev: weekStats(W.prev.days, recs) }; report.day = ptYmd(0);
+      report.data = { weeks: W, recs: recs, cur: weekStats(W.cur.days, recs, W.cur.all), prev: weekStats(W.prev.days, recs, W.prev.all) }; report.day = ptYmd(0);
       renderReport();
     } catch (e) { body.innerHTML = "<div class='muted'>Couldn't build the report: " + esc(e.message) + "</div>"; }
     finally { report.loading = false; }
