@@ -272,6 +272,11 @@
   .wr-table td.wrap { white-space: normal; text-align: left; }
   .wr-table th { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
   .wr-foot { color: var(--ink-3); font-size: 12px; margin-top: 10px; line-height: 1.45; }
+  /* Agent scores: fits the dialog without a sideways scroll bar (2026-10-30). Headers wrap, cells are tighter, and the
+     two text columns stack their detail under the value. */
+  .wr-agents th { white-space: normal; vertical-align: bottom; line-height: 1.2; }
+  .wr-agents th, .wr-agents td { padding: 6px 5px; }
+  .wr-agents td .sub2 { display: block; font-size: 11px; color: var(--ink-3); font-weight: 400; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -480,7 +485,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 6.2<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 6.3<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -3454,7 +3459,10 @@
     var agents = names.map(function (k) { return { k: k, c: cur.people[k], p: prev.people[k] }; })
       .sort(function (a, b) { return (b.c ? b.c.avg : -1) - (a.c ? a.c.avg : -1) || (b.p ? b.p.avg : -1) - (a.p ? a.p.avg : -1); });
     R.agents = agents;
-    html += "<div class='wr-sub'>Agent scores</div><div class='table-wrap'><table class='wr-table'><thead><tr><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th>" +
+    // Last week includes days converted from the old scorecard (saved data.approx): marked ≈ and explained below.
+    var approxDays = cur.days.concat(prev.days).filter(function (y) { return R.recs[y] && R.recs[y].approx; });
+    var prevApprox = prev.days.some(function (y) { return R.recs[y] && R.recs[y].approx; });
+    html += "<div class='wr-sub'>Agent scores</div><div class='table-wrap'><table class='wr-table wr-agents'><thead><tr><th>Agent</th><th>This week</th><th>Last week" + (prevApprox ? " ≈" : "") + "</th><th>Change</th>" +
       cur.days.map(function (y) { return "<th>" + esc(dayShort(y)) + "</th>"; }).join("") +
       "<th>Lowest day</th><th>Loses most on</th><th>In/Out</th><th>Email</th><th>Late starts</th><th>Long lunches</th></tr></thead><tbody>" +
       (agents.map(function (x) {
@@ -3465,8 +3473,8 @@
           "<td>" + grade(p ? p.avg : null) + (p ? " <span class='muted tiny'>" + p.n + "d</span>" : "") + "</td>" +
           "<td class='" + ch.cls + "'>" + esc(ch.text) + "</td>" +
           cur.days.map(function (y) { var sc = c ? c.days[y] : undefined; return "<td>" + (sc === undefined ? "<span class='muted'>–</span>" : "<span class='" + scoreGrade(sc) + "'>" + Math.round(sc) + "</span>") + "</td>"; }).join("") +
-          "<td>" + (c && c.n > 1 ? Math.round(c.low.score) + " <span class='muted tiny'>" + esc(dayShort(c.low.ymd)) + "</span>" : "<span class='muted'>–</span>") + "</td>" +
-          "<td>" + (c && c.worst ? esc(c.worst.part) + " <span class='muted tiny'>-" + c.worst.perDay.toFixed(1) + "/day</span>" : "<span class='muted'>" + (c ? "nothing" : "–") + "</span>") + "</td>" +
+          "<td>" + (c && c.n > 1 ? Math.round(c.low.score) + "<span class='sub2'>" + esc(dayShort(c.low.ymd)) + "</span>" : "<span class='muted'>–</span>") + "</td>" +
+          "<td>" + (c && c.worst ? esc(c.worst.part) + "<span class='sub2'>-" + c.worst.perDay.toFixed(1) + "/day</span>" : "<span class='muted'>" + (c ? "nothing" : "–") + "</span>") + "</td>" +
           "<td>" + (!c ? "<span class='muted'>–</span>" : c.email ? "<span class='muted'>–</span>" : c.answered + "/" + c.outbound) + "</td><td>" + (c ? c.took || "<span class='muted'>0</span>" : "<span class='muted'>–</span>") + "</td>" +
           "<td>" + (c && c.late ? "<span class='warmn'>" + c.late + "</span>" : "<span class='muted'>0</span>") + "</td>" +
           "<td>" + (c && c.longLunch ? "<span class='warmn'>" + c.longLunch + "</span>" : "<span class='muted'>0</span>") + "</td></tr>";
@@ -3478,7 +3486,9 @@
       "Each finished day is saved once (boards do it automatically), because the server only keeps 8 days of agent snapshots. " +
       "Lowest day, Loses most on (scorecard part with the most points lost per day: Ready 25, RNA or email Pickup 10, Start 12, Lunch 8, Tickets 20, Tickets/hr 10, ES 5, CSAT 10), In/Out (queue calls answered / outbound dialed), Email (email and webform tickets taken), late starts and long lunches are for this week." +
       (gaps.length ? " No saved scores for " + esc(gaps.join(", ")) + " (before saving started, or no snapshots left)." : "") +
-      (partial.length ? " Partial day (tracking started late): " + esc(partial.join(", ")) + "." : "") + "</div>";
+      (partial.length ? " Partial day (tracking started late): " + esc(partial.join(", ")) + "." : "") +
+      (approxDays.length ? " ≈ Estimated: " + esc(approxDays.map(dayShort).join(", ")) + " were scored before the current scorecard and could only be converted from their saved points" +
+        " (Tickets/hr not judged, Ready and Tickets estimated), because those days' snapshots are no longer kept. Every other day uses the current scorecard." : " Every day uses the current scorecard.") + "</div>";
     $("weekReportBody").innerHTML = html;
   }
   function reportText() {
