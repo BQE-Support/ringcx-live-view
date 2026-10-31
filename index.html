@@ -480,7 +480,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 5.99<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 6.0<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -4132,9 +4132,11 @@
   }
   function unrankTag(r, controls) {
     var u = r.unranked, mgr = controls && isManagerViewer();
-    if (u) return " <span class='chip info' title='" + esc("Excluded from ranking: " + u.reason + " (" + u.reviewer_name + ", " + fmtClock(Date.parse(u.created_at)) + ")") + "'>Excluded from ranking</span>" +
-      (mgr ? " <a href='#' class='muted tiny' data-unrank-undo='" + u.id + "' title='Put them back in the ranking'>undo</a>" : "");
-    return mgr && !r.sup ? " <a href='#' class='muted tiny' data-unrank='" + esc(r.name) + "' title='Exclude them from today&#39;s ranking (managers only; a note is required)'>exclude from ranking</a>" : "";
+    if (u) {
+      var tip = "Excluded from ranking: " + u.reason + " (" + u.reviewer_name + ", " + fmtClock(Date.parse(u.created_at)) + ")" + (mgr ? ". Click to put them back." : "");
+      return mgr ? " <a href='#' class='chip info' data-unrank-undo='" + u.id + "' title='" + esc(tip) + "'>Excluded</a>" : " <span class='chip info' title='" + esc(tip) + "'>Excluded</span>";
+    }
+    return mgr && !r.sup ? " <a href='#' class='muted' data-unrank='" + esc(r.name) + "' title='Exclude from ranking (managers only; a note is required)' aria-label='Exclude from ranking'>×</a>" : "";
   }
   async function unrankAgent(name) {
     var note = window.prompt("Why exclude " + name + " from today's ranking? (required, for example \"Assigned to training\")", "");
