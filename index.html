@@ -485,7 +485,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 6.3<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 6.4<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -2279,6 +2279,10 @@
       });
       html += "</ul>"; text += "\n";
     });
+    copyRich(btn, html, text);
+  }
+  // Copies links as rich text (pastes as links in Teams / Outlook) with a plain-text copy alongside.
+  async function copyRich(btn, html, text) {
     var ok = false;
     try {
       await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([text], { type: "text/plain" }) })]);
@@ -2952,12 +2956,31 @@
       (t.waiting ? " <span class='muted tiny'>(" + t.waiting + ")</span>" : "") + "</a>";
   }
   var tkOpen = {};   // name -> true: ticket list shown under their row
+  var tkCopy = {};   // name -> { name, rows }: the late tickets in the list last drawn for them
+  function tkCopyLinks(btn, k) {
+    var c = tkCopy[k]; if (!c || !c.rows.length) return;
+    var n = c.rows.length, head = c.name + ": " + n + " late ticket" + (n === 1 ? "" : "s");
+    var html = "<p><b>" + esc(c.name) + "</b>: " + n + " late ticket" + (n === 1 ? "" : "s") + "</p><ul>", text = head + "\n";
+    c.rows.forEach(function (x) {
+      html += "<li><a href='" + esc(x.url) + "'>" + esc(x.label) + "</a> " + esc(x.subject) + " (" + esc(x.state) + ", " + esc(x.status) + ")</li>";
+      text += "  " + x.label + " " + x.subject + " (" + x.state + ", " + x.status + ") " + x.url + "\n";
+    });
+    copyRich(btn, html + "</ul>", text);
+  }
   function ticketListHtml(r, asOf) {
     var t = r.tk; if (!t) return "";
     var zd = "https://bqe.zendesk.com/agent/tickets/", es = "https://bqetrack.atlassian.net/browse/";
     var lateKeys = {}; t.late.forEach(function (l) { lateKeys[l.x.src + l.x.id] = l; });
     var list = t.mine.slice().sort(function (a, b) { return a.entered - b.entered; });
-    return "<div class='section-title' style='font-size:15px'>Tickets waiting on " + esc(r.name) + " <span class='sub'>" + t.late.length + " past deadline · " + t.waiting + " waiting now</span></div>" +
+    // Copy late tickets (2026-10-30): the rows marked late, as links, to paste into a Teams chat or email to the agent.
+    var lateRows = list.filter(function (x) { var l = lateKeys[x.src + x.id]; return l && l.x === x; }).map(function (x) {
+      var l = lateKeys[x.src + x.id], still = x.last >= asOf - 15 * 60000;
+      return { url: (x.src === "es" ? es : zd) + x.id, label: x.src === "es" ? String(x.id) : "#" + x.id, subject: x.subject || "", state: x.label,
+        status: (still ? "late, still waiting" : "handled late") + (l.bad ? " (2+ days)" : "") };
+    });
+    tkCopy[normName(r.name)] = { name: r.name, rows: lateRows };
+    return "<div class='section-title' style='font-size:15px'>Tickets waiting on " + esc(r.name) + " <span class='sub'>" + t.late.length + " past deadline · " + t.waiting + " waiting now</span>" +
+      (lateRows.length ? " <button class='btn' style='margin-left:auto;padding:2px 10px;font-size:12px' data-tk-copy='" + esc(normName(r.name)) + "' title='Copy the late tickets as links, to paste into Teams or an email'>Copy late ticket links</button>" : "") + "</div>" +
       "<div class='table-wrap'><table><thead><tr><th>Ticket</th><th>State</th><th>Waiting since</th><th>Deadline (end of next shift)</th><th>Result</th><th>Subject</th></tr></thead><tbody>" +
       (list.map(function (x) {
         var l = lateKeys[x.src + x.id], dl = shiftDeadline(r.name, tkStart(x)), still = x.last >= asOf - 15 * 60000;
@@ -4639,6 +4662,8 @@
       return;
     }
     if (ev.target.closest("a.alert[href='#esPanel']")) $("esPanel").open = true;   // jump to the ES section, unfolded
+    var tkc = ev.target.closest("[data-tk-copy]");
+    if (tkc) { ev.preventDefault(); tkCopyLinks(tkc, tkc.getAttribute("data-tk-copy")); return; }
     var esb = ev.target.closest("[data-es-copy]");
     if (esb) { ev.preventDefault(); esCopy(esb, esb.getAttribute("data-es-copy")); return; }
     if (ev.target.closest("[data-inline-close]")) { ev.preventDefault(); inline = null; render(); return; }
