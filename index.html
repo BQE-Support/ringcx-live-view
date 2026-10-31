@@ -485,7 +485,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 6.9<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.0<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -1019,6 +1019,14 @@
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
       var polls = j.polls || [], fields = j.fields || [];
+      // Overnight shifts: before noon their shift began yesterday afternoon or evening, so replay those snapshots first.
+      if (Object.keys(SHIFT_BLOCKS).length && shiftDayOf(Date.now()) < ptYmd(0)) {
+        try {
+          var ry = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/history?day=" + ptYmd(1), { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+          var jy = await ry.json().catch(function () { return {}; });
+          if (ry.ok) polls = overnightPolls(jy.polls || [], jy.fields || [], fields, shiftWindow(ptYmd(1)).from, Infinity).concat(polls);
+        } catch (e) { /* their row starts at midnight until this works */ }
+      }
       if (!polls.length) { serverHist.err = "no server snapshots yet"; return; }
       var firstTs = Date.parse(polls[0].ts);
       // Only replace this browser's history if the server's goes back further.
@@ -1069,6 +1077,24 @@
     return +v.slice(0, 2) * 60 + +v.slice(3, 5) - (dst ? 0 : 60);
   }
   function ymdIsDST(ymd) { return /-07/.test(ptMidnightIsoOf(ymd).slice(-5)); }
+  // Overnight shifts count in the Pacific day they start (Fred, 2026-10-30). Every SHIFT_BLOCKS shift starts after noon
+  // and ends before the next noon, so for these people a "day" runs noon to noon: their history, calls, ticket work and
+  // ticket waits are all taken from that window, on the live board and on past days.
+  function isOvernight(name) { return !!shiftBlocksFor(name); }
+  function shiftDayOf(ms) { return ymdOfMs(ms - 12 * 3600000); }
+  function currentShiftYmd() { return hist.scoreYmd || shiftDayOf(Date.now()); }
+  function shiftWindow(ymd) { return { from: Date.parse(ptMidnightIsoOf(ymd)) + 12 * 3600000, to: Date.parse(ptMidnightIsoOf(addDaysYmd(ymd, 1))) + 12 * 3600000 }; }
+  function overnightNames() { return Object.keys(SHIFT_BLOCKS).map(normName); }
+  // Snapshots kept to the overnight agents only, between from and to (ms), re-keyed to the fields order "want".
+  function overnightPolls(polls, have, want, from, to) {
+    var iF = have.indexOf("firstName"), iL = have.indexOf("lastName"), names = overnightNames();
+    return polls.filter(function (q) { var ts = Date.parse(q.ts); return ts >= from && ts < to; }).map(function (q) {
+      var rows = (q.a || []).filter(function (r) { return names.indexOf(normName((r[iF] || "") + " " + (r[iL] || ""))) >= 0; })
+        .map(function (r) { return want.map(function (f) { var i = have.indexOf(f); return i < 0 ? null : r[i]; }); });
+      return { ts: q.ts, a: rows };
+    }).filter(function (q) { return q.a.length; });
+  }
+  function isOvernightCall(r) { return isOvernight(firstLast(r.connected_name || "")); }
   // Temporary schedules the roster doesn't show yet (Smartsheet can't be edited right now). Each lapses on its own
   // after "until" (Pacific date). Times are Pacific "HH:MM"; omit a field to keep the roster value.
   var SCHEDULE_OVERRIDES = {
@@ -1350,6 +1376,15 @@
   function loginInfo(h, s, day) {
     var keys = sessionKeys(h);
     if (!keys.length) return null;
+    var ovB = shiftBlocksFor(h.name);
+    if (ovB) {   // overnight: their history holds just this shift; compare the first login with the shift day's start
+      var sd = currentShiftYmd(), base = Date.parse(ptMidnightIsoOf(sd)), tot = 0, ls = 0;
+      if (h.shiftDay && h.shiftDay !== sd) return null;   // that was an earlier shift; this one hasn't started
+      keys.forEach(function (k) { tot += h.sessions[k].login || 0; ls = Math.max(ls, h.sessions[k].seen || 0); });
+      var fm = Math.round((dtsMs(keys[0]) - base) / 60000), st = blockStart(ovB, new Date(sd + "T12:00:00Z").getUTCDay(), ymdIsDST(sd));
+      return { keys: keys, first: fm, total: tot, lastSeen: Math.max(ls, h.lastSeen || 0), start: st, hidden: false, conf: "confirmed",
+        eve: !hist.scoreYmd && sd < ptYmd(0), logins: keys.length, late: st !== null ? fm - st : null };
+    }
     var first = dtsMinutes(keys[0]), total = 0, lastSeen = 0;
     keys.forEach(function (k) { total += h.sessions[k].login || 0; lastSeen = Math.max(lastSeen, h.sessions[k].seen || 0); });
     lastSeen = Math.max(lastSeen, h.lastSeen || 0);   // last refresh that still had them logged in
@@ -1657,7 +1692,11 @@
 
   function observe(agents, fetchedAt, noSave) {
     purgeL2Logins();
-    if (hist.day !== todayKey()) hist = { day: todayKey(), since: fetchedAt, agents: {} };
+    if (hist.day !== todayKey()) {
+      hist = { day: todayKey(), since: fetchedAt, agents: {} };
+      // An overnight shift running through the reset: refill it from the server (yesterday's evening snapshots).
+      if (!noSave && Object.keys(SHIFT_BLOCKS).length) setTimeout(function () { loadHistory(true); }, 3000);
+    }
     // The whole day is kept (the history resets at midnight): the Email Support credit needs each person's RingCX
     // status at any minute of the day (Fred, 2026-10-16). It used to keep 10 hours.
     var keepAfter = 0;
@@ -1672,7 +1711,10 @@
       var start = asOf - (a.stateTime || 0) * 1000;
       var b = isOnCall(a) ? "ONCALL" : base(a);
       var label = stateLabel(a);
+      var ovSd = isOvernight(fullName(a)) ? shiftDayOf(fetchedAt) : null;   // overnight: noon-to-noon shift day
+      if (ovSd && hist.agents[id] && hist.agents[id].shiftDay && hist.agents[id].shiftDay !== ovSd) delete hist.agents[id];
       var h = hist.agents[id] || (hist.agents[id] = { ev: [] });
+      if (ovSd) { h.shiftDay = ovSd; var cdy = ymdOfMs(fetchedAt); (h.rnaDays = h.rnaDays || {})[cdy] = Math.max(h.rnaDays[cdy] || 0, a.rna || 0); }
       // RNA rings (2026-10-27): RingCX's RNA count is a day total, so each rise between two refreshes is a ring this
       // agent didn't answer. Kept so the status list can show each one (rnaRings() matches it to the call report).
       // end = when their status timer restarted after the ring, if it did between the two refreshes.
@@ -2490,6 +2532,16 @@
         .map(function (r) { r.source_name = queueLabel(r.source_name); return r; });
       abandons.rows = abandons.all.filter(function (r) { return (r.call_result === "ABANDON" && r.source_type === "ACD-INBOUND") || hungUpRinging(r); })
         .sort(function (a, b) { return String(b.call_start_dts).localeCompare(String(a.call_start_dts)); });
+      // Overnight shifts: before noon, their calls since yesterday noon count too.
+      if (Object.keys(SHIFT_BLOCKS).length && shiftDayOf(Date.now()) < ptYmd(0)) {
+        if (!abandons.prevAt || Date.now() - abandons.prevAt > 10 * 60000) {
+          try {
+            var pcsv = await api("reportsStreaming", { reportType: "GLOBAL_CALL_TYPE_DELIMITED",
+              reportCriteria: { criteriaType: "GLOBAL_CALL_TYPE_CRITERIA", startDate: ptMidnightIsoOf(ptYmd(1)).replace("T00:00:00", "T12:00:00"), endDate: ptMidnightIso(), containGates: true, containAgents: true, includeNoAnswers: true } });
+            abandons.prev = parseCsv(pcsv).filter(isOvernightCall); abandons.prevAt = Date.now();
+          } catch (e) { /* tried again next refresh */ }
+        }
+      } else { abandons.prev = null; abandons.prevAt = 0; }
       abandons.at = Date.now(); abandons.err = null;
     } catch (e) {
       abandons.err = e.status === 403 ? "Your RingCX user can't read call detail reports (HTTP 403)." : "Couldn't load call detail (" + e.message + ").";
@@ -2512,28 +2564,30 @@
   // their own talk time. The report alone credits the whole call to the first agent.
   var callIdx = { at: -2, legsVer: -1, map: {} };
   function callIndex() {
-    if (callIdx.at !== abandons.at || callIdx.legsVer !== rsLegsVer) {
+    if (callIdx.at !== abandons.at || callIdx.legsVer !== rsLegsVer || callIdx.sd !== currentShiftYmd()) {
       var map = {}, done = {}, out = {};
       // Outbound calls they dialed today (RingCX manual dials), counted apart from queue calls (2026-10-23).
       (abandons.all || []).forEach(function (r) {
         if (r.source_type !== "MANUAL OUTBOUND" || !r.connected_name) return;
         (out[r.connected_name] = out[r.connected_name] || {})[r.UII] = 1;
       });
-      function credit(name, uii, talk, ptMin) {
+      var curSd = currentShiftYmd();
+      function credit(name, uii, talk, ptMin, tms) {
+        if (isOvernight(firstLast(name)) && isFinite(tms) && shiftDayOf(tms) !== curSd) return;   // another shift's call
         var c = map[name] || (map[name] = { uiis: {}, talk: 0, first: null });
         if (!c.uiis[uii]) { c.uiis[uii] = 1; c.talk += talk; }
         if (ptMin !== null && ptMin >= 0 && (c.first === null || ptMin < c.first)) c.first = ptMin;
       }
-      (abandons.all || []).forEach(function (r) {
+      (abandons.all || []).concat(abandons.prev || []).forEach(function (r) {
         if (r.source_type !== "ACD-INBOUND" || !r.connected_name || done[r.UII] || hungUpRinging(r)) return;
         done[r.UII] = 1;
         var legs = transferLegs(r);
-        if (legs) { legs.forEach(function (l) { credit(lastFirst(l.name), r.UII, l.dur, ptMinutes(Date.parse(l.start))); }); return; }
+        if (legs) { legs.forEach(function (l) { credit(lastFirst(l.name), r.UII, l.dur, ptMinutes(Date.parse(l.start)), Date.parse(l.start)); }); return; }
         // Earliest moment they were on a queue call today (Pacific minutes): proof they were logged in by then.
         var m = /(\d+):(\d+):\d+$/.exec(String(r.connected_dts || r.call_start_dts || ""));
-        credit(r.connected_name, r.UII, +r.connected_duration || 0, m ? (+m[1] - 3) * 60 + +m[2] : null);
+        credit(r.connected_name, r.UII, +r.connected_duration || 0, m ? (+m[1] - 3) * 60 + +m[2] : null, etMs(r.connected_dts || r.call_start_dts));
       });
-      callIdx = { at: abandons.at, legsVer: rsLegsVer, map: map, out: out };
+      callIdx = { at: abandons.at, legsVer: rsLegsVer, sd: curSd, map: map, out: out };
     }
     return callIdx.map;
   }
@@ -2608,7 +2662,13 @@
   async function loadWaits() {
     if (waits.loading || !session || !CONFIG.SUPABASE_URL) return;
     waits.loading = true;
-    try { var w = await fetchWaits(""); waits.rows = w.rows; waits.avail = w.avail; waits.work = w.work; waits.workTimed = w.workTimed; waits.es = w.es; waits.csat = w.csat; waits.at = Date.now(); waits.err = null; }
+    try {
+      var w = await fetchWaits(""); waits.rows = w.rows; waits.avail = w.avail; waits.work = w.work; waits.workTimed = w.workTimed; waits.es = w.es; waits.csat = w.csat; waits.at = Date.now(); waits.err = null;
+      // Overnight shifts: before noon, yesterday's checks hold the start of their shift (refetched every 10 minutes).
+      if (Object.keys(SHIFT_BLOCKS).length && shiftDayOf(Date.now()) < ptYmd(0)) {
+        if (!waits.other || Date.now() - waits.other.at > 10 * 60000) { var wo = await fetchWaits(ptYmd(1)); waits.other = { rows: wo.rows, work: wo.work, at: Date.now() }; }
+      } else waits.other = null;
+    }
     catch (e) { waits.err = e.message; }
     finally { waits.loading = false; if (data.fetchedAt) render(); }
   }
@@ -2698,7 +2758,7 @@
   function ticketTimeliness2(name, asOf) {
     if (!waits.rows) return null;
     var byT = {}, mine = [];
-    waits.rows.forEach(function (x) {
+    (isOvernight(name) && waits.other && waits.other.rows ? waits.rows.concat(waits.other.rows) : waits.rows).forEach(function (x) {
       if (!x.entered || !waitIsFor(name, x)) return;
       mine.push(x);
       if (!onHoldCounts(x, asOf)) return;
@@ -2766,7 +2826,8 @@
       v.start = p.start === 12 ? W.start : (p.start === 6 ? 3 : 0);
       v.lunch = p.lunch === 8 ? W.lunch : (p.lunch === 4 ? 3 : 0);
       v.csat = r.csat && r.csat.frac != null ? Math.round(W.csat * r.csat.frac) : W.csat;
-      r.tk = ticketTimeliness2(r.name, asOf); v.tickets = r.tk ? r.tk.pts : W.tickets;
+      var tkAsOf = isOvernight(r.name) && hist.scoreYmd ? Math.min(Date.now(), shiftWindow(hist.scoreYmd).to) : asOf;
+      r.tk = ticketTimeliness2(r.name, tkAsOf); v.tickets = r.tk ? r.tk.pts : W.tickets;
       r.es2 = es2For(r.name); v.es = r.es2 ? r.es2.pts : 5;
       r.parts = v;
     });
@@ -2848,7 +2909,33 @@
     });
     return out;
   }
+  // Overnight agents: their ticket work inside the noon-to-noon window, from the timed events zdwatch keeps (days from
+  // 2026-10-31 on). Days recorded before that have no times, so they keep the calendar day's counts.
+  function overnightWork(name) {
+    var win = shiftWindow(currentShiftYmd()), ev = [];
+    (waits.work || []).concat((waits.other && waits.other.work) || []).forEach(function (r) {
+      if (waitIsFor(name, { name: r[0], email: r[1] })) (r[10] || []).forEach(function (x) { ev.push(x); });
+    });
+    if (!ev.length) return null;
+    var tk = {};
+    ev.forEach(function (x) {
+      if (x[3] * 1000 < win.from || x[3] * 1000 >= win.to) return;
+      var o = tk[x[0]] || (tk[x[0]] = { id: x[0], origin: x[1], old: x[4], took: 0, replies: 0, solved: 0 });
+      if (x[2] === "take") o.took = 1; else if (x[2] === "reply") o.replies++; else o.solved = 1;
+    });
+    var out = { email: 0, web: 0, tookEmail: 0, tookWeb: 0, followups: 0, fuList: [], ewList: [] };
+    Object.keys(tk).forEach(function (k) {
+      var o = tk[k], ew = o.origin === "email" || o.origin === "webform", worked = o.replies || o.solved;
+      if (ew) {
+        if (o.took) { if (o.origin === "email") out.tookEmail++; else out.tookWeb++; }
+        if (worked) { if (o.origin === "email") out.email++; else out.web++; }
+        out.ewList.push([o.id, o.origin, o.took, o.replies, o.solved, ""]);
+      } else if (o.origin === "phone" && o.old && worked) { out.followups++; out.fuList.push([o.id, o.replies, o.solved, ""]); }
+    });
+    return out;
+  }
   function workFor(name) {
+    if (isOvernight(name)) { var ow = overnightWork(name); if (ow) return ow; }
     var w = waits.work; if (!w) return null;
     var hit = w.filter(function (r) { return waitIsFor(name, { name: r[0], email: r[1] }); });
     // followups stays null for a day saved before follow-ups were tracked (the server sends null).
@@ -3059,8 +3146,10 @@
     var people = {};
     Object.keys(hist.agents).forEach(function (id) {
       var h = hist.agents[id]; if (!h.name) return;
+      if (isOvernight(h.name) && h.shiftDay && h.shiftDay !== currentShiftYmd()) return;   // their last shift belongs to another day
       var login = 0, rna = 0;
       Object.keys(h.sessions || {}).forEach(function (k) { login += h.sessions[k].login; rna = Math.max(rna, h.sessions[k].rna || 0); });
+      if (h.rnaDays) rna = Object.keys(h.rnaDays).reduce(function (s, d) { return s + h.rnaDays[d]; }, 0);   // overnight: one count per calendar day
       people[h.name] = { id: id, name: h.name, sup: h.sup, login: login, rna: Math.max(0, rna - rnaExcused(h)), ready: h.readySec || 0, seen: h.seenSec || 0, off: h.offSec || 0 };
     });
     // Live session values are fresher than history for anyone logged in right now.
@@ -3075,9 +3164,10 @@
       var answered = Object.keys(c.uiis).length;
       // Same totals the Agents table shows for anyone logged in right now.
       var live = data.agents.filter(function (x) { return fullName(x) === n; })[0];
-      if (live) { var ds = dayStats(live); answered = ds.calls; c = { uiis: c.uiis, talk: ds.talk }; p.rna = ds.rna; p.login = ds.login; }
+      // (Overnight agents skip both: RingCX's day totals reset at midnight, halfway through their shift.)
+      if (live && !isOvernight(n)) { var ds = dayStats(live); answered = ds.calls; c = { uiis: c.uiis, talk: ds.talk }; p.rna = ds.rna; p.login = ds.login; }
       // Logged-in time: RingCX's own total for the whole day (every session), when it's higher than what this page saw.
-      p.login = Math.max(p.login, (hist.agents[p.id] || {}).dayLogin || 0);
+      if (!isOvernight(n)) p.login = Math.max(p.login, (hist.agents[p.id] || {}).dayLogin || 0);
       p.sup = isSupervisorName(n, p.sup);   // by name too: a history entry can miss the flag
       if ((CONFIG.MANAGER_IDS || []).indexOf(String(p.id)) >= 0) return;   // managers are never ranked
       if ((CONFIG.NOT_RANKED_IDS || []).indexOf(String(p.id)) >= 0) return;
@@ -3224,20 +3314,21 @@
     var m = /GMT([+-])(\d+)/.exec((p.filter(function (x) { return x.type === "timeZoneName"; })[0] || {}).value || "GMT-8");
     return ymd + "T00:00:00.000" + (m ? m[1] : "-") + String(m ? m[2] : 8).padStart(2, "0") + "00";
   }
-  function scoreDay(ymd, fields, polls, calls, dayWaits, dayUnrank) {
+  function scoreDay(ymd, fields, polls, calls, dayWaits, dayUnrank, extra) {
+    extra = extra || { polls: [], calls: [], other: null };
     if (!polls.length) return { empty: true };
     var saved = { hist: hist, abandons: abandons, agents: data.agents, loginByName: loginByName, intervalSec: intervalSec, waits: waits, unrank: unrankOverride };
     unrankOverride = dayUnrank || [];
-    waits = { rows: dayWaits && dayWaits.rows, avail: dayWaits && dayWaits.avail, work: dayWaits && dayWaits.work, workTimed: !!(dayWaits && dayWaits.workTimed), es: dayWaits && dayWaits.es, csat: dayWaits && dayWaits.csat };   // that day's server checks (null = not tracked yet that day)
+    waits = { rows: dayWaits && dayWaits.rows, avail: dayWaits && dayWaits.avail, work: dayWaits && dayWaits.work, workTimed: !!(dayWaits && dayWaits.workTimed), es: dayWaits && dayWaits.es, csat: dayWaits && dayWaits.csat, other: extra.other };   // that day's server checks (null = not tracked yet that day); other = next morning (overnight)
     try {
       intervalSec = 60;   // the snapshots' cadence
       var t0 = Date.parse(polls[0].ts), t1 = Date.parse(polls[polls.length - 1].ts);
-      hist = { day: todayKey(), since: t0, agents: {}, source: "server", endAt: t1 + 60000, keepAll: true };
-      polls.forEach(function (p) {
+      hist = { day: todayKey(), since: t0, agents: {}, source: "server", endAt: t1 + 60000, keepAll: true, scoreYmd: ymd };
+      polls.concat(extra.polls).forEach(function (p) {
         observe((p.a || []).map(function (row) { var o = {}; fields.forEach(function (f, i) { o[f] = row[i]; }); return o; }), Date.parse(p.ts), true);
       });
       data.agents = [];   // nobody is "live" on a finished day
-      abandons = { all: calls, at: -Date.now() };   // a key callIndex() hasn't seen, so it rebuilds from this day's calls
+      abandons = { all: calls.concat(extra.calls), at: -Date.now() };   // a key callIndex() hasn't seen, so it rebuilds from this day's calls
       var sched = {}, wd = new Date(ymd + "T12:00:00Z").getUTCDay();
       (pto.schedule || []).forEach(function (s) { sched[normName(s.name)] = s; });
       loginByName = {};
@@ -3295,7 +3386,21 @@
       var ur = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/reviews?day=" + ymd, { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
       var uj = await ur.json().catch(function () { return {}; }); if (ur.ok) dayUnrank = uj.reviews || [];
     } catch (e) { dayUnrank = []; }
-    yd.cache[ymd] = scoreDay(ymd, j.fields || [], j.polls || [], calls, dayWaits, dayUnrank);
+    // Overnight shifts count in the day they start: add the next morning (to noon) for those agents.
+    var extra = { polls: [], calls: [], other: null }, nx = ptYmd(back - 1);
+    if (Object.keys(SHIFT_BLOCKS).length && back >= 1) {
+      try {
+        var win = shiftWindow(ymd);
+        var rn = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/history?day=" + nx, { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+        var jn = await rn.json().catch(function () { return {}; });
+        if (rn.ok) extra.polls = overnightPolls(jn.polls || [], jn.fields || [], j.fields || [], to, win.to);
+        var ncsv = await api("reportsStreaming", { reportType: "GLOBAL_CALL_TYPE_DELIMITED",
+          reportCriteria: { criteriaType: "GLOBAL_CALL_TYPE_CRITERIA", startDate: ptMidnightIsoOf(nx), endDate: ptMidnightIsoOf(nx).replace("T00:00:00", "T12:00:00"), containGates: true, containAgents: true, includeNoAnswers: true } });
+        extra.calls = parseCsv(ncsv).filter(isOvernightCall).map(function (c) { c.source_name = queueLabel(c.source_name); return c; });
+        var wn = await fetchWaits(nx); extra.other = { rows: wn.rows, work: wn.work };
+      } catch (e) { /* scored on the calendar day if the next morning can't be read */ }
+    }
+    yd.cache[ymd] = scoreDay(ymd, j.fields || [], j.polls || [], calls, dayWaits, dayUnrank, extra);
     return yd.cache[ymd];
   }
 
@@ -3329,7 +3434,7 @@
     var rows = d.rows.concat(d.email || []).filter(function (r) { return !r.sup; });
     var scores = rows.filter(function (r) { return !r.unranked; }).map(function (r) { return r.score; });
     return {
-      v: 9, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
+      v: 10, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
       team: { answered: d.answered, abandoned: d.abandoned, talk: Math.round(d.talk), outbound: rows.reduce(function (t, r) { return t + (r.outbound || 0); }, 0),
         scored: rows.length, avg: scores.length ? scores.reduce(function (t, v) { return t + v; }, 0) / scores.length : null },
       agents: rows.map(function (r) {
@@ -3357,7 +3462,8 @@
   async function saveMissingDays(have) {
     // v 6 = the current scorecard (Tickets/hr scored, straight-line Ready, handled tickets count, email aliases, 2026-10-30); days saved under older rules are rebuilt and saved
     // again while snapshots last.
-    var missing = workdaysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 9; });
+    var missing = workdaysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 10; })
+      .filter(function (y) { return !(Object.keys(SHIFT_BLOCKS).length && y === ptYmd(1) && shiftDayOf(Date.now()) < ptYmd(0)); });   // yesterday's overnight shift may still be running
     for (var i = 0; i < missing.length; i++) {
       var d = null;
       try { d = await buildDay(backOf(missing[i])); } catch (e) { d = null; }
@@ -3371,7 +3477,7 @@
   async function autoSaveDays() {
     var today = ptYmd(0);
     if (autoSave.running || autoSave.done === today || !session || !CONFIG.SUPABASE_URL || document.hidden) return;
-    var key = "rcxLiveView.daysSaved.v9";
+    var key = "rcxLiveView.daysSaved.v10";
     try { if (localStorage.getItem(key) === today) { autoSave.done = today; return; } } catch (e) {}
     autoSave.running = true;
     try {
@@ -3622,7 +3728,7 @@
       var j = await dayscoresApi("GET", "?from=" + W.prev.from + "&to=" + W.cur.to), recs = {};
       (j.days || []).forEach(function (x) { recs[String(x.day).slice(0, 10)] = x.data; });
       // Days still on the server but not saved yet, or saved under older scoring rules: rebuild and save them now.
-      var todo = W.cur.days.concat(W.prev.days).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 9) && backOf(y) >= 1 && backOf(y) <= 7; });
+      var todo = W.cur.days.concat(W.prev.days).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 10) && backOf(y) >= 1 && backOf(y) <= 7; });
       for (var i = 0; i < todo.length; i++) {
         body.innerHTML = "<div class='muted' style='padding:12px 0'>Rebuilding " + esc(dayShort(todo[i])) + " (" + (i + 1) + " of " + todo.length + ") from the server's snapshots…</div>";
         var d = null; try { d = await buildDay(backOf(todo[i])); } catch (e) { d = null; }
