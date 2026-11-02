@@ -486,7 +486,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.3<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.4<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -554,6 +554,10 @@
     HIDDEN_SESSION_SEC: 90,                          // RingCX day total exceeds seen sessions by this = an unseen earlier login
     LOGIN_GRACE_MIN: 5,                            // first login this many min after scheduled start = late (yellow)
     LOGIN_LATE_CRIT_MIN: 15,                         // ...red after this; also "not logged in yet" after this
+    // A confirmed first login this many min BEFORE the scheduled start = flagged (2026-11-02, after the time change:
+    // people on a clock with no daylight saving came in an hour early). Logins today + What to Watch; not scored.
+    LOGIN_EARLY_WARN_MIN: 30,
+    LOGIN_EARLY_ALERT_HOURS: 2,                      // the What to Watch alert shows until this long after their scheduled start
     // Email Team scorecard (Fred, 2026-10-16): email-only agents, scored from their Zendesk statuses. SHARIK, Danish and
     // Alan do phone and email (call scorecard); Laura is Payroll; Victor and Adnan are supervisors.
     EMAIL_AGENTS: ["Mohsin", "Bisma", "Sabreena Yaqoob"],
@@ -1237,6 +1241,7 @@
     } catch (x) { /* tried again in a minute */ }
     finally { eve.loading = false; if (data.fetchedAt) render(); }
   }
+  var loginsEarly = [];   // agents who signed in LOGIN_EARLY_WARN_MIN+ early today (What to Watch)
   function renderLogins(e) {
     var body = $("loginBody"); if (!body) return;
     // Keep a half-typed note intact: skip redrawing while someone is typing one.
@@ -1301,6 +1306,7 @@
       if (r.late === null) return "<span class='muted'>–</span>";
       // 1 to 15 minutes before the scheduled start = Early (2026-10-27).
       var early = Math.round(-r.late);
+      if (isEarly(r)) return "<span class='warmn' title='First login " + early + " min before the scheduled start (" + clockOf(r.start) + "). Check their schedule, or whether their clock skipped the daylight saving change.'>" + fmtShort(early * 60) + " early</span>";
       if (early >= 1 && early <= 15) return "<span class='good' title='" + early + " min before the scheduled start'>Early</span>";
       if (r.late <= CONFIG.LOGIN_GRACE_MIN) return "<span class='good'>on time</span>";   // green, like Early (2026-10-27)
       if (r.conf === "unknown") return "<span class='muted' title='They had an earlier session this page never saw, so their real first login was earlier than this.'>can't tell</span>";
@@ -1320,10 +1326,13 @@
     }
     // Only a confirmed first login counts as late; an "at most" bound may well be on time.
     function isLate(r) { return r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN && (r.conf === "confirmed" || r.conf === "zd" || r.missing); }
+    // Signed in LOGIN_EARLY_WARN_MIN+ before the scheduled start (confirmed times only).
+    function isEarly(r) { return r.late !== null && r.start !== null && -r.late >= CONFIG.LOGIN_EARLY_WARN_MIN && (r.conf === "confirmed" || r.conf === "zd"); }
+    loginsEarly = rows.filter(function (r) { return !r.sup && isEarly(r); });
     body.innerHTML = rows.map(function (r, i) {
       var group = r.sup && (i === 0 || !rows[i - 1].sup)
         ? "<tr><td colspan='8' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" : "";
-      var flag = r.missing || ((r.conf === "confirmed" || r.conf === "zd") && r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (isLate(r) ? "flag-warn" : "");
+      var flag = r.missing || ((r.conf === "confirmed" || r.conf === "zd") && r.late !== null && r.late >= CONFIG.LOGIN_LATE_CRIT_MIN) ? "flag-crit" : (isLate(r) || isEarly(r) ? "flag-warn" : "");
       var pastEnd = r.live && r.start !== null && nowMin > r.start + CONFIG.SHIFT_HOURS * 60;
       var status = r.zd ? (r.zd.now !== "offline" ? "<span class='st st-green' style='font-weight:400'>In Zendesk: " + esc(r.zd.now) + "</span> <span class='muted tiny'>(no RingCX login)</span>"
           : "<span class='muted'>Offline in Zendesk · last seen " + fmtClock(r.zd.last) + " (no RingCX login)</span>")
@@ -1345,7 +1354,7 @@
     var lateN = rows.filter(function (r) { return !r.missing && isLate(r); }).length;
     var missN = rows.filter(function (r) { return r.missing; }).length;
     var supN = rows.filter(function (r) { return r.sup; }).length;
-    $("loginSub").textContent = (rows.length - supN) + " agents" + (supN ? " · " + supN + " supervisors" : "") + (lateN ? " · " + lateN + " late" : "") + (missN ? " · " + missN + " not logged in" : "") + " · " + trackedLabel();
+    $("loginSub").textContent = (rows.length - supN) + " agents" + (supN ? " · " + supN + " supervisors" : "") + (lateN ? " · " + lateN + " late" : "") + (loginsEarly.length ? " · " + loginsEarly.length + " early" : "") + (missN ? " · " + missN + " not logged in" : "") + " · " + trackedLabel();
   }
 
   // ---------------- who's viewing (Supabase Realtime presence) ----------------
@@ -1782,6 +1791,13 @@
     if (past.length) items.push({ lvl: "warn", score: 300,
       html: "<b>" + past.length + " agent" + (past.length > 1 ? "s" : "") + "</b> still logged in past shift end: " +
         past.map(function (p) { return esc(fullName(p.a)) + " (+" + fmtShort(p.over * 60) + ")"; }).join(", ") });
+    // Signed in 30+ min before their shift (2026-11-02): shown until LOGIN_EARLY_ALERT_HOURS after their scheduled start.
+    var nowPt = nowIn("America/Los_Angeles"), nowM = +nowPt.hm.slice(0, 2) * 60 + +nowPt.hm.slice(3, 5);
+    // An overnight shift that started the evening before: its start is in that evening's minutes (0..1439, or negative).
+    var early = loginsEarly.filter(function (r) { return (r.eve && r.start >= 0 ? nowM + 1440 : nowM) < r.start + CONFIG.LOGIN_EARLY_ALERT_HOURS * 60; });
+    if (early.length) items.push({ lvl: "warn", score: 280, link: "#loginPanel",
+      html: "<b>" + early.length + " agent" + (early.length > 1 ? "s" : "") + "</b> signed in " + CONFIG.LOGIN_EARLY_WARN_MIN + "+ min before their shift: " +
+        early.map(function (r) { return esc(r.name) + " (" + fmtShort(-r.late * 60) + " early, scheduled " + clockOf(r.start) + ")"; }).join(", ") + ". Check their schedule or time zone." });
     if (watch.length) {
       var crit = watch.filter(function (x) { return x.w.lvl === "crit"; }).length;
       items.push({ lvl: crit ? "crit" : "warn", score: 400, link: "#watchPanel",
