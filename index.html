@@ -486,7 +486,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.4<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.5<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -2525,7 +2525,8 @@
       var phone = boardRows();
       var rows = phone.concat(emailRows(phone.map(function (r) { return r.name; })) || []).filter(function (r) { return !r.sup; });
       var agents = rows.map(function (r) {
-        return { name: r.name, cells: boardCells(r).map(function (h, i) { var o = liveCell(h, false), tip = agentTip(r, BOARD_COLS[i]); if (tip) o.tip = tip; return o; }), tickets: ticketExport(r, Date.now()) };
+        return { name: r.name, cells: boardCells(r).map(function (h, i) { var o = liveCell(h, false), tip = agentTip(r, BOARD_COLS[i]); if (tip) o.tip = tip; return o; }), tickets: ticketExport(r, Date.now()),
+          excluded: r.unranked ? 1 : undefined };   // a manager excluded them today: the Agent View shows "Excluded", not the score
       });
       await dayscoresApi("POST", "", { live: { day: ptYmd(0), data: { cols: BOARD_COLS, agents: agents } } });
       liveSave.at = Date.now();
