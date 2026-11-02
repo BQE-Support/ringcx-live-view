@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3454D1">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
-<script src="scoring.js?v=7.3"></script>   <!-- scorecard rules (docs/_shared/scoring.js); bump ?v= when it changes -->
+<script src="scoring.js?v=7.6"></script>   <!-- scorecard rules (docs/_shared/scoring.js); bump ?v= when it changes -->
 <style>
   :root {
     --bg: #F5F6F9; --surface: #FFFFFF; --surface-alt: #ECEFF5; --border: #DDE1EA;
@@ -486,7 +486,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.5<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.6<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -2464,7 +2464,7 @@
     // v 6 = the current scorecard (Tickets/hr scored, straight-line Ready, handled tickets count, email aliases, 2026-10-30); days saved under older rules are rebuilt and saved
     // again while snapshots last.
     // Every day is saved, weekends too (2026-10-30): some people's shifts fall on Saturday or Sunday.
-    var missing = daysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 11; })
+    var missing = daysBetween(ptYmd(7), ptYmd(1)).filter(function (y) { return !have[y] || (have[y].v || 1) < 12; })
       .filter(function (y) { return !(Object.keys(SHIFT_BLOCKS).length && y === ptYmd(1) && shiftDayOf(Date.now()) < ptYmd(0)); });   // yesterday's overnight shift may still be running
     for (var i = 0; i < missing.length; i++) {
       var d = null;
@@ -2479,7 +2479,7 @@
   async function autoSaveDays() {
     var today = ptYmd(0);
     if (autoSave.running || autoSave.done === today || !session || !CONFIG.SUPABASE_URL || document.hidden) return;
-    var key = "rcxLiveView.daysSaved.v11";
+    var key = "rcxLiveView.daysSaved.v12";
     try { if (localStorage.getItem(key) === today) { autoSave.done = today; return; } } catch (e) {}
     autoSave.running = true;
     try {
@@ -2689,7 +2689,7 @@
       var j = await dayscoresApi("GET", "?from=" + W.prev.from + "&to=" + W.cur.to), recs = {};
       (j.days || []).forEach(function (x) { recs[String(x.day).slice(0, 10)] = x.data; });
       // Days still on the server but not saved yet, or saved under older scoring rules: rebuild and save them now.
-      var todo = W.cur.all.concat(W.prev.all).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 11) && backOf(y) >= 1 && backOf(y) <= 7; });
+      var todo = W.cur.all.concat(W.prev.all).filter(function (y) { return (!recs[y] || (recs[y].v || 1) < 12) && backOf(y) >= 1 && backOf(y) <= 7; });
       for (var i = 0; i < todo.length; i++) {
         body.innerHTML = "<div class='muted' style='padding:12px 0'>Rebuilding " + esc(dayShort(todo[i])) + " (" + (i + 1) + " of " + todo.length + ") from the server's snapshots…</div>";
         var d = null; try { d = await buildDay(backOf(todo[i])); } catch (e) { d = null; }

@@ -962,7 +962,7 @@
         parts.csat = csr ? csr.pts : 10;
         out.push({ name: who, email: true, work: workFor(who), esr: esr, answered: 0, perHr: null, talk: null, outbound: outboundCount(who), followups: followupsFor(who), score: parts.ready + parts.pickup + parts.start + parts.lunch + (tk ? tk.pts : 15) + parts.es + parts.csat, parts: parts, tk: tk, csat: csr,
           ready: share, readyMs: ready, slowMs: slow, login: logged / 1000, first: first, firstUnsure: firstUnsure, start: start, lateMin: lateMin,
-          lunchOver: over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(over) : 0, lunchLvl: ll, lunchFrom: L ? L.from : null, now: now,
+          lunchOver: over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(over) : 0, lunchLvl: ll, lunchFrom: L ? L.from : null, lunchTo: L ? L.to : null, now: now,
           slow2Ms: slow2 });
       });
       applyV2(out, asOf);
@@ -1087,7 +1087,8 @@
         out.push({ name: n, id: p.id,
           sup: p.sup, answered: answered, talk: c.talk, perHr: perHr, rna: p.rna, ready: ready, login: p.login, score: score, parts: parts, tk: tk, esr: esr, csat: csr,
           work: workFor(n), emailCreditSec: credit.ready, outbound: outboundCount(n), followups: followupsFor(n),
-          lunchOver: L && L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(L.over) : 0, lunchLvl: ll, lateMin: lateMin, lateConf: lg.conf || null });
+          lunchOver: L && L.over >= CONFIG.LUNCH_OVER_WARN_MIN ? Math.round(L.over) : 0, lunchLvl: ll, lateMin: lateMin, lateConf: lg.conf || null,
+          lunchFrom: L ? L.from : null, lunchTo: L ? L.to : null });
       });
       applyV2(out, S.hist.endAt || Date.now());   // Tickets/hr average = every phone agent that day, before the queue filter
       return out.filter(function (r) { return inQueue(r.name); }).sort(function (a, b) { return b.score - a.score || b.answered - a.answered; });
@@ -1175,7 +1176,12 @@
         ready: rd(r.ready, 3), lateMin: r.lateMin ? Math.round(r.lateMin) : 0, lunchOver: r.lunchOver || 0,
         tkLate: tk ? tk.late.length : null, tkDue: tk ? tk.owned : null,
         es: e && e.rate !== null ? rd(e.rate, 4) : null, csat: c && c.pct !== null ? rd(c.pct, 4) : null, csatN: c ? c.n : null,
-        login: Math.round(r.login || 0)
+        login: Math.round(r.login || 0),
+        // Exact times for the Agent View's hovers (2026-11-02), as PT minutes of the day: first login, scheduled start,
+        // and the lunch the Lunch column judged (lunchTo null = no end seen).
+        firstMin: r.li && r.li.first != null ? r.li.first : (r.first ? ptMinOf(r.first) : null),
+        startMin: r.li ? (r.li.start == null ? null : r.li.start) : (r.start == null ? null : r.start),
+        lunchFrom: r.lunchFrom ? ptMinOf(r.lunchFrom) : null, lunchTo: r.lunchTo ? ptMinOf(r.lunchTo) : null
       };
     }
     function dayRecord(ymd, d) {
@@ -1183,7 +1189,7 @@
       var rows = d.rows.concat(d.email || []).filter(function (r) { return !r.sup; });
       var scores = rows.filter(function (r) { return !r.offRank; }).map(function (r) { return r.score; });
       return {
-        v: 11, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
+        v: 12, partial: d.from - Date.parse(ptMidnightIsoOf(ymd)) > 30 * 60000,
         team: { answered: d.answered, abandoned: d.abandoned, talk: Math.round(d.talk), outbound: rows.reduce(function (t, r) { return t + (r.outbound || 0); }, 0),
           scored: rows.length, avg: scores.length ? scores.reduce(function (t, v) { return t + v; }, 0) / scores.length : null },
         agents: rows.map(function (r) {
