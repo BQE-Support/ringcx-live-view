@@ -491,7 +491,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.8<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.9<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -781,7 +781,7 @@
       var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/pto", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
-      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || [];
+      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = (j.schedule || []).map(dstAdjust).map(scheduleOverride);
       renderPto(j); renderLunch(elapsed()); renderLogins(elapsed());
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
@@ -2603,13 +2603,7 @@
         return { name: r.name, cells: boardCells(r).map(function (h, i) { var o = liveCell(h, false), tip = agentTip(r, BOARD_COLS[i]); if (tip) o.tip = tip; return o; }), tickets: ticketExport(r, Date.now()),
           excluded: r.unranked ? 1 : undefined };   // a manager excluded them today: the Agent View shows "Excluded", not the score
       });
-      // Tickets of people on PTO (2026-11-03), for the Agent View's coverage list: [src, id, state, waiting since, due,
-      // result, subject, handled by]. The agent-view function keeps only the viewer's queue mates (no supervisors).
-      var cover = (ptoCoverage(Date.now()) || []).map(function (g) {
-        return { name: g.name, type: g.type, hours: g.hours, end: g.end,
-          rows: g.rows.map(function (o) { return [o.x.src, o.x.id, o.x.label, o.x.entered, o.dl, o.res, String(o.x.subject || "").slice(0, 90), ptoHandledBy(o).replace(/^Looking…$|^Not found$/, "")]; }) };
-      });
-      await dayscoresApi("POST", "", { live: { day: ptYmd(0), data: { cols: BOARD_COLS, agents: agents, pto: cover } } });
+      await dayscoresApi("POST", "", { live: { day: ptYmd(0), data: { cols: BOARD_COLS, agents: agents } } });
       liveSave.at = Date.now();
     } catch (e) { liveSave.at = Date.now() - 2 * 60000; /* try again in a minute */ }
     finally { liveSave.busy = false; }
