@@ -598,14 +598,14 @@
     function ymdOfMs(ms) { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(ms)); }
     function onPtoDay(name, ymd) { var k = normName(name); return (S.pto.rows || []).some(function (r) { return normName(r.name) === k && r.start <= ymd && r.end >= ymd; }); }
     // End of the first shift that starts after t (roster start + SHIFT_HOURS; skips days off and PTO). No roster row:
-    // 8 AM Pacific, Monday to Friday.
-    function shiftDeadline(name, t) {
+    // 8 AM Pacific, Monday to Friday. keepPto: count PTO days as working days (the PTO coverage deadline).
+    function shiftDeadline(name, t, keepPto) {
       var s = schedForLoose(name), start0 = ymdOfMs(t), blocks = shiftBlocksFor(name);
       for (var i = 0; i < 21; i++) {
         var ymd = addDaysYmd(start0, i), wd = new Date(ymd + "T12:00:00Z").getUTCDay(), startMin;
         if (blocks) { startMin = blockStart(blocks, wd, ymdIsDST(ymd)); if (startMin === null) continue; }
         else { if (s && s.shift !== null ? s.days.indexOf(wd) < 0 : (wd === 0 || wd === 6)) continue; startMin = s && s.shift !== null ? s.shift : 8 * 60; }
-        if (onPtoDay(name, ymd)) continue;
+        if (!keepPto && onPtoDay(name, ymd)) continue;
         var start = Date.parse(ptMidnightIsoOf(ymd)) + startMin * 60000;
         if (start >= t) return start + CONFIG.SHIFT_HOURS * 3600000;
       }
@@ -689,6 +689,28 @@
       var late = list.filter(function (o) { return o.w; });
       return { pts: Math.round(W.tickets * (1 - share)), owned: owned, lateW: lateW, late: late, badN: late.filter(function (o) { return o.bad; }).length,
         mine: mine, waiting: mine.filter(function (x) { return x.last >= asOf - 15 * 60000; }).length };
+    }
+    // PTO coverage (2026-11-03): Zendesk and ES tickets waiting on someone who is out today, so someone else has to act.
+    // Due by the end of the shift they would have worked (roster start + SHIFT_HOURS, PTO days counted as working days),
+    // counted from today's midnight at the earliest. Handled = out of the waiting state, or given to someone else.
+    // Result: "due", "late" (still waiting past it), "handled", "handledlate". The person's own score is untouched
+    // (their deadline still skips PTO days).
+    function ptoCoverage(asOf) {
+      if (!S.waits.rows || !S.pto.rows) return null;
+      var today = ymdOfMs(asOf), midnight = Date.parse(ptMidnightIsoOf(today)), seen = {};
+      return S.pto.rows.filter(function (p) {
+        var k = normName(p.name);
+        if (!k || p.start > today || p.end < today || seen[k]) return false;
+        return (seen[k] = true);
+      }).map(function (p) {
+        var rows = S.waits.rows.filter(function (x) { return x.entered && waitIsFor(p.name, x); }).map(function (x) {
+          var dl = shiftDeadline(p.name, Math.max(tkStart(x), midnight), true), still = x.last >= asOf - 15 * 60000;
+          // Given to someone else: the same ticket waiting on another person from the check after this one.
+          var to = still ? null : S.waits.rows.filter(function (y) { return y.src === x.src && String(y.id) === String(x.id) && !waitIsFor(p.name, y) && y.first >= x.last; })[0];
+          return { x: x, dl: dl, still: still, to: to ? to.name : "", res: still ? (dl > asOf ? "due" : "late") : (x.last >= dl ? "handledlate" : "handled") };
+        }).sort(function (a, b) { return (b.still - a.still) || a.dl - b.dl || a.x.entered - b.x.entered; });
+        return { name: p.name, type: p.type || "PTO", hours: p.hours || null, end: p.end, rows: rows };
+      }).sort(function (a, b) { return b.rows.length - a.rows.length || a.name.localeCompare(b.name); });
     }
     // ES: weighted count (zdwatch esWeighted: Feature Request / Migration left out, Workaround / Cannot Reproduce /
     // By Design half) over Zendesk tickets, 30 days. 5 at or below ES2_FULL, 0 at or above ES2_ZERO; under minTickets2 = full.
@@ -1357,6 +1379,7 @@
       scoreTitle: scoreTitle,
       ticketCell: ticketCell,
       ticketExport: ticketExport,
+      ptoCoverage: ptoCoverage,
       emailTag: emailTag,
       emailRnaCell: emailRnaCell,
       emailStartCell: emailStartCell,
