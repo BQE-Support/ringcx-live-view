@@ -401,7 +401,7 @@
         <div id="esBody" class="tiny muted">Loading…</div>
       </details>
 
-      <details class="panel collapsible" id="ptoCoverPanel" open>
+      <details class="panel collapsible" id="ptoTicketsPanel">
         <summary class="section-title">Tickets of people on PTO today <span class="sub" id="ptoCoverSub"></span></summary>
         <div id="ptoCoverBody" class="tiny muted">Loading…</div>
       </details>
@@ -491,7 +491,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.7<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.8<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -1816,7 +1816,7 @@
     // Tickets of people on PTO still waiting past the end of the shift they'd have worked (2026-11-03).
     var ptoLate = (ptoCoverage(Date.now()) || []).filter(function (g) { return inQueue(g.name); })
       .reduce(function (n, g) { return n + g.rows.filter(function (o) { return o.res === "late"; }).length; }, 0);
-    if (ptoLate) items.push({ lvl: "crit", score: 650, link: "#ptoCoverPanel",
+    if (ptoLate) items.push({ lvl: "crit", score: 650, link: "#ptoTicketsPanel",
       html: "<b>" + ptoLate + " ticket" + (ptoLate > 1 ? "s" : "") + " of people on PTO</b> past due and still waiting" });
     items.sort(function (x, y) { return y.score - x.score; });
     $("alertList").innerHTML = items.length
@@ -3821,7 +3821,7 @@
       return;
     }
     if (ev.target.closest("a.alert[href='#esPanel']")) $("esPanel").open = true;   // jump to the ES section, unfolded
-    if (ev.target.closest("a.alert[href='#ptoCoverPanel']")) $("ptoCoverPanel").open = true;
+    if (ev.target.closest("a.alert[href='#ptoTicketsPanel']")) $("ptoTicketsPanel").open = true;
     var tkc = ev.target.closest("[data-tk-copy]");
     if (tkc) { ev.preventDefault(); tkCopyLinks(tkc, tkc.getAttribute("data-tk-copy")); return; }
     var esb = ev.target.closest("[data-es-copy]");
