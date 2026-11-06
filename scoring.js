@@ -415,7 +415,7 @@
           var gap = Math.min((fetchedAt - h.lastSeen) / 1000, 3 * S.intervalSec);
           h.seenSec = (h.seenSec || 0) + gap;
           if (h.base === "LUNCH" || h.base === "ON-BREAK") h.offSec = (h.offSec || 0) + gap;   // left out of Ready (2026-10-30)
-          if (h.base === "AVAILABLE" || h.base === "ONCALL") h.readySec = (h.readySec || 0) + gap;
+          if (h.base === "AVAILABLE" || h.base === "ONCALL" || (CONFIG.READY_STATUSES || []).indexOf(String(h.label || "").toUpperCase()) >= 0) h.readySec = (h.readySec || 0) + gap;   // + work statuses that count as ready (2026-11-06)
           if (h.base === "AVAILABLE") h.availSec = (h.availSec || 0) + gap;   // Agents table "Avail today"
         }
         if (!h.firstSeen) h.firstSeen = fetchedAt;
