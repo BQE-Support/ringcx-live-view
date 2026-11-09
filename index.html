@@ -459,7 +459,7 @@
           <li><b>SLA</b> is RingCX's own service-level count for each queue, from its real-time data (<code>slaPass</code> / <code>slaFail</code>). A call passes if it is answered within the queue's SLA time, which is 30 seconds on every BQE queue. Calls answered later, or abandoned after 30 seconds, fail. The top tile adds up all queues. The counts are today's running totals.</li>
           <li><b>Queue hours:</b> the viewer shows a queue as Open only if RingCX says it's open and, for queues with configured hours, the current time is inside them. Payroll Specialist is open M–F 6am–4pm Pacific, which matches its RingCX schedule. Outside those hours it shows Closed and raises no staffing alerts. If RingCX ever reports it open outside those hours, the page flags it as a schedule problem.</li>
           <li>"Not taking calls" means any status other than green that isn't a live call or wrap-up. The tiles split this into <b>Busy</b> (yellow statuses) and <b>Break / lunch</b> (grey: On-Break, Away, Lunch).</li>
-          <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, whenever they are Available or Engaged. Victor Guadarrama is treated as a supervisor too (TREAT_AS_SUPERVISOR in the page settings).</li>
+          <li>Supervisors (RingCX agent type SUPERVISOR) are listed separately. They move into the Agents table, and into the watch, whenever they are Available or Engaged. Victor Guadarrama and Connor Lenhart are treated as supervisors too (TREAT_AS_SUPERVISOR in the page settings).</li>
           <li>The avoidance watch flags an agent only when at least <b><span data-cfg="MIN_SIGNALS"></span> of these signals</b> are true at the same time. One signal alone is not flagged.
             <ul>
               <li>Any RNA (ring, no answer) today. Two or more is critical.</li>
@@ -491,7 +491,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.12<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.13<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -605,8 +605,8 @@
       "Payroll Specialist": { days: [1, 2, 3, 4, 5], open: "06:00", close: "16:00", tz: "America/Los_Angeles", label: "M–F 6am–4pm PT" }
     },
     // Agents treated exactly like RingCX supervisors (agent type AGENT in RingCX, supervisor role at BQE).
-    TREAT_AS_SUPERVISOR: ["Victor Guadarrama"],
-    SUPERVISOR_TAG: ["Connor Lenhart"],
+    TREAT_AS_SUPERVISOR: ["Victor Guadarrama", "Connor Lenhart"],   // Connor moved off the L1 list (2026-11-09)
+    SUPERVISOR_TAG: [],
     // People who are supervisors only part of the day (Pacific). Outside these hours they count as
     // agents everywhere, whatever their RingCX type (Fred, 2026-10-14: Peter takes calls, supervises 3-5 PM).
     SUPERVISOR_HOURS: { "Peter Taylor": { from: "15:00", to: "17:00" } },
