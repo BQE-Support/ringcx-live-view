@@ -265,6 +265,9 @@
   dialog.week-report { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
     padding: 18px 20px; width: min(1180px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
   dialog.week-report::backdrop { background: rgba(12,18,32,0.55); }
+  a.agent-trend { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+  a.agent-trend:hover { text-decoration: underline; }
+  .tr-spark { width: 100%; max-width: 760px; height: auto; display: block; margin: 6px 0 2px; }
   .wr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
   .wr-sub { font-family: var(--serif); font-size: 15px; margin: 16px 0 4px; }
   .wr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -496,7 +499,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.14<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.15<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -504,6 +507,13 @@
           <div><button type="button" class="btn" id="weekReportCopy">Copy report</button> <button type="button" class="btn" id="weekReportClose">Close</button></div>
         </div>
         <div id="weekReportBody"></div>
+      </dialog>
+      <dialog class="week-report" id="agentTrend">
+        <div class="wr-head">
+          <h2 class="section-title" id="agentTrendTitle" style="margin:0">Trend</h2>
+          <div><button type="button" class="btn" id="agentTrendClose">Close</button></div>
+        </div>
+        <div id="agentTrendBody"></div>
       </dialog>
     </main>
   </section>
@@ -2494,7 +2504,7 @@
       return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num' title='100-point scorecard: Ready 25, RNA (Email Team: pickup) 10, Start 5, Lunch 5, Tickets 23, Tickets/hr 15, ES 5, CSAT 12. Hover a score for its parts.'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took today / follow-ups (email and webform tickets they replied to or solved without taking them today). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='Scored (10 points): calls answered + email/webform tickets taken + follow-ups, per logged-in hour, compared with their group&#39;s average today (phone agents or Email Team). Full at or above the average, none at half of it.'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>Start</th><th class='num'>Lunch</th><th class='num' title='Tickets past their deadline out of the tickets that came due or that they handled (the number in brackets = waiting on them now; click for the list)'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle, weighted (Workaround, Cannot Reproduce and By Design count half; Fixed, GAL ticket, Feature Request and Migration don&#39;t count), last 30 days'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr data-brow='" + esc(normName(r.name)) + "'><td class='num'>" + (r.offRank ? "" : (dir > 0 ? startRank + i : total - i)) + "</td>" +
-            "<td>" + esc(r.name) + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + unrankTag(r, true) + "</td>" +
+            "<td><a class='agent-trend' data-trend='" + esc(normName(r.name)) + "' data-trend-name='" + esc(r.name) + "' title='Click for this person&#39;s trend over the past 4 weeks'>" + esc(r.name) + "</a>" + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + unrankTag(r, true) + "</td>" +
             boardCells(r).join("") + "</tr>" +
             (tkOpen["today|" + normName(r.name)] ? "<tr class='inline-drill'><td colspan='17'><div class='inline-box'>" + ticketListHtml(r, Date.now()) + "</div></td></tr>" : "");
         }).join("") || "<tr><td colspan='17' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
@@ -2695,6 +2705,98 @@
     finally { liveSave.busy = false; }
   }
   setInterval(saveLiveScores, 60000);
+
+
+  // ---------------- one agent's trend, past 4 weeks (2026-11-13) ----------------
+  // Click a name on the board. Reads the saved daily records (the same ones the Report uses): this week so far plus the
+  // three weeks before it, Sunday to Saturday. Today is not in it until the day is finished and saved.
+  var trendReq = 0;
+  function trendRange() {
+    var today = ptYmd(0), wd = new Date(today + "T12:00:00Z").getUTCDay(), sun = addDaysYmd(today, -wd);
+    return { weeks: [0, 1, 2, 3].map(function (i) { var f = addDaysYmd(sun, -7 * (3 - i)); return { from: f, to: addDaysYmd(f, 6) }; }), from: addDaysYmd(sun, -21), to: ptYmd(1) };
+  }
+  function trendSpark(pts, allDays) {
+    var W = 760, H = 120, L = 28, R = 8, T = 8, B = 18, n = allDays.length, x = function (i) { return L + (n < 2 ? 0 : i * (W - L - R) / (n - 1)); }, y = function (v) { return T + (100 - v) * (H - T - B) / 100; };
+    var g = [0, 50, 100].map(function (v) { return "<line x1='" + L + "' x2='" + (W - R) + "' y1='" + y(v) + "' y2='" + y(v) + "' stroke='currentColor' opacity='.15'/><text x='2' y='" + (y(v) + 4) + "' font-size='10' fill='currentColor' opacity='.6'>" + v + "</text>"; }).join("");
+    var seg = [], cur = [];
+    allDays.forEach(function (d, i) { if (pts[d] === undefined) { if (cur.length) seg.push(cur); cur = []; } else cur.push(x(i).toFixed(1) + "," + y(pts[d]).toFixed(1)); });
+    if (cur.length) seg.push(cur);
+    var lines = seg.map(function (c) { return c.length > 1 ? "<polyline fill='none' stroke='currentColor' stroke-width='2' points='" + c.join(" ") + "'/>" : ""; }).join("");
+    var dots = allDays.map(function (d, i) { return pts[d] === undefined ? "" : "<circle cx='" + x(i).toFixed(1) + "' cy='" + y(pts[d]).toFixed(1) + "' r='3' fill='currentColor'><title>" + esc(dayShort(d)) + ": " + Math.round(pts[d]) + "</title></circle>"; }).join("");
+    var ticks = allDays.map(function (d, i) { return new Date(d + "T12:00:00Z").getUTCDay() === 0 ? "<text x='" + x(i).toFixed(1) + "' y='" + (H - 4) + "' font-size='10' fill='currentColor' opacity='.6'>" + esc(dayShort(d).replace(/^Sun /, "")) + "</text>" : ""; }).join("");
+    return "<svg class='tr-spark' viewBox='0 0 " + W + " " + H + "' role='img' aria-label='Daily score, past 4 weeks'>" + g + lines + dots + ticks + "</svg>";
+  }
+  function renderTrend(name, key, recs, R) {
+    var allDays = daysBetween(R.from, R.to), per = {}, approx = false, partial = false;
+    allDays.forEach(function (y) {
+      var rec = recs[y]; if (!rec) return;
+      var a = (rec.agents || []).filter(function (x) { return normName(x.name) === key; })[0];
+      if (!a) return;
+      per[y] = { a: a, rec: rec };
+    });
+    var scored = allDays.filter(function (y) { return per[y] && !per[y].a.unranked && !per[y].a.early; });
+    var pts = {}; scored.forEach(function (y) { pts[y] = per[y].a.score; if (recs[y].approx) approx = true; });
+    var avgOf = function (a) { return a.length ? a.reduce(function (t, v) { return t + v; }, 0) / a.length : null; };
+    var grade = function (s) { return s === null || s === undefined ? "<span class='muted'>–</span>" : "<b class='" + scoreGrade(s) + "'>" + Math.round(s) + "</b>"; };
+    var email = scored.some(function (y) { return per[y].a.email; });
+    if (!scored.length) return "<div class='muted' style='padding:12px 0'>No saved scored days for " + esc(name) + " since " + esc(dayShort(R.from)) + ". Days are saved once they finish.</div>";
+    var shown = PART_MAX.filter(function (pm) { return email ? pm[0] !== "rna" : pm[0] !== "pickup"; });
+    var wk = R.weeks.map(function (w) {
+      var ds = scored.filter(function (y) { return y >= w.from && y <= w.to; }), o = { w: w, n: ds.length, avg: avgOf(ds.map(function (y) { return pts[y]; })), parts: {}, calls: 0, took: 0, late: 0, lunch: 0 };
+      ds.forEach(function (y) { var a = per[y].a; o.calls += (a.answered || 0) + (a.outbound || 0); o.took += a.took || 0; o.late += a.late || 0; o.lunch += a.longLunch || 0; });
+      PART_MAX.forEach(function (pm) {
+        var v = ds.map(function (y) { var p = per[y].a.parts || {}; return p[pm[0]] === undefined ? undefined : (p[pm[0]] === null ? pm[2] : p[pm[0]]); }).filter(function (z) { return z !== undefined; });
+        o.parts[pm[0]] = avgOf(v);
+      });
+      return o;
+    });
+    var withData = wk.filter(function (w) { return w.n; }), first = withData[0], last = withData[withData.length - 1];
+    var delta = first && last && first !== last ? last.avg - first.avg : null;
+    var all = scored.map(function (y) { return pts[y]; }), best = scored.slice().sort(function (a, b) { return pts[b] - pts[a]; })[0], low = scored.slice().sort(function (a, b) { return pts[a] - pts[b]; })[0];
+    var sum = "4-week average " + grade(avgOf(all)) + " over " + scored.length + " scored day" + (scored.length === 1 ? "" : "s") +
+      (delta === null ? "" : ", " + (Math.abs(delta) < 0.5 ? "<span class='muted'>flat</span>" : "<b class='" + (delta > 0 ? "good" : "hot") + "'>" + (delta > 0 ? "up " : "down ") + Math.abs(Math.round(delta * 10) / 10) + "</b>") + " from the " + esc(dayShort(first.w.from)) + " week to the " + esc(dayShort(last.w.from)) + " week") +
+      ". Best " + esc(dayShort(best)) + " (" + Math.round(pts[best]) + "), lowest " + esc(dayShort(low)) + " (" + Math.round(pts[low]) + ").";
+    var html = "<div style='margin:6px 0'>" + sum + "</div>" + trendSpark(pts, allDays);
+    html += "<div class='wr-sub'>By week (Sunday to Saturday)</div><div class='table-wrap'><table class='wr-table'><thead><tr><th>Week</th><th>Avg score</th><th>Change</th><th>Days</th>" +
+      shown.map(function (pm) { return "<th title='Average points earned out of " + pm[2] + "'>" + esc(pm[1]) + " /" + pm[2] + "</th>"; }).join("") +
+      "<th>" + (email ? "Tickets taken" : "Calls in+out") + "</th><th>Late starts</th><th>Long lunches</th></tr></thead><tbody>" +
+      wk.map(function (o, i) {
+        var prev = null; for (var j = i - 1; j >= 0; j--) if (wk[j].n) { prev = wk[j]; break; }
+        var ch = o.n && prev ? wkChange(1, "n", o.avg, prev.avg) : { text: "", cls: "" };
+        return "<tr><td>" + esc(dayShort(o.w.from) + " to " + dayShort(o.w.to)) + (o.w.to > R.to ? " <span class='muted tiny'>so far</span>" : "") + "</td><td>" + (o.n ? grade(o.avg) : "<span class='muted'>no data</span>") + "</td><td class='" + ch.cls + "'>" + esc(ch.text) + "</td><td>" + o.n + "</td>" +
+          shown.map(function (pm) { var v = o.parts[pm[0]]; return "<td>" + (v === null || v === undefined ? "<span class='muted'>–</span>" : (Math.round(v * 10) / 10)) + "</td>"; }).join("") +
+          "<td>" + (o.n ? (email ? o.took : o.calls) : "") + "</td><td>" + (o.n ? o.late : "") + "</td><td>" + (o.n ? o.lunch : "") + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+    html += "<div class='wr-sub'>Day by day</div><div class='table-wrap'><table class='wr-table'><thead><tr><th>Day</th><th>Score</th><th>Note</th></tr></thead><tbody>" +
+      allDays.filter(function (y) { return per[y]; }).reverse().map(function (y) {
+        var a = per[y].a, note = a.unranked ? "Not ranked: " + a.unranked : a.early ? "Under 2 logged-in hours, not ranked" : [a.late ? "late start" : "", a.longLunch ? "long lunch" : "", recs[y].partial ? "partial day record" : ""].filter(Boolean).join(", ");
+        if (recs[y].partial) partial = true;
+        return "<tr><td>" + esc(dayShort(y)) + "</td><td>" + (a.unranked || a.early ? "<span class='muted'>" + Math.round(a.score) + "</span>" : grade(a.score)) + "</td><td class='wrap'>" + esc(note) + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+    html += "<div class='wr-foot'>Scores come from each finished day's saved record, scored with the 100-point card in force when it was saved. Today is not included until it finishes." +
+      (approx ? " Days converted from the earlier scorecard are approximate." : "") + (partial ? " Days marked partial started recording late." : "") + "</div>";
+    return html;
+  }
+  async function openTrend(key, name) {
+    var dlg = $("agentTrend"), body = $("agentTrendBody"), my = ++trendReq, R = trendRange();
+    $("agentTrendTitle").textContent = name + ": past 4 weeks";
+    body.innerHTML = "<div class='muted' style='padding:12px 0'>Loading saved days…</div>";
+    if (!dlg.open) dlg.showModal();
+    try {
+      var j = await dayscoresApi("GET", "?from=" + R.from + "&to=" + R.to), recs = {};
+      (j.days || []).forEach(function (x) { recs[String(x.day).slice(0, 10)] = x.data; });
+      if (my !== trendReq) return;
+      body.innerHTML = renderTrend(name, key, recs, R);
+    } catch (e) { if (my === trendReq) body.innerHTML = "<div class='muted'>Couldn't load the trend: " + esc(e.message) + "</div>"; }
+  }
+  document.addEventListener("click", function (ev) {
+    var t = ev.target.closest && ev.target.closest("a.agent-trend");
+    if (!t) return;
+    ev.preventDefault(); ev.stopPropagation();
+    openTrend(t.getAttribute("data-trend"), t.getAttribute("data-trend-name"));
+  });
+  $("agentTrendClose").addEventListener("click", function () { $("agentTrend").close(); });
+  $("agentTrend").addEventListener("click", function (e) { if (e.target === this) this.close(); });
 
   // ---------------- the Report: this week vs last week ----------------
   // This week = Monday to yesterday; on a Monday (nothing finished yet) it's last week vs the week before.
