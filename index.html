@@ -267,6 +267,10 @@
   dialog.week-report::backdrop { background: rgba(12,18,32,0.55); }
   a.agent-trend { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
   a.agent-trend:hover { text-decoration: underline; }
+  .tr-wrap { overflow: visible; }
+  .wr-table.tr-compact th, .wr-table.tr-compact td { padding: 6px 4px; white-space: normal; }
+  .wr-table.tr-compact th { font-size: 10px; vertical-align: bottom; }
+  .wr-table.tr-compact td:first-child, .wr-table.tr-compact th:first-child { white-space: nowrap; }
   .tr-spark { width: 100%; max-width: 760px; height: auto; display: block; margin: 6px 0 2px; }
   .wr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
   .wr-sub { font-family: var(--serif); font-size: 15px; margin: 16px 0 4px; }
@@ -499,7 +503,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.15<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.16<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -2757,9 +2761,9 @@
       (delta === null ? "" : ", " + (Math.abs(delta) < 0.5 ? "<span class='muted'>flat</span>" : "<b class='" + (delta > 0 ? "good" : "hot") + "'>" + (delta > 0 ? "up " : "down ") + Math.abs(Math.round(delta * 10) / 10) + "</b>") + " from the " + esc(dayShort(first.w.from)) + " week to the " + esc(dayShort(last.w.from)) + " week") +
       ". Best " + esc(dayShort(best)) + " (" + Math.round(pts[best]) + "), lowest " + esc(dayShort(low)) + " (" + Math.round(pts[low]) + ").";
     var html = "<div style='margin:6px 0'>" + sum + "</div>" + trendSpark(pts, allDays);
-    html += "<div class='wr-sub'>By week (Sunday to Saturday)</div><div class='table-wrap'><table class='wr-table'><thead><tr><th>Week</th><th>Avg score</th><th>Change</th><th>Days</th>" +
+    html += "<div class='wr-sub'>By week (Sunday to Saturday)</div><div class='tr-wrap'><table class='wr-table tr-compact'><thead><tr><th>Week</th><th>Avg score</th><th>Change</th><th>Days</th>" +
       shown.map(function (pm) { return "<th title='Average points earned out of " + pm[2] + "'>" + esc(pm[1]) + " /" + pm[2] + "</th>"; }).join("") +
-      "<th>" + (email ? "Tickets taken" : "Calls in+out") + "</th><th>Late starts</th><th>Long lunches</th></tr></thead><tbody>" +
+      "<th>" + (email ? "Tickets taken" : "Calls in+out") + "</th><th>Late starts</th><th>Long lunch</th></tr></thead><tbody>" +
       wk.map(function (o, i) {
         var prev = null; for (var j = i - 1; j >= 0; j--) if (wk[j].n) { prev = wk[j]; break; }
         var ch = o.n && prev ? wkChange(1, "n", o.avg, prev.avg) : { text: "", cls: "" };
@@ -2767,7 +2771,7 @@
           shown.map(function (pm) { var v = o.parts[pm[0]]; return "<td>" + (v === null || v === undefined ? "<span class='muted'>–</span>" : (Math.round(v * 10) / 10)) + "</td>"; }).join("") +
           "<td>" + (o.n ? (email ? o.took : o.calls) : "") + "</td><td>" + (o.n ? o.late : "") + "</td><td>" + (o.n ? o.lunch : "") + "</td></tr>";
       }).join("") + "</tbody></table></div>";
-    html += "<div class='wr-sub'>Day by day</div><div class='table-wrap'><table class='wr-table'><thead><tr><th>Day</th><th>Score</th><th>Note</th></tr></thead><tbody>" +
+    html += "<div class='wr-sub'>Day by day</div><div class='tr-wrap' style='max-width:560px'><table class='wr-table tr-compact'><thead><tr><th>Day</th><th>Score</th><th>Note</th></tr></thead><tbody>" +
       allDays.filter(function (y) { return per[y]; }).reverse().map(function (y) {
         var a = per[y].a, note = a.unranked ? "Not ranked: " + a.unranked : a.early ? "Under 2 logged-in hours, not ranked" : [a.late ? "late start" : "", a.longLunch ? "long lunch" : "", recs[y].partial ? "partial day record" : ""].filter(Boolean).join(", ");
         if (recs[y].partial) partial = true;
