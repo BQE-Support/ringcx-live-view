@@ -261,6 +261,17 @@
       var g = function (t) { return +(f.filter(function (x) { return x.type === t; })[0] || {}).value; };
       return g("hour") * 60 + g("minute");
     }
+    // Work statuses that count as Ready (CONFIG.READY_STATUSES). READY_SECOND_HALF names people for whom a status counts only
+    // in the second half of their shift (roster start + SHIFT_HOURS; Fred 2026-11-13: Peter and Escalation Support).
+    function readyLabel(label, name, ms) {
+      var L = String(label || "").toUpperCase(), k = normName(name), late = CONFIG.READY_SECOND_HALF || {}, key = Object.keys(late).filter(function (x) { return normName(x) === k; })[0];
+      if (key && L.indexOf("ESCALATION SUPPORT") >= 0) {
+        var sc = schedFor(name); if (!sc || sc.shift == null) return false;
+        var half = sc.shift + (CONFIG.SHIFT_HOURS || 9) * 30, m = ptMinOf(ms);   // 30 min per shift hour = half the shift
+        return m >= half;
+      }
+      return (CONFIG.READY_STATUSES || []).indexOf(L) >= 0;
+    }
     function schedFor(name) {
       var k = normName(name);
       return (S.pto.schedule || []).filter(function (s) { return normName(s.name) === k; })[0] || null;
@@ -415,7 +426,7 @@
           var gap = Math.min((fetchedAt - h.lastSeen) / 1000, 3 * S.intervalSec);
           h.seenSec = (h.seenSec || 0) + gap;
           if (h.base === "LUNCH" || h.base === "ON-BREAK") h.offSec = (h.offSec || 0) + gap;   // left out of Ready (2026-10-30)
-          if (h.base === "AVAILABLE" || h.base === "ONCALL" || (CONFIG.READY_STATUSES || []).indexOf(String(h.label || "").toUpperCase()) >= 0) h.readySec = (h.readySec || 0) + gap;   // + work statuses that count as ready (2026-11-06)
+          if (h.base === "AVAILABLE" || h.base === "ONCALL" || readyLabel(h.label, fullName(a), fetchedAt)) h.readySec = (h.readySec || 0) + gap;   // + work statuses that count as ready (2026-11-06)
           if (h.base === "AVAILABLE") h.availSec = (h.availSec || 0) + gap;   // Agents table "Avail today"
         }
         if (!h.firstSeen) h.firstSeen = fetchedAt;
