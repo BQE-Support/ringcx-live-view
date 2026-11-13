@@ -503,7 +503,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.17<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.18<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -2723,13 +2723,21 @@
   function trendSpark(pts, allDays) {
     var W = 760, H = 120, L = 28, R = 8, T = 8, B = 18, n = allDays.length, x = function (i) { return L + (n < 2 ? 0 : i * (W - L - R) / (n - 1)); }, y = function (v) { return T + (100 - v) * (H - T - B) / 100; };
     var g = [0, 50, 100].map(function (v) { return "<line x1='" + L + "' x2='" + (W - R) + "' y1='" + y(v) + "' y2='" + y(v) + "' stroke='currentColor' opacity='.15'/><text x='2' y='" + (y(v) + 4) + "' font-size='10' fill='currentColor' opacity='.6'>" + v + "</text>"; }).join("");
-    var seg = [], cur = [];
-    allDays.forEach(function (d, i) { if (pts[d] === undefined) { if (cur.length) seg.push(cur); cur = []; } else cur.push(x(i).toFixed(1) + "," + y(pts[d]).toFixed(1)); });
-    if (cur.length) seg.push(cur);
-    var lines = seg.map(function (c) { return c.length > 1 ? "<polyline fill='none' stroke='currentColor' stroke-width='2' points='" + c.join(" ") + "'/>" : ""; }).join("");
-    var dots = allDays.map(function (d, i) { return pts[d] === undefined ? "" : "<circle cx='" + x(i).toFixed(1) + "' cy='" + y(pts[d]).toFixed(1) + "' r='3' fill='currentColor'><title>" + esc(dayShort(d)) + ": " + Math.round(pts[d]) + "</title></circle>"; }).join("");
+    // Points take the color of their score (the same grades as the tables). A line between two days is that color when both
+    // are the same, a blend when they differ, and when days off sit between them it takes the color of the next day worked.
+    var CLR = { good: "var(--good)", "": "var(--ink)", warmn: "var(--warning)", hot: "var(--critical)" };
+    var worked = allDays.map(function (d, i) { return pts[d] === undefined ? null : { d: d, i: i, c: scoreGrade(pts[d]) }; }).filter(Boolean);
+    var defs = "", lines = "";
+    for (var k = 1; k < worked.length; k++) {
+      var p0 = worked[k - 1], p1 = worked[k], x0 = x(p0.i).toFixed(1), y0 = y(pts[p0.d]).toFixed(1), x1 = x(p1.i).toFixed(1), y1 = y(pts[p1.d]).toFixed(1);
+      var stroke;
+      if (p0.c === p1.c || p1.i - p0.i > 1) stroke = CLR[p1.c];   // same color, or days off between: the next day worked decides
+      else { defs += "<linearGradient id='trg" + k + "' gradientUnits='userSpaceOnUse' x1='" + x0 + "' y1='" + y0 + "' x2='" + x1 + "' y2='" + y1 + "'><stop offset='0' style='stop-color:" + CLR[p0.c] + "'/><stop offset='1' style='stop-color:" + CLR[p1.c] + "'/></linearGradient>"; stroke = "url(#trg" + k + ")"; }
+      lines += "<line x1='" + x0 + "' y1='" + y0 + "' x2='" + x1 + "' y2='" + y1 + "' stroke-width='2' style='stroke:" + stroke + "'/>";
+    }
+    var dots = allDays.map(function (d, i) { return pts[d] === undefined ? "" : "<circle cx='" + x(i).toFixed(1) + "' cy='" + y(pts[d]).toFixed(1) + "' r='3.5' style='fill:" + CLR[scoreGrade(pts[d])] + "'><title>" + esc(dayShort(d)) + ": " + Math.round(pts[d]) + "</title></circle>"; }).join("");
     var ticks = allDays.map(function (d, i) { return new Date(d + "T12:00:00Z").getUTCDay() === 0 ? "<text x='" + x(i).toFixed(1) + "' y='" + (H - 4) + "' font-size='10' fill='currentColor' opacity='.6'>" + esc(dayShort(d).replace(/^Sun /, "")) + "</text>" : ""; }).join("");
-    return "<svg class='tr-spark' viewBox='0 0 " + W + " " + H + "' role='img' aria-label='Daily score, past 4 weeks'>" + g + lines + dots + ticks + "</svg>";
+    return "<svg class='tr-spark' viewBox='0 0 " + W + " " + H + "' role='img' aria-label='Daily score, past 4 weeks'>" + "<defs>" + defs + "</defs>" + g + lines + dots + ticks + "</svg>";
   }
   function renderTrend(name, key, recs, R) {
     var allDays = daysBetween(R.from, R.to), per = {}, approx = false, partial = false;
