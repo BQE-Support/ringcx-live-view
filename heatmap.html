@@ -156,6 +156,10 @@
   .heat-legend-bar.inverted {
     background: linear-gradient(to right, var(--critical), var(--warning), var(--good));
   }
+  /* Change-vs-baseline view: green (below baseline) - neutral - red (above) */
+  .heat-legend-bar.diverging {
+    background: linear-gradient(to right, var(--good), rgba(128,128,128,0.25), var(--critical));
+  }
   .heat-legend-caption { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
 
   input[type="date"].pill-toggle { padding: 6px 10px; font-family: var(--sans); color-scheme: light dark; }
@@ -280,13 +284,18 @@
         <button class="pill-toggle compare-btn" data-compare="prev4" aria-pressed="false">Prior 4-week avg</button>
         <span class="channel-note" id="compareNote"></span>
       </div>
+      <div class="filters" id="deltaFilterRow" style="margin-top:10px; margin-bottom:0;">
+        <span class="section-note">Show:</span>
+        <button class="pill-toggle delta-btn" data-delta="0" aria-pressed="true">Values</button>
+        <button class="pill-toggle delta-btn" data-delta="1" aria-pressed="false">Change vs baseline</button>
+      </div>
       <div class="panel" style="margin-top:12px;">
         <div class="matrix-scroll">
           <div class="heatmatrix" id="heatMatrix"></div>
         </div>
         <div class="heat-legend">
-          <span>0</span>
-          <div class="heat-legend-bar"></div>
+          <span id="legendMin">0</span>
+          <div class="heat-legend-bar" id="legendBar"></div>
           <span id="legendMax">&mdash;</span>
         </div>
         <div class="heat-legend-caption" id="legendCaption">Fixed scale &mdash; the same shade means the same absolute volume across every channel, direction, and week selection.</div>
@@ -519,7 +528,7 @@ window.startHeatmap = function (S) {
   if (S.calls_from) { var cf = new Date(S.calls_from + "T12:00:00Z").toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
     document.getElementById("callsFrom").textContent = " \u00b7 Calls from " + cf + " (RingCX keeps about 126 days); tickets from Jan 2026"; }
 
-  var state = { channel: "all", dir: "all", week: "", metric: "volume", compare: "ytd", range: { start: "", end: "" }, coverageMode: "required" };
+  var state = { channel: "all", dir: "all", week: "", metric: "volume", compare: "ytd", deltaView: false, range: { start: "", end: "" }, coverageMode: "required" };
   function isRangeActive() { return !!(state.range.start && state.range.end && state.range.start <= state.range.end); }
 
   function escapeHtml(s) {
@@ -1183,7 +1192,37 @@ window.startHeatmap = function (S) {
   }
   var FIXED_MAX_BY_METRIC = {};
   Object.keys(METRICS).forEach(function (k) { FIXED_MAX_BY_METRIC[k] = computeFixedMax(k); });
+  // Set by renderMatrix(): null in normal Values view, else the max absolute
+  // difference (symmetric scale) used to color the Change-vs-baseline view.
+  var lastDeltaMaxAbs = null;
+  function deltaColor(signedRatio) {
+    // signedRatio in [-1,1]: negative = below baseline (--good), positive =
+    // above (--critical), ~0 = neutral grey. Alpha ramps with magnitude.
+    var cs = getComputedStyle(document.documentElement);
+    function hexToRgb(hex) {
+      hex = hex.trim().replace("#", "");
+      if (hex.length === 3) hex = hex.split("").map(function (c) { return c + c; }).join("");
+      var n = parseInt(hex, 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    var base = signedRatio >= 0 ? hexToRgb(cs.getPropertyValue("--critical") || "#C23B3B") : hexToRgb(cs.getPropertyValue("--good") || "#1E8A5F");
+    var m = Math.min(Math.abs(signedRatio), 1);
+    if (m < 0.02) return "rgba(128,128,128,0.22)";
+    return "rgba(" + base[0] + "," + base[1] + "," + base[2] + "," + (0.25 + 0.75 * m).toFixed(2) + ")";
+  }
   function updateLegend() {
+    var bar = document.getElementById("legendBar");
+    if (lastDeltaMaxAbs != null) {
+      var mt = METRICS[state.metric];
+      var fm = function (x) { return mt.fmt ? mt.fmt(x, false) : String(Math.round(x * 10) / 10); };
+      bar.classList.add("diverging");
+      document.getElementById("legendMin").textContent = "-" + fm(lastDeltaMaxAbs);
+      document.getElementById("legendMax").textContent = "+" + fm(lastDeltaMaxAbs);
+      document.getElementById("legendCaption").textContent = "Change vs " + lastEffectiveCompareLabel + " — green = below baseline, red = above. Scale is symmetric and set by the largest difference in this view, so it varies with the week and comparison picked.";
+      return;
+    }
+    bar.classList.remove("diverging");
+    document.getElementById("legendMin").textContent = "0";
     var max = FIXED_MAX_BY_METRIC[state.metric];
     var metric = METRICS[state.metric];
     document.getElementById("legendMax").textContent = metric.isPercent ? "100%" : (metric.fmt ? metric.fmt(max, false) + "+" : Math.ceil(max) + "+");
@@ -1280,6 +1319,18 @@ window.startHeatmap = function (S) {
     }
     lastEffectiveCompareLabel = (weekMatrix && !rangeActive) ? compareLabel : "YTD avg";
 
+    // Change-vs-baseline view: only for a single selected week. Colors each
+    // cell by (this week - baseline) on a symmetric scale.
+    var deltaMode = !!(state.deltaView && weekMatrix && !rangeActive);
+    var deltaMaxAbs = 0.001;
+    if (deltaMode) {
+      for (var dd = 0; dd < 7; dd++) for (var dh = 0; dh < 24; dh++) {
+        var dv = weekMatrix[dd][dh], dc = compareMatrix[dd][dh];
+        if (dv != null && dc != null && Math.abs(dv - dc) > deltaMaxAbs) deltaMaxAbs = Math.abs(dv - dc);
+      }
+    }
+    lastDeltaMaxAbs = deltaMode ? deltaMaxAbs : null;
+
     // Anomaly flagging: is this week's actual value >2 std dev above this
     // slot's own historical distribution across every week on record? Only
     // meaningful with a single week selected (there's no single "actual"
@@ -1311,6 +1362,18 @@ window.startHeatmap = function (S) {
         var hasData = v != null;
         var ratio = hasData ? Math.min(v / fixedMax, 1) : 0;
         var color = heatColor(ratio);
+        var deltaText = null;
+        if (deltaMode) {
+          if (hasData && compareVal != null) {
+            var dAbs = v - compareVal;
+            color = deltaColor(dAbs / deltaMaxAbs);
+            var dRound = Math.round(dAbs * 10) / 10;
+            deltaText = Math.abs(dAbs) < 0.05 ? "" : ((dRound > 0 ? "+" : "-") + (metricKey === "volume" ? String(Math.abs(dRound)) : (metric.fmt ? metric.fmt(Math.abs(dAbs), false) : String(Math.abs(dRound)))));
+          } else {
+            color = "rgba(128,128,128,0.12)";
+            deltaText = "";
+          }
+        }
         var pct = percentileOf(v);
         var deltaOverall = (hasData && overallAvg > 0) ? Math.round(((v - overallAvg) / overallAvg) * 100) : 0;
         var deltaCompare = (hasData && compareVal != null && compareVal > 0) ? Math.round(((v - compareVal) / compareVal) * 100) : 0;
@@ -1327,6 +1390,7 @@ window.startHeatmap = function (S) {
 
         var valueText = hasData ? metric.fmt(v, !!weekMatrix) : "no data";
         var cellText = hasData ? (metricKey === "volume" ? (weekMatrix ? (v > 0 ? String(v) : "") : (v >= 0.05 ? v.toFixed(1) : "")) : metric.fmt(v, !!weekMatrix)) : "";
+        if (deltaText !== null) cellText = deltaText;
         html += '<div class="matrix-cell" style="background:' + color + '"' +
           ' data-day="' + DAY_NAMES[day] + '" data-hour="' + hourLabelShort(hr) + '" data-day-idx="' + day + '" data-hour-idx="' + hr + '" data-value="' + valueText + '"' +
           ' data-has-data="' + (hasData ? "1" : "0") + '"' +
@@ -1513,6 +1577,7 @@ window.startHeatmap = function (S) {
     // anomaly flagging are single-week concepts, see renderMatrix's comment.
     var enabled = state.week !== "" && !isRangeActive();
     document.querySelectorAll(".compare-btn").forEach(function (b) { b.disabled = !enabled; });
+    document.querySelectorAll(".delta-btn").forEach(function (b) { b.disabled = !enabled; });
     if (!enabled) {
       document.getElementById("compareNote").textContent = isRangeActive()
         ? "Not available for a custom range — pick a single week above instead."
@@ -1967,6 +2032,15 @@ window.startHeatmap = function (S) {
   document.getElementById("weekSelect").addEventListener("change", function () { setActivePeriodBtn(null); });
   document.getElementById("rangeStart").addEventListener("change", function () { setActivePeriodBtn(null); });
   document.getElementById("rangeEnd").addEventListener("change", function () { setActivePeriodBtn(null); });
+
+  document.querySelectorAll(".delta-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      state.deltaView = btn.getAttribute("data-delta") === "1";
+      document.querySelectorAll(".delta-btn").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+      render();
+    });
+  });
 
   document.querySelectorAll(".compare-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
