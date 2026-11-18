@@ -285,6 +285,9 @@
   .wr-agents th { white-space: normal; vertical-align: bottom; line-height: 1.2; }
   .wr-agents th, .wr-agents td { padding: 6px 5px; }
   .wr-agents td .sub2 { display: block; font-size: 11px; color: var(--ink-3); font-weight: 400; }
+  /* Heatmap overlay (2026-11-18): the page heatmap.html runs in a full-screen frame; the data comes from the "heatmap" function. */
+  #hmOverlay { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: flex; flex-direction: column; }
+  #hmOverlay iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -342,6 +345,7 @@
           <button id="refreshBtn" class="btn" title="Refresh now">Refresh</button>
           <button id="reportBtn" class="btn" title="This week vs last week: team numbers and agent score summaries, ready to copy">Report</button>
           <button id="snapshotBtn" class="btn" title="Download the main numbers as a time-stamped spreadsheet (CSV)">Snapshot</button>
+          <button id="heatmapBtn" class="btn" title="Day by hour call and ticket volume, with staffing coverage" hidden>Heatmap</button>
           <button id="themeBtn" class="btn" title="Switch theme">Theme</button>
           <span id="viewerTag" class="snapshot-tag" hidden></span>
           <button id="signoutBtn" class="btn">Sign out</button>
@@ -503,7 +507,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.18<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.19<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -632,8 +636,9 @@
     SUPERVISOR_HOURS: { "Peter Taylor": { from: "15:00", to: "17:00" } },
     // Managers: not tracked in Logins today (Fred, 2026-10-15).
     LOGIN_EXCLUDE: ["Erasmo Robles", "Ricardo Andrade"],
-    // L2s' logins are shown only to managers (Fred, 2026-10-15). L2 list confirmed by Fred (the roster tier lookup was out of date).
-    MANAGER_IDS: ["3299715", "3301145", "3301139"],   // Fred, Ricardo, Erasmo
+    // L2s' logins are shown only to managers (2026-10-15). L2 list confirmed (the roster tier lookup was out of date).
+    MANAGER_IDS: ["3299715", "3301145", "3301139"],   // the three managers
+    HEATMAP_IDS: ["3299715"],   // who sees the Heatmap button; the "heatmap" function has its own VIEWERS list, keep them in sync
     NOT_RANKED_IDS: ["3301130"],                      // never ranked in Performance or Previous days
     // Zendesk / Jira email for people whose Zendesk name doesn't match their RingCX name (ticket waits, ES, CSAT, work).
     EMAIL_ALIASES: { "Lenny Pendilla": "lenny@bqe.com" },
@@ -785,6 +790,7 @@
   function initialsOf(n) { return String(n || "").split(/\s+/).filter(Boolean).map(function (p) { return p[0]; }).slice(0, 2).join("").toUpperCase(); }
   function showViewer() {
     var el = $("viewerTag"); if (!el) return;
+    var hb = $("heatmapBtn"); if (hb) hb.hidden = (CONFIG.HEATMAP_IDS || []).indexOf(String(myAgentId() || "")) < 0;
     var n = viewerName();
     if (presence.channel) { if (n && n !== presence.trackedName) trackPresence(); renderPresence(); return; }
     el.hidden = !n;
@@ -4132,6 +4138,43 @@
   $("snapshotBtn").addEventListener("click", function () { downloadSnapshot(); });
 
   // ---------------- views ----------------
+  // ---------------- Heatmap overlay ----------------
+  // heatmap.html (built from the old Volume Heatmap by scripts/make-live-heatmap.py) runs in a full-screen frame.
+  // This page fetches the nightly snapshot once (kept in memory, ETag re-check on each open) and posts it to the frame.
+  var hm = { snap: null, etag: "", frame: null, loading: false };
+  async function hmFetch() {
+    if (tokenNearExpiry()) { try { await refreshToken(); } catch (e) {} }
+    var go = function () { return fetch(CONFIG.SUPABASE_URL + "/functions/v1/heatmap", { headers: Object.assign({ apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess }, hm.snap && hm.etag ? { "If-None-Match": hm.etag } : {}) }); };
+    var r = await go();
+    if (r.status === 401) { await refreshToken(); r = await go(); }
+    if (r.status === 304 && hm.snap) return hm.snap;
+    if (!r.ok) { var j = {}; try { j = await r.json(); } catch (e) {} throw new Error(j.error || ("HTTP " + r.status)); }
+    var et = r.headers.get("ETag") || "";
+    hm.snap = await r.json(); hm.etag = et;
+    return hm.snap;
+  }
+  async function hmSend() {
+    if (hm.loading) return;
+    hm.loading = true;
+    try { var s = await hmFetch(); if (hm.frame && hm.frame.contentWindow) hm.frame.contentWindow.postMessage({ type: "hm-data", snapshot: s }, location.origin); }
+    catch (e) { if (hm.frame && hm.frame.contentWindow) hm.frame.contentWindow.postMessage({ type: "hm-error", message: String(e.message || e) }, location.origin); }
+    finally { hm.loading = false; }
+  }
+  function openHeatmap() {
+    if ($("hmOverlay")) return;
+    var box = document.createElement("div"); box.id = "hmOverlay";
+    var f = document.createElement("iframe"); f.title = "Volume heatmap"; f.src = "heatmap.html";
+    box.appendChild(f); document.body.appendChild(box); hm.frame = f;
+    document.body.style.overflow = "hidden";
+  }
+  function closeHeatmap() { var b = $("hmOverlay"); if (b) b.remove(); hm.frame = null; document.body.style.overflow = ""; }
+  window.addEventListener("message", function (ev) {
+    if (ev.origin !== location.origin || !ev.data || !hm.frame || ev.source !== hm.frame.contentWindow) return;
+    if (ev.data.type === "hm-ready") hmSend();
+    if (ev.data.type === "hm-close") closeHeatmap();
+  });
+  $("heatmapBtn").addEventListener("click", openHeatmap);
+
   function showSignin(msg) {
     stopPolling();
     $("liveView").hidden = true; $("signinView").hidden = false;

@@ -1,0 +1,2187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Volume Heatmap</title>
+<style>
+  #hmStatus { padding: 60px 16px; text-align: center; color: var(--ink-2); font-size: 14px; }
+  #hmStatus.err { color: #B3261E; }
+  #hmApp[hidden] { display: none; }
+  :root {
+    --bg: #F5F6F9;
+    --surface: #FFFFFF;
+    --surface-alt: #ECEFF5;
+    --border: #DDE1EA;
+    --ink: #16213E;
+    --ink-2: #47517A;
+    --ink-3: #8890AC;
+    --accent: #3454D1;
+    --accent-soft: #E7EBFB;
+    --good: #1E8A5F;
+    --good-soft: #E4F5EC;
+    --warning: #B8801E;
+    --warning-soft: #FBF1DE;
+    --critical: #C23B3B;
+    --critical-soft: #FBE7E4;
+    --shadow: 0 1px 2px rgba(22,33,62,0.06), 0 6px 16px rgba(22,33,62,0.06);
+    --serif: Georgia, "Iowan Old Style", "Source Serif 4", "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0C1220; --surface: #131A2B; --surface-alt: #1B2438; --border: #29334A;
+      --ink: #E9ECF6; --ink-2: #B0B7D1; --ink-3: #7C86A3;
+      --accent: #7C93F5; --accent-soft: #1E2748;
+      --good: #4FC090; --good-soft: #123024;
+      --warning: #E3AC49; --warning-soft: #34240A;
+      --critical: #E2685A; --critical-soft: #38201B;
+      --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 6px 20px rgba(0,0,0,0.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0C1220; --surface: #131A2B; --surface-alt: #1B2438; --border: #29334A;
+    --ink: #E9ECF6; --ink-2: #B0B7D1; --ink-3: #7C86A3;
+    --accent: #7C93F5; --accent-soft: #1E2748;
+    --good: #4FC090; --good-soft: #123024;
+    --warning: #E3AC49; --warning-soft: #34240A;
+    --critical: #E2685A; --critical-soft: #38201B;
+    --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 6px 20px rgba(0,0,0,0.3);
+  }
+  :root[data-theme="light"] {
+    --bg: #F5F6F9; --surface: #FFFFFF; --surface-alt: #ECEFF5; --border: #DDE1EA;
+    --ink: #16213E; --ink-2: #47517A; --ink-3: #8890AC;
+    --accent: #3454D1; --accent-soft: #E7EBFB;
+    --good: #1E8A5F; --good-soft: #E4F5EC;
+    --warning: #B8801E; --warning-soft: #FBF1DE;
+    --critical: #C23B3B; --critical-soft: #FBE7E4;
+    --shadow: 0 1px 2px rgba(22,33,62,0.06), 0 6px 16px rgba(22,33,62,0.06);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .dash {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100%;
+    padding: 32px 20px 80px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+  .masthead { display: flex; flex-direction: column; gap: 6px; }
+  .back-link { font-size: 12px; }
+  .back-link a { color: var(--ink-3); text-decoration: none; }
+  .back-link a:hover { color: var(--accent); text-decoration: underline; }
+  .eyebrow {
+    font: 600 11px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 { font: 400 34px/1.15 var(--serif); margin: 2px 0 0; color: var(--ink); text-wrap: balance; }
+  .snapshot-tag {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
+    font-size: 12px; color: var(--ink-3); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 10px 4px 8px; width: fit-content;
+  }
+  .snapshot-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
+
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .pill-toggle {
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+    border-radius: 999px; padding: 7px 13px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+    font-family: var(--sans);
+  }
+  .pill-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .pill-toggle:disabled { opacity: 0.45; cursor: default; }
+  .pill-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  select.pill-toggle { appearance: none; -webkit-appearance: none; padding-right: 26px; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: right 12px center, right 7px center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+  .channel-note { font-size: 12px; color: var(--ink-3); }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 4px;
+  }
+  .kpi-label { font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .kpi-value { font: 400 30px/1.1 var(--serif); font-variant-numeric: tabular-nums; }
+  .kpi-sub { font-size: 12.5px; color: var(--ink-2); }
+
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .section-title { font: 400 19px/1.2 var(--serif); margin: 0; }
+  .section-note { font-size: 12.5px; color: var(--ink-3); }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px 22px; box-shadow: var(--shadow);
+  }
+  .panel-empty { font-size: 12.5px; color: var(--ink-3); padding: 8px 0; }
+
+  /* Day x Hour matrix: rows = weekday, columns = hour, cell color = volume,
+     green (quiet) -> red (busy) on a FIXED scale (see FIXED_MAX in the
+     script) so a shade means the same absolute volume regardless of which
+     channel/direction/week is currently selected. */
+  .matrix-scroll { overflow-x: auto; margin-top: 4px; }
+  .heatmatrix { display: flex; flex-direction: column; gap: 3px; min-width: 760px; }
+  .matrix-row { display: grid; grid-template-columns: 46px repeat(24, 1fr); gap: 3px; align-items: center; }
+  .matrix-corner { min-width: 0; }
+  .matrix-hourlabel {
+    text-align: center; font-size: 9px; font-weight: 600; color: var(--ink-3);
+    letter-spacing: 0.02em;
+  }
+  .matrix-daylabel {
+    font-size: 11.5px; font-weight: 700; color: var(--ink-2); text-align: right; padding-right: 6px;
+  }
+  .matrix-cell {
+    aspect-ratio: 1.4 / 1; border-radius: 4px; color: #fff; display: flex;
+    align-items: center; justify-content: center; font-size: 9.5px; font-weight: 700;
+    font-variant-numeric: tabular-nums; cursor: default; min-width: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .matrix-cell { transition: background-color 0.4s ease; }
+  }
+  /* Anomaly ring (Phase 2, 2026-08-04): a white inset ring + dark halo flags a
+     cell whose selected-week value is >2 standard deviations above its own
+     historical per-slot mean - deliberately a border, not a color/fill
+     change, so it never clashes with the fixed volume/metric color scale. */
+  .matrix-cell[data-anomaly="1"] { outline: 2px solid #fff; outline-offset: -2px; box-shadow: 0 0 0 1px rgba(0,0,0,0.35); }
+
+  .heat-legend { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 12px; color: var(--ink-3); }
+  .heat-legend-bar {
+    flex: 1 1 auto; max-width: 260px; height: 10px; border-radius: 5px;
+    background: linear-gradient(to right, var(--good), var(--warning), var(--critical));
+  }
+  /* Coverage's scale is inverted (red = 0/danger, green = fully staffed) -
+     see renderCoverageSection's ratio comment. */
+  .heat-legend-bar.inverted {
+    background: linear-gradient(to right, var(--critical), var(--warning), var(--good));
+  }
+  .heat-legend-caption { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
+
+  input[type="date"].pill-toggle { padding: 6px 10px; font-family: var(--sans); color-scheme: light dark; }
+
+  /* Click-to-drill panel (Phase 3, 2026-08-05) */
+  .drill-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .drill-table th, .drill-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .drill-table th { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600; }
+  .drill-table td.subject-cell { white-space: normal; max-width: 320px; }
+  .drill-table tbody tr:hover { background: var(--surface-alt); }
+
+  /* Upcoming PTO/holidays panel (Phase 4, 2026-08-05) */
+  .pto-list { display: flex; flex-direction: column; gap: 8px; }
+  .pto-row { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
+  .pto-dates { font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 150px; flex: none; }
+  .pto-who { color: var(--ink); }
+  .pto-type { font-size: 11.5px; color: var(--ink-3); }
+  .pto-row.pto-holiday .pto-who { font-weight: 700; color: var(--accent); }
+
+  .heat-tooltip {
+    position: fixed; z-index: 50; pointer-events: none; background: var(--ink);
+    color: var(--bg); border-radius: 8px; padding: 9px 12px; font-size: 12px;
+    line-height: 1.5; box-shadow: var(--shadow); opacity: 0; transform: translateY(4px);
+    transition: opacity 0.1s ease, transform 0.1s ease; max-width: 220px;
+  }
+  .heat-tooltip.visible { opacity: 1; transform: translateY(0); }
+  .heat-tooltip .htt-title { font-weight: 700; margin-bottom: 4px; }
+  .heat-tooltip .htt-row { display: flex; justify-content: space-between; gap: 12px; opacity: 0.9; }
+  .heat-tooltip .htt-row b { font-variant-numeric: tabular-nums; }
+
+  details.panel summary {
+    cursor: pointer; font: 400 15px/1.2 var(--serif); list-style: none; display: flex;
+    align-items: center; justify-content: space-between;
+  }
+  details.panel summary::-webkit-details-marker { display: none; }
+  details.panel summary::after { content: "+"; font-family: var(--sans); font-size: 18px; color: var(--ink-3); }
+  details.panel[open] summary::after { content: "\2212"; }
+  .method-body { margin-top: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+  @media (max-width: 760px) { .method-body { grid-template-columns: 1fr; } }
+  .method-body h4 { font: 700 12px var(--sans); letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 6px; }
+  .method-body ul { margin: 0; padding-left: 18px; }
+  .method-body li { margin-bottom: 5px; }
+  .method-body code { background: var(--surface-alt); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .method-full { grid-column: 1 / -1; }
+  .method-lede { margin: 0; }
+
+  footer.foot { text-align: center; font-size: 11.5px; color: var(--ink-3); padding-top: 4px; }
+</style>
+
+</head>
+<body>
+<div id="hmStatus">Loading the heatmap (about 8 MB, first open only)...</div>
+<div id="hmApp" hidden>
+<div class="dash">
+  <div class="wrap">
+
+    <div class="masthead">
+      <div class="back-link"><a href="#" id="hmClose">&larr; Back to Live View</a></div>
+      <div class="eyebrow">Support Operations &middot; Volume Heatmap</div>
+      <h1>Volume vs. Coverage Heatmap</h1>
+      <div class="snapshot-tag"><span class="snapshot-dot"></span>Data snapshot &mdash; <span id="genDate">&mdash;</span>, updated nightly<span id="callsFrom"></span></div>
+    </div>
+
+    <div class="filters" id="periodFilterRow">
+      <span class="section-note">Period:</span>
+      <button class="pill-toggle period-btn" data-period="week" aria-pressed="false">Week</button>
+      <button class="pill-toggle period-btn" data-period="month" aria-pressed="false">Month</button>
+      <button class="pill-toggle period-btn" data-period="quarter" aria-pressed="false">Quarter</button>
+      <button class="pill-toggle period-btn" data-period="year" aria-pressed="true">Year (YTD)</button>
+    </div>
+
+    <div class="filters">
+      <button class="pill-toggle channel-btn" data-channel="all" aria-pressed="true">All</button>
+      <button class="pill-toggle channel-btn" data-channel="calls" aria-pressed="false">Calls</button>
+      <button class="pill-toggle channel-btn" data-channel="email" aria-pressed="false">Email</button>
+      <button class="pill-toggle channel-btn" data-channel="webform" aria-pressed="false">Webform</button>
+    </div>
+
+    <div class="filters" id="directionFilterRow">
+      <span class="section-note">Direction:</span>
+      <button class="pill-toggle dir-btn" data-dir="all" aria-pressed="true">All</button>
+      <button class="pill-toggle dir-btn" data-dir="Inbound" aria-pressed="false">Inbound</button>
+      <button class="pill-toggle dir-btn" data-dir="Outbound" aria-pressed="false">Outbound</button>
+      <span class="channel-note" id="directionNote"></span>
+    </div>
+
+    <div class="filters" id="metricFilterRow">
+      <span class="section-note">Heat by:</span>
+      <button class="pill-toggle metric-btn" data-metric="volume" aria-pressed="true">Volume</button>
+      <button class="pill-toggle metric-btn" data-metric="abandon" aria-pressed="false">Abandon Rate</button>
+      <button class="pill-toggle metric-btn" data-metric="handle" aria-pressed="false">Avg Handle Time</button>
+      <button class="pill-toggle metric-btn" data-metric="firstresponse" aria-pressed="false">First Response Time</button>
+      <span class="channel-note" id="metricNote"></span>
+    </div>
+
+    <div class="kpi-grid" id="kpiGrid"></div>
+
+    <details class="panel" id="upcomingPtoPanel">
+      <summary>Upcoming PTO &amp; Holidays</summary>
+      <div id="upcomingPtoBody" style="margin-top:12px;"></div>
+    </details>
+
+    <div>
+      <div class="section-head">
+        <h2 class="section-title">Day &times; Hour Volume Heatmap</h2>
+        <span class="section-note" id="matrixNote">Average per slot, year-to-date &middot; Pacific Time</span>
+      </div>
+      <div class="filters" style="margin-top:10px; margin-bottom:0;">
+        <span class="section-note">Compare a week:</span>
+        <select class="pill-toggle" id="weekSelect"><option value="">None (YTD average only)</option></select>
+        <span class="section-note">or a custom range:</span>
+        <input type="date" class="pill-toggle" id="rangeStart" aria-label="Range start date">
+        <span class="section-note">&ndash;</span>
+        <input type="date" class="pill-toggle" id="rangeEnd" aria-label="Range end date">
+        <button class="pill-toggle" id="rangeClearBtn" type="button">Clear range</button>
+        <span class="channel-note" id="rangeNote"></span>
+      </div>
+      <div class="filters" id="compareFilterRow" style="margin-top:10px; margin-bottom:0;">
+        <span class="section-note">Compare to:</span>
+        <button class="pill-toggle compare-btn" data-compare="ytd" aria-pressed="true">YTD average</button>
+        <button class="pill-toggle compare-btn" data-compare="prevweek" aria-pressed="false">Previous week</button>
+        <button class="pill-toggle compare-btn" data-compare="prev4" aria-pressed="false">Prior 4-week avg</button>
+        <span class="channel-note" id="compareNote"></span>
+      </div>
+      <div class="panel" style="margin-top:12px;">
+        <div class="matrix-scroll">
+          <div class="heatmatrix" id="heatMatrix"></div>
+        </div>
+        <div class="heat-legend">
+          <span>0</span>
+          <div class="heat-legend-bar"></div>
+          <span id="legendMax">&mdash;</span>
+        </div>
+        <div class="heat-legend-caption" id="legendCaption">Fixed scale &mdash; the same shade means the same absolute volume across every channel, direction, and week selection.</div>
+        <div class="section-note" style="margin-top:8px;">Click any cell to see the underlying calls/tickets.</div>
+      </div>
+      <div class="panel" id="drillPanel" style="display:none; margin-top:12px;">
+        <div class="section-head">
+          <h3 class="section-title" id="drillTitle" style="font-size:16px;"></h3>
+          <div class="filters" style="gap:8px;">
+            <button class="pill-toggle" id="drillExportBtn" type="button">Export this slot (CSV)</button>
+            <button class="pill-toggle" id="drillCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div class="section-note" id="drillNote" style="margin:6px 0 10px;"></div>
+        <div class="matrix-scroll">
+          <table class="drill-table" id="drillTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-head">
+        <h2 class="section-title">Day &times; Hour Agent Coverage Heatmap</h2>
+        <span class="section-note" id="coverageMatrixNote">Typical scheduled agents per slot &middot; Pacific Time</span>
+      </div>
+      <div class="filters" style="margin-top:10px; margin-bottom:0;">
+        <span class="section-note">Show:</span>
+        <button class="pill-toggle coverage-mode-btn" data-coverage-mode="required" aria-pressed="true">Required (vs Volume)</button>
+        <button class="pill-toggle coverage-mode-btn" data-coverage-mode="planned" aria-pressed="false">Planned (Roster + PTO)</button>
+        <button class="pill-toggle coverage-mode-btn" data-coverage-mode="actual" aria-pressed="false">Actual (real activity)</button>
+        <span class="channel-note" id="coverageModeNote"></span>
+      </div>
+      <div class="panel" style="margin-top:12px;">
+        <div class="matrix-scroll">
+          <div class="heatmatrix" id="coverageMatrix"></div>
+        </div>
+        <div class="heat-legend">
+          <span id="coverageLegendMin">0</span>
+          <div class="heat-legend-bar inverted" id="coverageLegendBar"></div>
+          <span id="coverageLegendMax">&mdash;</span>
+        </div>
+        <div class="heat-legend-caption" id="coverageLegendCaption">Fixed scale &mdash; agents typically scheduled per slot, from the Support Roster + approved PTO.</div>
+        <div class="section-note" style="margin-top:8px;">Click any cell to see who's scheduled (and who's on approved PTO/holiday) &mdash; hover for a quick name list. Uses the same channel/direction/week/range filters above.</div>
+      </div>
+      <div class="panel" id="coverageDrillPanel" style="display:none; margin-top:12px;">
+        <div class="section-head">
+          <h3 class="section-title" id="coverageDrillTitle" style="font-size:16px;"></h3>
+          <div class="filters" style="gap:8px;">
+            <button class="pill-toggle" id="coverageDrillExportBtn" type="button">Export this slot (CSV)</button>
+            <button class="pill-toggle" id="coverageDrillCloseBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div class="section-note" id="coverageDrillNote" style="margin:6px 0 10px;"></div>
+        <div class="matrix-scroll">
+          <table class="drill-table" id="coverageDrillTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="heat-tooltip" id="heatTooltip"></div>
+
+    <details class="panel">
+      <summary>Methodology &amp; scope notes</summary>
+      <div class="method-body">
+        <div class="method-full">
+          <h4>Data source</h4>
+          <p class="method-lede">
+            Calls come from RingCentral's platform Call Log API
+            (<code>/restapi/v1.0/account/~/call-log</code>) &mdash; not RingCX/ACE's
+            session-token-only endpoint, which requires an internal-only
+            permission no self-service app can obtain. Email and Webform come
+            from Zendesk ticket creation timestamps, identified via the
+            ticket's Origin field (mirrored as a tag) rather than Zendesk's
+            native channel field, which is unreliable for this account (most
+            tickets arrive through a middleware/API layer that reports every
+            channel as <code>api</code> regardless of true origin).
+          </p>
+        </div>
+        <div>
+          <h4>Timezone &amp; averaging</h4>
+          <ul>
+            <li>All day-of-week and hour-of-day bucketing uses <b>Pacific Time</b>, matching BQE's HQ business hours &mdash; not the caller's local time or UTC.</li>
+            <li>With no week selected, each matrix cell shows an <b>average</b>: total volume in that day+hour bucket &divide; number of times that weekday has occurred so far this year (not a raw total), so a partial year doesn't understate later months.</li>
+            <li>Selecting a week switches every cell to that week's actual count instead &mdash; hover any cell to see the exact value, how it compares to that slot's own YTD average, and its percentile among all 168 slots currently shown.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Color scale</h4>
+          <ul>
+            <li>The green-to-red scale is <b>fixed</b>, not rescaled per view: the reference maximum is computed once from every channel's full year-to-date matrix, so a given shade of red represents the same absolute volume whether you're looking at All, Calls, Email, or Webform, any direction filter, or any selected week. Switching views never silently changes what "red" means.</li>
+            <li>A single unusually busy week can exceed the fixed reference (which is based on YTD averages) &mdash; those cells simply clip at full red rather than the scale stretching to fit, which is standard behavior for a fixed-scale heatmap.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Heat by: metric toggle</h4>
+          <ul>
+            <li><b>Volume</b> (default) works with any channel. <b>Abandon Rate</b> and <b>Avg Handle Time</b> are Calls-only concepts (they use the call's own <code>result</code>/duration fields) &mdash; disabled outside the Calls channel, auto-reverting to Volume if you switch away while one is active. <b>First Response Time</b> is a Zendesk-ticket concept with no meaning for Calls &mdash; disabled on the Calls channel, same auto-revert behavior.</li>
+            <li>Switching the metric only changes what the <b>matrix</b> and its <b>legend</b> show &mdash; the KPI tiles above (including Busiest Slot) always reflect Volume, regardless of which metric is currently heat-mapped.</li>
+            <li>An empty cell (no calls/tickets in that slot at all) is shown blank rather than as a misleading "0%" or "0s" &mdash; hover it to confirm "No data in this slot" rather than reading a blank cell as a real zero measurement.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Comparison &amp; anomaly flagging</h4>
+          <ul>
+            <li>Once a week is selected, <b>Compare to</b> sets what "typical" means for every cell's tooltip delta: <b>YTD average</b> (default), the <b>Previous week</b>, or a <b>Prior 4-week average</b>. If there isn't enough history yet for the chosen mode (e.g. the earliest week on record), it falls back to YTD average with a note rather than showing nothing.</li>
+            <li>A white ring around a cell flags an <b>anomaly</b>: that week's actual value is more than 2 standard deviations above everything this exact day+hour slot has ever recorded (at least 4 prior weeks of history required before flagging &mdash; too few data points make a standard deviation meaningless). This is a different question from the Compare-to delta above &mdash; it's independent of which comparison baseline is selected, and only appears once a week is chosen.</li>
+            <li><b>Same week last year</b> isn't available as a comparison option &mdash; the pipeline only holds year-to-date data; adding it would mean backfilling roughly 7 months of prior-year data across every pull script, deferred for now.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Custom date range, click-to-drill, export</h4>
+          <ul>
+            <li>The week dropdown and the two date pickers are mutually exclusive &mdash; picking one clears the other. A custom range works everywhere a week did (matrix, KPIs), except <b>Compare-to and anomaly flagging are single-week-only</b> and are disabled while a range is active.</li>
+            <li><b>Click any matrix cell</b> to list the actual calls/tickets behind that number, scoped to whatever's currently in view. With no week/range selected this can span every occurrence of that slot all year &mdash; the list caps at 300 rows (most recent first) with a note; the panel's own "Export this slot (CSV)" button downloads the complete set, not just what's rendered.</li>
+            <li><b>Calls</b> show time, direction, duration, and outcome &mdash; there's no clean per-call "agent" (a call's routing can end in a queue, auto-attendant, or a forwarded external number, not always one named person). <b>Tickets</b> (Email/Webform) show the Zendesk assignee and subject instead &mdash; every phone call also creates a Zendesk ticket, so "who handled this" lives on the ticket side, not the raw call record.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Day &times; Hour Agent Coverage Heatmap (Phase 4, 2026-08-05)</h4>
+          <ul>
+            <li>A separate heatmap below the Volume one (not a "Heat by" toggle, so both can be read side by side) showing how many agents are scheduled to be working each day+hour slot, from the Smartsheet Support Roster + PTO Calendar &mdash; not live presence (there's no real-time cross-check against Zendesk/RingCentral agent status yet, see below). With no week/range selected it shows the <b>typical</b> schedule (PTO ignored); selecting a week or range applies each date's actual approved PTO/holidays, so a past OR <b>upcoming</b> week (the dropdown includes the next 12 weeks even with no volume data yet) shows real expected coverage.</li>
+            <li><b>Calls</b> restricts to phone-capable agents (the Roster's <code>Phone</code> checkbox &mdash; the real "who's in RingCX" signal, confirmed live; the sheet's separate "Support Type" field is blank on 105 of 109 rows and isn't it). Every other channel counts every agent with shift-time data, since all support engineers handle Zendesk tickets regardless of phone duty.</li>
+            <li><b>Shift length is a documented assumption</b>: each agent's own Shift Start plus 8 hours &mdash; no Shift End column exists anywhere in the source sheet for any agent. <b>Lunch is a documented assumption too</b>: a 1-hour break starting at each agent's own Lunch Start, subtracted from their coverage for that hour &mdash; the sheet gives a lunch start time but, like shift length, no duration.</li>
+            <li><b><span id="noShiftCount"></span> team members have no shift-time data anywhere in the sheet, and no reliable activity data to derive one from either</b> &mdash; excluded from hourly coverage rather than guessed at: <span id="noShiftList"></span>. (Agents on overnight rotations use the explicit shift blocks kept in the roster.)</li>
+            <li>PTO entries are matched to a roster employee by normalized name (case/spacing/punctuation-insensitive) &mdash; <b><span id="ptoUnmatchedCount"></span> PTO entries</b> couldn't be matched to a roster employee and are excluded from the coverage subtraction (undercounting PTO impact slightly rather than risking attributing time off to the wrong person; almost all are pre-2023 entries for employees no longer on the current roster). Company-wide entries (blank name, or "Holiday"/"Office Closed Holiday" typed into the name field) reduce every scheduled agent's count for that date. <b>Team/region-level holidays reduce just that office</b> &mdash; found live 2026-08-05 that some Holiday-type rows name a team ("PHL Support Team", "MX") rather than a person; these now correctly zero out only that office's scheduled agents on that date, not everyone.</li>
+            <li>Compare-to only offers "YTD average" for Coverage (Previous week/Prior 4-week don't add information over a schedule that's already fixed and known), and anomaly flagging is off entirely &mdash; a coverage dip from approved PTO is a known, planned fact, not a statistical surprise.</li>
+            <li><b>Planned vs. Actual</b>: "Planned" is the Roster+PTO schedule described above. "Actual" (2026-08-05: "this data should be picked up with the daily dashboard refresh") shows how many agents had <b>real ticket activity</b> (a ticket created or solved, attributed to its assignee) in that exact day+hour slot, at least <code>3</code> times YTD - a documented threshold so a single incidental after-hours touch doesn't look like a regular pattern. This is derived entirely from data already pulled daily, not a live presence poller - Zendesk's Agent Availability API and RingCentral's extension presence are both real-time-snapshot-only with no historical query, so neither could be reconstructed from a once-daily pull; a true login/logout poller remains a possible future follow-up with its own always-on schedule. "Actual" reflects the whole year's empirical pattern and does <b>not</b> respond to the week/range selector the way "Planned" does.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Known caveats</h4>
+          <ul>
+            <li>The Direction (Inbound/Outbound) filter only applies to Calls &mdash; Email and Webform tickets have no equivalent concept, so it's disabled outside the Calls channel.</li>
+            <li>A ticket can carry more than one Origin tag (e.g. a webform submission that also triggers an email) &mdash; each ticket is still counted once per matching channel, so Email + Webform totals can slightly exceed a simple sum if you're cross-checking against another report.</li>
+            <li><b>Avg Time to Resolution</b> starts from a broader population than the rest of the page &mdash; when the channel is "All" it covers <b>every</b> Zendesk ticket, excluding the Product, Custom Reports Group, and Procurement groups, not just tickets tagged phone/email/webform. Selecting Calls/Email/Webform narrows it to that Origin tag specifically (Calls = phone-tagged tickets); the week selector scopes it the same way as every other KPI, bucketed by each ticket's created date (Pacific Time). Direction has no effect (tickets have no inbound/outbound concept). "Resolution" = time to first Solved status (Zendesk's <code>first_resolution_time</code>), not the final close &mdash; a reopened-then-resolved ticket is still measured from its first solve. A very recent week (or a low-volume channel) can show "&mdash;" since only tickets that have <i>already</i> been solved are counted &mdash; a ticket created this week but still open simply isn't in the average yet.</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Refresh</h4>
+          <ul>
+            <li>Both pulls are incremental (checkpoint-based, since the last successful run) rather than a full re-pull each time, so a routine refresh only queries a day or two of new data.</li>
+            <li>This page is a static snapshot &mdash; automated daily refresh + republish keeps it current, but re-publish manually after any ad-hoc pipeline change.</li>
+          </ul>
+        </div>
+      </div>
+    </details>
+
+    <footer class="foot">BQE Software &middot; Internal &middot; Live View Heatmap v1.0</footer>
+  </div>
+</div>
+
+<script>
+window.startHeatmap = function (S) {
+  "use strict";
+
+  // ROWS columns (one row per call OR ticket, unified across channels):
+  //   [channel("calls"/"email"/"webform"), direction("Inbound"/"Outbound"/null),
+  //    durationSec(number/null), weekdayIdx(0=Sun..6=Sat), hourPt(0-23),
+  //    datePt("yyyy-MM-dd"), result(string/null - calls only, e.g. "CONNECTED"/
+  //    "Abandoned" - powers the Abandon Rate heat-by metric),
+  //    assigneeName(string/null - tickets only, Phase 3 2026-08-05), subject
+  //    (string/null - tickets only), timePt("HH:mm"/null - Phase 3, powers
+  //    the click-to-drill list's per-row time-of-day)]
+  var ROWS = S.rows || [];
+  // All-Zendesk-tickets resolution data (Product/Custom Reports Group/
+  // Procurement excluded, first-solve minutes) - a broader population than
+  // ROWS (every ticket, not just phone/email/webform-tagged ones), but
+  // responds to BOTH the week selector and the channel switcher like every
+  // other KPI (2026-08-04 x2 - first added week-scoping, then flagged
+  // that channel-scoping was still missing). Bucketed by each ticket's
+  // created date in Pacific Time. One row per resolved ticket:
+  //   [weekdayIdx(0=Sun..6=Sat), datePt("yyyy-MM-dd"), firstResolutionMinutes,
+  //    channelTags(array, subset of "phone"/"email"/"webform" - "phone" maps
+  //    to the "calls" channel filter; a ticket can have more than one tag),
+  //    hourPt(0-23), replyTimeMinutes(number/null - First Response Time,
+  //    null if solved with no agent reply e.g. via a macro)]
+  var RESOLUTIONS = S.resolutions || [];
+  var RCOL = { weekday: 0, date: 1, minutes: 2, tags: 3, hour: 4, reply: 5 };
+  var CHANNEL_TO_TAG = { calls: "phone", email: "email", webform: "webform" };
+
+  // ---- Agent Coverage heat-by metric (Phase 4, 2026-08-05) ----
+  // ROSTER: one row per real roster entry (see smartsheet-roster-pull.ps1's
+  // header for the sheet's two-section structure and why only the first
+  // section is used) - [employee(email), scheduleDays(array, 0=Sun..6=Sat),
+  // shiftStartHour(0-23, or null if the sheet has no shift-time data for this
+  // person - excluded from hourly coverage, see the methodology panel),
+  // phoneCapable(1/0 - the real "RingCX vs Zendesk-only" signal, confirmed
+  // live 2026-08-05 to be the Phone checkbox column, NOT "Support Type"
+  // which is blank on 105 of 109 rows)].
+  var ROSTER = S.roster || [];
+  var ROSTERCOL = { employee: 0, days: 1, shiftHour: 2, phone: 3, lunchHour: 4, office: 5, shiftEndHour: 6, approx: 7 };
+  // PTO: one row per approved absence/holiday (2026-08-05: "If it is on
+  // the PTO calendar, it has been approved" - no separate approval-status
+  // field exists because there's no unapproved state in this calendar) -
+  // [employeeMatched(email, or null), agentNameRaw, ptoType, startDate,
+  // endDate, officeScope(string, or null)]. Three possible scopes:
+  //   - employeeMatched set -> reduces just that one person's coverage.
+  //   - officeScope set (e.g. "Philippines") -> a team-level holiday entry
+  //     ("PHL Support Team", "MX") found live 2026-08-05 - reduces every
+  //     roster agent in that office, not one individual.
+  //   - both null AND agentNameRaw==="" (or a "Holiday"/"Office Closed
+  //     Holiday" text artifact) -> company-wide, reduces every agent.
+  // Anything else (both null, agentNameRaw non-empty) is a genuinely
+  // unmatched individual entry - affects nobody's count rather than
+  // silently guessing who it means (see ptoUnmatched count in the UI).
+  var PTO = S.pto || [];
+  var PTOCOL = { employee: 0, name: 1, type: 2, start: 3, end: 4, office: 5 };
+  // ACTIVITY: real historical agent activity (Phase 4, 2026-08-05, the requester:
+  // "check the zd or ringcx logs" + "this data should be picked up with the
+  // daily dashboard refresh" - no live-polling task, derived from ticket
+  // created/solved timestamps already pulled daily) - [employee(email),
+  // weekdayIdx(0=Sun..6=Sat), hourIdx(0-23), touchCount]. One row per
+  // (agent, weekday, hour) combination with at least 1 real ticket touch
+  // that YTD. This is the data behind the Coverage matrix's "Actual" mode -
+  // see computeActualBaselineMatrix.
+  var ACTIVITY = S.activity || [];
+  var ACTIVITYCOL = { employee: 0, weekday: 1, hour: 2, count: 3 };
+  var GENERATED_AT = S.generated_at ? new Date(S.generated_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) + " PT" : "unknown";
+  var COL = { channel: 0, dir: 1, duration: 2, weekday: 3, hour: 4, date: 5, result: 6, assignee: 7, subject: 8, time: 9 };
+  // Talk time counts for answered calls only (an abandoned or IVR-only call has none).
+  ROWS.forEach(function (r) { if (r[COL.channel] === "calls" && !(r[COL.result] === "CONNECTED" && r[COL.duration] > 0)) r[COL.duration] = null; });
+  var CALLS_FROM = S.calls_from || null;
+  var ROWS_ALL = CALLS_FROM ? ROWS.filter(function (r) { return r[COL.channel] === "calls" || (r[COL.date] || "") >= CALLS_FROM; }) : ROWS;
+  var DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  document.getElementById("genDate").textContent = GENERATED_AT;
+  document.getElementById("noShiftCount").textContent = (S.no_shift_data || []).length;
+  document.getElementById("noShiftList").textContent = (S.no_shift_data || []).join(", ") || "none";
+  document.getElementById("ptoUnmatchedCount").textContent = S.pto_unmatched || 0;
+  if (S.calls_from) { var cf = new Date(S.calls_from + "T12:00:00Z").toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+    document.getElementById("callsFrom").textContent = " \u00b7 Calls from " + cf + " (RingCX keeps about 126 days); tickets from Jan 2026"; }
+
+  var state = { channel: "all", dir: "all", week: "", metric: "volume", compare: "ytd", range: { start: "", end: "" }, coverageMode: "required" };
+  function isRangeActive() { return !!(state.range.start && state.range.end && state.range.start <= state.range.end); }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  // ---- Week bucketing (Sunday-start, matching the DAY_NAMES order) ----
+  // Works entirely in whole-day integers (epoch-day since 1970-01-01 UTC) to
+  // avoid any timezone-parsing ambiguity from "yyyy-MM-dd" strings - the
+  // weekday index is already correct per-row (computed in Pacific Time at
+  // pull time), so this only needs to find which Sunday each row's date
+  // falls under, not re-derive the weekday itself.
+  function epochDay(dateStr) {
+    var parts = dateStr.split("-");
+    return Math.floor(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]) / 86400000);
+  }
+  function weekStartKeyOf(dateStr, weekdayIdx) {
+    return epochDay(dateStr) - weekdayIdx; // integer epoch-day of that week's Sunday - stable sort/compare key
+  }
+  function weekStartKey(row) { return weekStartKeyOf(row[COL.date], row[COL.weekday]); }
+  function resolutionWeekStartKey(r) { return weekStartKeyOf(r[RCOL.date], r[RCOL.weekday]); }
+  function fmtEpochDay(ed) {
+    var d = new Date(ed * 86400000);
+    return { m: d.getUTCMonth(), day: d.getUTCDate(), y: d.getUTCFullYear() };
+  }
+  var MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function weekLabel(startEpochDay) {
+    var s = fmtEpochDay(startEpochDay), e = fmtEpochDay(startEpochDay + 6);
+    var sStr = MONTH_NAMES[s.m] + " " + s.day;
+    var eStr = (e.m === s.m ? MONTH_NAMES[e.m] + " " + e.day : MONTH_NAMES[e.m] + " " + e.day);
+    return sStr + " – " + eStr + ", " + e.y;
+  }
+
+  // Populate the week dropdown once at load - every week with at least one
+  // row across any channel, most recent first (most relevant for a "how did
+  // this week compare" staffing question). Also adds the next 12 UPCOMING
+  // weeks with no volume data at all (Phase 4, 2026-08-05) - Volume/other
+  // metrics correctly show "no data" for those, but Agent Coverage can be
+  // computed for a future week from the schedule + already-approved PTO,
+  // which is the whole point of "aware of upcoming... PTO requests" (the requester).
+  var weekKeys = [];
+  // Populated by buildWeekOptions() below - weeks added purely to let
+  // Coverage preview an upcoming week, with zero real Volume/ticket/call
+  // data. renderMatrix() checks this so non-Coverage metrics fall back to
+  // the YTD average for these weeks instead of showing an all-blank grid
+  // (2026-08-05: "If you select an upcoming week, the Day x Hour
+  // Volume Heatmap should show YTD averages").
+  var upcomingWeekKeys = {};
+  var FUTURE_WEEKS_TO_ADD = 12;
+  (function buildWeekOptions() {
+    var seen = {};
+    ROWS.forEach(function (r) {
+      if (!r[COL.date]) return;
+      var k = weekStartKey(r);
+      seen[k] = true;
+    });
+    var dataWeekKeys = Object.keys(seen).map(Number);
+    var todayEd = todayEpochDay();
+    var thisWeekStart = todayEd - weekdayOfEpochDay(todayEd);
+    var upcomingKeys = [];
+    for (var i = 0; i <= FUTURE_WEEKS_TO_ADD; i++) {
+      var k2 = thisWeekStart + i * 7;
+      if (seen[k2]) continue; // already has real volume data, not purely "upcoming"
+      seen[k2] = true;
+      upcomingKeys.push(k2);
+    }
+    weekKeys = dataWeekKeys.concat(upcomingKeys).sort(function (a, b) { return b - a; });
+    var sel = document.getElementById("weekSelect");
+    upcomingKeys.forEach(function (k) { upcomingWeekKeys[k] = true; });
+    weekKeys.forEach(function (k) {
+      var opt = document.createElement("option");
+      opt.value = String(k);
+      opt.textContent = "Week of " + weekLabel(k) + (upcomingWeekKeys[k] ? " (upcoming)" : "");
+      sel.appendChild(opt);
+    });
+  })();
+
+  function scopedByChannel() {
+    if (state.channel === "all") return ROWS_ALL;
+    return ROWS.filter(function (r) { return r[COL.channel] === state.channel; });
+  }
+
+  function scopedRows() {
+    var rows = scopedByChannel();
+    if (state.channel === "calls" && state.dir !== "all") {
+      rows = rows.filter(function (r) { return r[COL.dir] === state.dir; });
+    }
+    return rows;
+  }
+
+  function weekRows(rows, weekKey) {
+    return rows.filter(function (r) { return r[COL.date] && weekStartKey(r) === weekKey; });
+  }
+
+  // ---- Phase 3 (2026-08-05): custom date-range filtering, alongside (not
+  // replacing) the single-week dropdown - "yyyy-MM-dd" strings sort the same
+  // lexicographically as chronologically, so plain string comparison works
+  // without re-parsing into epoch days. Compare-to baselines and anomaly
+  // flagging are deliberately NOT extended to ranges (see methodology panel)
+  // - both are single-week concepts; a multi-week custom range disables them
+  // rather than applying them in a way that would be statistically muddled.
+  function rangeRowsOf(rows, dateOf, start, end) {
+    return rows.filter(function (r) { var d = dateOf(r); return d && d >= start && d <= end; });
+  }
+  function daysInRange(start, end) { return epochDay(end) - epochDay(start) + 1; }
+
+  // Number of times each weekday has occurred so far this year, up to and
+  // including the generation date - used for the YTD-average baseline (and
+  // still shown as the comparison figure even when a week is selected).
+  function seriesStart(today, forCalls) {
+    if (forCalls && CALLS_FROM) { var p = CALLS_FROM.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+    return new Date(today.getFullYear(), 0, 1);
+  }
+  function weekdayOccurrences(forCalls) {
+    var counts = [0, 0, 0, 0, 0, 0, 0];
+    var today = GENERATED_AT_PARSEABLE();
+    var jan1 = seriesStart(today, forCalls);
+    var daysElapsed = Math.floor((today - jan1) / 86400000) + 1;
+    var fullWeeks = Math.floor(daysElapsed / 7);
+    var extraDays = daysElapsed % 7;
+    var jan1Day = jan1.getDay();
+    for (var i = 0; i < 7; i++) counts[i] = fullWeeks;
+    for (var d = 0; d < extraDays; d++) counts[(jan1Day + fullWeeks * 7 + d) % 7]++;
+    return counts;
+  }
+
+  function GENERATED_AT_PARSEABLE() {
+    var d = new Date(S.generated_at);
+    if (isNaN(d.getTime())) return new Date();
+    return d;
+  }
+
+  function hourOccurrences(forCalls) {
+    var today = GENERATED_AT_PARSEABLE();
+    var jan1 = seriesStart(today, forCalls);
+    return Math.floor((today - jan1) / 86400000) + 1; // each hour-of-day bucket occurs once per elapsed day
+  }
+
+  // Days-elapsed denominator for "Avg Daily Volume" when a week IS selected -
+  // 7 for any fully-past week, or however many days of the current week have
+  // actually happened so far (never divide a partial week by 7 and understate
+  // it). epoch-day arithmetic throughout to stay consistent with weekStartKey.
+  function todayEpochDay() {
+    var d = GENERATED_AT_PARSEABLE();
+    return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+  }
+  function daysElapsedInWeek(weekKey) {
+    var today = todayEpochDay();
+    if (today < weekKey) return 0;
+    return Math.min(today - weekKey + 1, 7);
+  }
+
+  // Avg first-resolution-time in minutes, scoped to the selected week AND
+  // channel (2026-08-04: "shouldn't the KPIs respect the filters at
+  // the top as well? ... AVG TIME TO RESOLUTION doesn't change if I select
+  // calls, email, or webform" - week-scoping alone wasn't enough, channel
+  // was still being ignored). channel === "all" skips the tag filter
+  // entirely (this KPI's whole point is a broader population than the
+  // phone/email/webform-tagged rows in ROWS, so "all" here still means
+  // every ticket, group-exclusions aside - not just the three tagged ones).
+  function avgResolutionMinutesFor(weekKey, channel, range) {
+    var list = RESOLUTIONS;
+    // Custom range (Phase 3, 2026-08-05) takes priority over the week
+    // dropdown when active - see isRangeActive().
+    if (range && range.start && range.end && range.start <= range.end) {
+      list = rangeRowsOf(list, function (r) { return r[RCOL.date]; }, range.start, range.end);
+    } else if (weekKey !== "" && weekKey != null) {
+    // Normalize here rather than trust the caller - state.week is stored as a
+    // string (it's a <select> value), and every other week-filter in this
+    // file converts with a leading `+` right before comparing against the
+    // numeric epoch-day keys. Missing that conversion once here made this
+    // KPI silently show "-" for EVERY week (Number === String is always
+    // false, never throws) - easy to miss since a genuinely-too-recent week
+    // legitimately shows "-" too, masking the bug in casual testing.
+      list = list.filter(function (r) { return resolutionWeekStartKey(r) === +weekKey; });
+    }
+    if (channel && channel !== "all") {
+      var tag = CHANNEL_TO_TAG[channel];
+      list = list.filter(function (r) { return r[RCOL.tags].indexOf(tag) !== -1; });
+    }
+    return avgOf(list);
+  }
+  function avgOf(list) {
+    if (!list.length) return null;
+    var sum = list.reduce(function (a, r) { return a + r[RCOL.minutes]; }, 0);
+    return sum / list.length;
+  }
+
+  function heatColor(ratio) {
+    // ratio in [0,1]; interpolate --good -> --warning -> --critical, reading
+    // the actual resolved colors so light/dark/manual theme overrides all
+    // just work without duplicating hex values here.
+    var cs = getComputedStyle(document.documentElement);
+    function hexToRgb(hex) {
+      hex = hex.trim().replace("#", "");
+      if (hex.length === 3) hex = hex.split("").map(function (c) { return c + c; }).join("");
+      var n = parseInt(hex, 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
+    var good = hexToRgb(cs.getPropertyValue("--good") || "#1E8A5F");
+    var warn = hexToRgb(cs.getPropertyValue("--warning") || "#B8801E");
+    var crit = hexToRgb(cs.getPropertyValue("--critical") || "#C23B3B");
+    var from, to, t;
+    if (ratio <= 0.5) { from = good; to = warn; t = ratio / 0.5; }
+    else { from = warn; to = crit; t = (ratio - 0.5) / 0.5; }
+    var rgb = [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)];
+    return "rgb(" + rgb.join(",") + ")";
+  }
+
+  // Coverage-specific color calibration (2026-08-05: "Red should be 0
+  // coverage. anything 1-12 should be gradients of orange and yellow. 13+
+  // get into greens") - 3 explicit bands feeding heatColor's ratio, instead
+  // of Volume's single continuous linear ramp from 0 to fixedMax. heatColor
+  // itself is unchanged (still good->warning->critical over ratio 0..1);
+  // this just maps a raw headcount to a ratio that lands in the right band.
+  function coverageColorRatio(v, fixedMax) {
+    if (v <= 0) return 1; // pure critical/red, reserved for exactly 0
+    if (v < 13) {
+      // 1..12 -> stays within the warning->critical half (0.5-0.9), i.e.
+      // orange trending toward pure amber/yellow as v rises toward 12.
+      var t = (v - 1) / 11;
+      return 0.9 - t * 0.4;
+    }
+    // 13+ -> the good->warning half (0-0.45), i.e. yellow-green trending to
+    // pure green as v approaches/exceeds fixedMax.
+    var t2 = Math.min((v - 13) / Math.max(fixedMax - 13, 1), 1);
+    return 0.45 - t2 * 0.45;
+  }
+
+  function hourLabelShort(h) { return h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p"; }
+
+  // 7x24 matrix of YTD averages (total in that day+hour bucket / number of
+  // times that weekday has occurred so far this year) - the joint view a
+  // single day-of-week strip and hour-of-day strip can't show (e.g. a
+  // weekday's average can be high while a specific hour on that weekday is
+  // actually quiet, or vice versa). This is the "Volume" heat-by metric.
+  function computeYtdMatrix(rows) {
+    var occ = weekdayOccurrences(rows.some(function (r) { return r[COL.channel] === "calls"; }));
+    var totals = [];
+    for (var d = 0; d < 7; d++) totals.push(new Array(24).fill(0));
+    rows.forEach(function (r) { totals[r[COL.weekday]][r[COL.hour]]++; });
+    return totals.map(function (row, d) { return row.map(function (t) { return occ[d] > 0 ? t / occ[d] : 0; }); });
+  }
+
+  // Generic "average a numeric field per day+hour slot" matrix builder, used
+  // by every non-Volume heat-by metric (Abandon Rate, Avg Handle Time, First
+  // Response Time) - unlike Volume (a rate over elapsed occurrences), these
+  // are plain per-slot averages of a value already present on each row.
+  // Returns null (not 0) for a slot with no underlying data points - a true
+  // 0% abandon rate or 0s handle time is a real, meaningful measurement, but
+  // an EMPTY slot (no calls/tickets at all) isn't the same thing and must
+  // not render as if it were - same "don't show a misleading zero" lesson
+  // as the Avg Time to Resolution KPI's "-" for an empty population.
+  function computeAvgMatrix(rows, weekdayOf, hourOf, valueOf) {
+    var sums = [], counts = [];
+    for (var d = 0; d < 7; d++) { sums.push(new Array(24).fill(0)); counts.push(new Array(24).fill(0)); }
+    rows.forEach(function (r) {
+      var v = valueOf(r);
+      if (v == null || isNaN(v)) return;
+      var d = weekdayOf(r), h = hourOf(r);
+      sums[d][h] += v;
+      counts[d][h]++;
+    });
+    return sums.map(function (row, d) { return row.map(function (s, h) { return counts[d][h] > 0 ? s / counts[d][h] : null; }); });
+  }
+  // Abandon Rate matrix (0-100 scale) - percentage of calls in each slot
+  // whose result wasn't "Accepted". Only meaningful for the Calls channel;
+  // the caller is expected to have already scoped `rows` to calls only.
+  function computeAbandonMatrix(rows) {
+    return computeAvgMatrix(rows,
+      function (r) { return r[COL.weekday]; },
+      function (r) { return r[COL.hour]; },
+      function (r) { return r[11] !== "ACD-INBOUND" ? null : (r[COL.result] === "Abandoned" ? 100 : 0); });
+  }
+  // Avg Handle Time matrix (seconds) - Calls only, same duration field the
+  // existing "Avg Handle Time (Calls)" KPI already averages, just per-slot.
+  function computeHandleMatrix(rows) {
+    return computeAvgMatrix(rows,
+      function (r) { return r[COL.weekday]; },
+      function (r) { return r[COL.hour]; },
+      function (r) { return r[COL.duration]; });
+  }
+  // First Response Time matrix (minutes) - from RESOLUTIONS (a broader,
+  // separately-pulled population than ROWS), optionally filtered to a
+  // channel's Origin tag same as avgResolutionMinutesFor. "calls" has no
+  // meaning here (RESOLUTIONS is Zendesk tickets only) - the UI disables
+  // this heat-by option outside Email/Webform/All.
+  function computeFirstResponseMatrix(channel) {
+    var rows = RESOLUTIONS;
+    if (channel && channel !== "all") {
+      var tag = CHANNEL_TO_TAG[channel];
+      rows = rows.filter(function (r) { return r[RCOL.tags].indexOf(tag) !== -1; });
+    }
+    return computeAvgMatrix(rows,
+      function (r) { return r[RCOL.weekday]; },
+      function (r) { return r[RCOL.hour]; },
+      function (r) { return r[RCOL.reply]; });
+  }
+  function weekAvgMatrix(rows, weekKey, weekdayOf, hourOf, valueOf, weekKeyOf) {
+    var filtered = rows.filter(function (r) { return weekKeyOf(r) === weekKey; });
+    return computeAvgMatrix(filtered, weekdayOf, hourOf, valueOf);
+  }
+
+  // ---- Agent Coverage computation (Phase 4, 2026-08-05) ----
+  // Shift length is a documented ASSUMPTION for most agents: shiftStartHour
+  // + 8 hours, wrapping past midnight where needed - no Shift End column
+  // exists anywhere in the source sheet for any agent (confirmed live
+  // 2026-08-05). 3 agents (overnight-rotation agents) carry
+  // an explicit shiftEndHour instead, derived from their REAL Zendesk
+  // ticket-assignment activity (2026-08-05: "check the zd or ringcx
+  // logs to see when they are available") rather than the 8-hour default -
+  // see smartsheet-roster-pull.ps1's header for the empirical numbers.
+  function shiftEndFor(r) {
+    var explicitEnd = r[ROSTERCOL.shiftEndHour];
+    if (explicitEnd != null) return explicitEnd;
+    var start = r[ROSTERCOL.shiftHour];
+    return start == null ? null : (start + 8) % 24;
+  }
+  function isScheduledHour(shiftHour, endHour, hour) {
+    if (shiftHour == null || endHour == null) return false;
+    if (shiftHour < endHour) return hour >= shiftHour && hour < endHour;
+    return hour >= shiftHour || hour < endHour; // overnight shift wraps past midnight
+  }
+  // Lunch is a documented ASSUMPTION too (2026-08-05: "it should take
+  // their lunch breaks... into consideration") - 1 hour starting at
+  // lunchHour, since the sheet gives a Lunch Start time but no duration,
+  // same "state the assumption, don't hide it" treatment as shift length.
+  function isOnLunch(lunchHour, hour) {
+    if (lunchHour == null) return false;
+    return hour === lunchHour;
+  }
+  function isAvailableHour(r, hour) {
+    return isScheduledHour(r[ROSTERCOL.shiftHour], shiftEndFor(r), hour) && !isOnLunch(r[ROSTERCOL.lunchHour], hour);
+  }
+  // Typical/baseline scheduled headcount per slot, ignoring PTO entirely -
+  // this is the "Coverage" metric's YTD view: "how many people are normally
+  // scheduled here." channel === "calls" restricts to phone-capable agents;
+  // every other channel counts everyone with shift-time data (all support
+  // engineers handle tickets, only a subset also take calls).
+  function computeCoverageBaselineMatrix(channel) {
+    var m = []; for (var d = 0; d < 7; d++) m.push(new Array(24).fill(0));
+    ROSTER.forEach(function (r) {
+      if (channel === "calls" && r[ROSTERCOL.phone] !== 1) return;
+      if (r[ROSTERCOL.shiftHour] == null) return;
+      r[ROSTERCOL.days].forEach(function (d) {
+        for (var h = 0; h < 24; h++) { if (isAvailableHour(r, h)) m[d][h]++; }
+      });
+    });
+    return m;
+  }
+  // "Actual" coverage baseline (Phase 4, 2026-08-05) - distinct-agent
+  // headcount per slot from REAL historical ticket-touch activity, instead
+  // of the Roster's documented schedule. Only counts an agent as "actually
+  // active" in a slot if their YTD touch count there meets
+  // ACTIVITY_MIN_TOUCHES - a single incidental after-hours touch shouldn't
+  // read the same as a slot someone regularly works. This has no per-week
+  // granularity (it's a whole-year empirical pattern, not per-date data),
+  // so unlike Planned, "Actual" doesn't respond to the week/range selector.
+  var ACTIVITY_MIN_TOUCHES = 3;
+  var ROSTER_BY_EMPLOYEE = {};
+  ROSTER.forEach(function (r) { ROSTER_BY_EMPLOYEE[r[ROSTERCOL.employee]] = r; });
+  function computeActualBaselineMatrix(channel) {
+    var m = []; for (var d = 0; d < 7; d++) m.push(new Array(24).fill(0));
+    ACTIVITY.forEach(function (a) {
+      if (a[ACTIVITYCOL.count] < ACTIVITY_MIN_TOUCHES) return;
+      var r = ROSTER_BY_EMPLOYEE[a[ACTIVITYCOL.employee]];
+      if (channel === "calls" && (!r || r[ROSTERCOL.phone] !== 1)) return;
+      m[a[ACTIVITYCOL.weekday]][a[ACTIVITYCOL.hour]]++;
+    });
+    return m;
+  }
+  function actualAgentNamesFor(day, hour, channel) {
+    var names = [];
+    ACTIVITY.forEach(function (a) {
+      if (a[ACTIVITYCOL.weekday] !== day || a[ACTIVITYCOL.hour] !== hour) return;
+      if (a[ACTIVITYCOL.count] < ACTIVITY_MIN_TOUCHES) return;
+      var r = ROSTER_BY_EMPLOYEE[a[ACTIVITYCOL.employee]];
+      if (channel === "calls" && (!r || r[ROSTERCOL.phone] !== 1)) return;
+      names.push({ employee: a[ACTIVITYCOL.employee], count: a[ACTIVITYCOL.count] });
+    });
+    names.sort(function (x, y) { return y.count - x.count; });
+    return names;
+  }
+  // Per-employee, per-office, and company-wide PTO date ranges, epoch-day
+  // indexed once at load rather than re-scanning all ~2,350 PTO rows per
+  // cell per render. Office-scoped entries (2026-08-05: "check...
+  // holidays when teams are out") are team-level holidays ("PHL Support
+  // Team", "MX") that reduce everyone in that office, not one individual -
+  // see PTOCOL's comment and build-heatmap-dashboard.ps1's TEAM_HOLIDAY_MAP.
+  var ptoByEmployee = {}, ptoByOffice = {}, ptoCompanyWide = [];
+  (function indexPto() {
+    PTO.forEach(function (p) {
+      if (!p[PTOCOL.start]) return;
+      var s = epochDay(p[PTOCOL.start]), e = epochDay(p[PTOCOL.end] || p[PTOCOL.start]);
+      if (p[PTOCOL.employee]) {
+        if (!ptoByEmployee[p[PTOCOL.employee]]) ptoByEmployee[p[PTOCOL.employee]] = [];
+        ptoByEmployee[p[PTOCOL.employee]].push([s, e]);
+      } else if (p[PTOCOL.office]) {
+        if (!ptoByOffice[p[PTOCOL.office]]) ptoByOffice[p[PTOCOL.office]] = [];
+        ptoByOffice[p[PTOCOL.office]].push([s, e]);
+      } else if (!p[PTOCOL.name]) {
+        ptoCompanyWide.push([s, e]); // blank name = company-wide (Holiday/Office Closed), not an unmatched individual
+      }
+    });
+  })();
+  function isOffOnDate(employee, office, dateEpoch) {
+    var list = ptoByEmployee[employee];
+    if (list) { for (var i = 0; i < list.length; i++) { if (dateEpoch >= list[i][0] && dateEpoch <= list[i][1]) return true; } }
+    var officeList = office ? ptoByOffice[office] : null;
+    if (officeList) { for (var k = 0; k < officeList.length; k++) { if (dateEpoch >= officeList[k][0] && dateEpoch <= officeList[k][1]) return true; } }
+    for (var j = 0; j < ptoCompanyWide.length; j++) { if (dateEpoch >= ptoCompanyWide[j][0] && dateEpoch <= ptoCompanyWide[j][1]) return true; }
+    return false;
+  }
+  function weekdayOfEpochDay(ed) { return new Date(ed * 86400000).getUTCDay(); }
+  function fmtEpochDayIso(ed) {
+    var f = fmtEpochDay(ed);
+    function pad2(n) { return (n < 10 ? "0" : "") + n; }
+    return f.y + "-" + pad2(f.m + 1) + "-" + pad2(f.day);
+  }
+  // Real coverage for a specific set of dates (a week's 7 dates, or every
+  // date in a custom range) - PTO/holidays are applied per-date, so this is
+  // "who was ACTUALLY available," not the baseline. Multiple dates sharing a
+  // weekday (a multi-week range) are averaged, same convention as every
+  // other metric's range mode.
+  function computeCoverageForDates(channel, dates) {
+    var totals = [], weekdaySeen = [0, 0, 0, 0, 0, 0, 0];
+    for (var d = 0; d < 7; d++) totals.push(new Array(24).fill(0));
+    dates.forEach(function (dt) { weekdaySeen[dt.weekday]++; });
+    dates.forEach(function (dt) {
+      ROSTER.forEach(function (r) {
+        if (channel === "calls" && r[ROSTERCOL.phone] !== 1) return;
+        if (r[ROSTERCOL.shiftHour] == null) return;
+        if (r[ROSTERCOL.days].indexOf(dt.weekday) === -1) return;
+        if (isOffOnDate(r[ROSTERCOL.employee], r[ROSTERCOL.office], dt.epochDay)) return;
+        for (var h = 0; h < 24; h++) { if (isAvailableHour(r, h)) totals[dt.weekday][h]++; }
+      });
+    });
+    var m = [];
+    for (var d2 = 0; d2 < 7; d2++) {
+      m.push(totals[d2].map(function (t) { return weekdaySeen[d2] > 0 ? t / weekdaySeen[d2] : null; }));
+    }
+    return m;
+  }
+  function datesForWeek(weekKey) {
+    var out = [];
+    for (var d = 0; d < 7; d++) out.push({ weekday: d, epochDay: weekKey + d });
+    return out;
+  }
+  function datesForRange(start, end) {
+    var out = [];
+    for (var ed = epochDay(start); ed <= epochDay(end); ed++) out.push({ weekday: weekdayOfEpochDay(ed), epochDay: ed });
+    return out;
+  }
+
+  // Standalone "Upcoming time off" panel (Phase 4, 2026-08-05) - always
+  // visible regardless of the Heat-by/channel/week selection, since knowing
+  // what's coming up is useful context no matter what else is on screen.
+  // Static at page load (PTO dates don't change without a fresh pull).
+  var UPCOMING_PTO_COUNT = 12;
+  function renderUpcomingPto() {
+    var todayEd = todayEpochDay();
+    var upcoming = PTO.filter(function (p) {
+      if (!p[PTOCOL.start]) return false;
+      var e = epochDay(p[PTOCOL.end] || p[PTOCOL.start]);
+      return e >= todayEd; // still relevant today or in the future (covers a PTO block already in progress)
+    }).sort(function (a, b) { return epochDay(a[PTOCOL.start]) - epochDay(b[PTOCOL.start]); });
+    var body = document.getElementById("upcomingPtoBody");
+    if (!upcoming.length) { body.innerHTML = '<div class="panel-empty">No upcoming time off on record.</div>'; return; }
+    var shown = upcoming.slice(0, UPCOMING_PTO_COUNT);
+    var html = '<div class="pto-list">';
+    shown.forEach(function (p) {
+      var isHoliday = !p[PTOCOL.name];
+      // Region-scoped holidays (2026-08-05: "08-31 is not a company
+      // wide holiday. It is a holiday for the Philippine team only") get
+      // their own label instead of the generic "Company holiday" - see
+      // Classify-HolidayLabel in build-heatmap-dashboard.ps1.
+      var who = isHoliday ? (p[PTOCOL.office] ? (p[PTOCOL.office] + " holiday") : "Company holiday") : p[PTOCOL.name];
+      var dateLabel = p[PTOCOL.start] === p[PTOCOL.end] ? p[PTOCOL.start] : p[PTOCOL.start] + " – " + p[PTOCOL.end];
+      html += '<div class="pto-row' + (isHoliday ? " pto-holiday" : "") + '"><span class="pto-dates">' + escapeHtml(dateLabel) + '</span><span class="pto-who">' + escapeHtml(who) + '</span><span class="pto-type">' + escapeHtml(p[PTOCOL.type] || "") + "</span></div>";
+    });
+    html += "</div>";
+    if (upcoming.length > UPCOMING_PTO_COUNT) {
+      html += '<div class="section-note" style="margin-top:8px;">+ ' + (upcoming.length - UPCOMING_PTO_COUNT).toLocaleString() + " more scheduled further out.</div>";
+    }
+    body.innerHTML = html;
+  }
+
+  // ---- Phase 2 (2026-08-04): comparison baselines beyond "vs YTD average" ----
+  // Same-week-last-year was considered and explicitly deferred (the requester,
+  // 2026-08-04) - the pipeline only holds 2026 YTD data, and backfilling ~7
+  // months of 2025 across all three pull scripts was judged not worth doing
+  // for this pass. Previous week / prior 4-week average need no new data -
+  // both are derivable from weeks already present in ROWS/RESOLUTIONS.
+
+  // Up to n weeks strictly before weekKey that actually have data (a week
+  // with zero rows in every channel was never added to weekKeys) - skips
+  // silently over gaps rather than assuming every week exists.
+  function priorWeekKeys(weekKey, n) {
+    var out = [];
+    for (var i = 1; i <= n; i++) {
+      var k = weekKey - 7 * i;
+      if (weekKeys.indexOf(k) !== -1) out.push(k);
+    }
+    return out;
+  }
+  // Cell-wise average across several 7x24 matrices, null-safe - a slot with
+  // no data in ANY of the input matrices stays null rather than becoming 0.
+  function averageMatrices(matrices) {
+    var sums = [], counts = [];
+    for (var d = 0; d < 7; d++) { sums.push(new Array(24).fill(0)); counts.push(new Array(24).fill(0)); }
+    matrices.forEach(function (m) {
+      m.forEach(function (row, d) { row.forEach(function (v, h) { if (v != null) { sums[d][h] += v; counts[d][h]++; } }); });
+    });
+    return sums.map(function (row, d) { return row.map(function (s, h) { return counts[d][h] > 0 ? s / counts[d][h] : null; }); });
+  }
+  var COMPARE_LABELS = { ytd: "YTD avg", prevweek: "Previous week", prev4: "Prior 4-wk avg" };
+  // Set by renderMatrix() to whichever label was ACTUALLY used (may differ
+  // from COMPARE_LABELS[state.compare] on a fallback-to-YTD) - updateNotes()
+  // reads this rather than re-deriving from state.compare, so the section
+  // note never claims a comparison mode that didn't actually apply.
+  var lastEffectiveCompareLabel = "YTD avg";
+  // Returns the baseline matrix for a non-YTD comparison mode, or null if
+  // there isn't enough prior history yet (e.g. the earliest week on record) -
+  // renderMatrix falls back to YTD in that case rather than showing nothing.
+  function compareMatrixFor(rows, metric, channel, weekKey, mode) {
+    if (mode === "prevweek") {
+      var prev = priorWeekKeys(weekKey, 1);
+      return prev.length ? metric.week(rows, prev[0], channel) : null;
+    }
+    if (mode === "prev4") {
+      var keys = priorWeekKeys(weekKey, 4);
+      return keys.length ? averageMatrices(keys.map(function (k) { return metric.week(rows, k, channel); })) : null;
+    }
+    return null;
+  }
+
+  // ---- Seasonality + anomaly flagging (>2 std dev above a slot's own
+  // historical weekly values) - a genuinely different question from "vs
+  // typical slot" above: that's a point comparison against one baseline,
+  // this is "how unusual is this value against everything we've seen in this
+  // exact slot across every week on record." Rendered as a border/ring on
+  // the cell (see .matrix-cell[data-anomaly] CSS), never a color change, so
+  // it doesn't clash with the fixed volume/metric color scale.
+  var seasonalityCache = {};
+  function computeSeasonality(rows, metric, channel, cacheKey) {
+    if (seasonalityCache[cacheKey]) return seasonalityCache[cacheKey];
+    var mean = [], std = [], n = [];
+    for (var d = 0; d < 7; d++) { mean.push(new Array(24).fill(null)); std.push(new Array(24).fill(0)); n.push(new Array(24).fill(0)); }
+    var perSlotValues = [];
+    for (var d2 = 0; d2 < 7; d2++) { var row = []; for (var h2 = 0; h2 < 24; h2++) row.push([]); perSlotValues.push(row); }
+    weekKeys.forEach(function (k) {
+      var m = metric.week(rows, k, channel);
+      m.forEach(function (r, d) { r.forEach(function (v, h) { if (v != null) perSlotValues[d][h].push(v); }); });
+    });
+    for (var d3 = 0; d3 < 7; d3++) {
+      for (var h3 = 0; h3 < 24; h3++) {
+        var vals = perSlotValues[d3][h3];
+        if (vals.length) {
+          var avg = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
+          var variance = vals.reduce(function (a, b) { return a + (b - avg) * (b - avg); }, 0) / vals.length;
+          mean[d3][h3] = avg; std[d3][h3] = Math.sqrt(variance); n[d3][h3] = vals.length;
+        }
+      }
+    }
+    var result = { mean: mean, std: std, n: n };
+    seasonalityCache[cacheKey] = result;
+    return result;
+  }
+  // Minimum weeks of history required before flagging an anomaly - with too
+  // few data points a std dev is noise, not signal (e.g. a slot seen in only
+  // 2 weeks has no meaningful "normal" yet).
+  var ANOMALY_MIN_WEEKS = 4;
+  var ANOMALY_SIGMA = 2;
+
+  // Metric descriptors - one place that ties together how each "Heat by"
+  // mode computes its matrix, formats a cell/tooltip value, and which fixed
+  // color-scale reference it uses. Volume's scale is a real count computed
+  // from the data (see FIXED_MAX below); Abandon Rate is always a 0-100
+  // percent scale (no need to derive a max); Handle Time / First Response
+  // Time scales are derived the same cross-channel-max way Volume's is.
+  var METRICS = {
+    volume: {
+      label: "calls/tickets", isCount: true,
+      ytd: function (rows) { return computeYtdMatrix(rows); },
+      week: function (rows, weekKey) {
+        var m = []; for (var d = 0; d < 7; d++) m.push(new Array(24).fill(0));
+        weekRows(rows, weekKey).forEach(function (r) { m[r[COL.weekday]][r[COL.hour]]++; });
+        return m;
+      },
+      range: function (rows, start, end) {
+        var m = []; for (var d = 0; d < 7; d++) m.push(new Array(24).fill(0));
+        rangeRowsOf(rows, function (r) { return r[COL.date]; }, start, end).forEach(function (r) { m[r[COL.weekday]][r[COL.hour]]++; });
+        return m;
+      },
+      fmt: function (v, isWeek) { return isWeek ? String(v) : v.toFixed(1); }
+    },
+    abandon: {
+      label: "abandon rate", isPercent: true,
+      ytd: function (rows) { return computeAbandonMatrix(rows); },
+      week: function (rows, weekKey) { return weekAvgMatrix(rows, weekKey, function (r) { return r[COL.weekday]; }, function (r) { return r[COL.hour]; }, function (r) { return r[COL.result] == null ? null : (r[COL.result] === "Accepted" ? 0 : 100); }, weekStartKey); },
+      range: function (rows, start, end) { return computeAvgMatrix(rangeRowsOf(rows, function (r) { return r[COL.date]; }, start, end), function (r) { return r[COL.weekday]; }, function (r) { return r[COL.hour]; }, function (r) { return r[COL.result] == null ? null : (r[COL.result] === "Accepted" ? 0 : 100); }); },
+      fmt: function (v) { return Math.round(v) + "%"; }
+    },
+    handle: {
+      label: "avg handle time", isDuration: true,
+      ytd: function (rows) { return computeHandleMatrix(rows); },
+      week: function (rows, weekKey) { return weekAvgMatrix(rows, weekKey, function (r) { return r[COL.weekday]; }, function (r) { return r[COL.hour]; }, function (r) { return r[COL.duration]; }, weekStartKey); },
+      range: function (rows, start, end) { return computeAvgMatrix(rangeRowsOf(rows, function (r) { return r[COL.date]; }, start, end), function (r) { return r[COL.weekday]; }, function (r) { return r[COL.hour]; }, function (r) { return r[COL.duration]; }); },
+      fmt: function (v) { return fmtDuration(v); }
+    },
+    firstresponse: {
+      label: "first response time", isMinutes: true,
+      ytd: function (rows, channel) { return computeFirstResponseMatrix(channel); },
+      week: function (rows, weekKey, channel) {
+        var list = RESOLUTIONS;
+        if (channel && channel !== "all") { var tag = CHANNEL_TO_TAG[channel]; list = list.filter(function (r) { return r[RCOL.tags].indexOf(tag) !== -1; }); }
+        return weekAvgMatrix(list, weekKey, function (r) { return r[RCOL.weekday]; }, function (r) { return r[RCOL.hour]; }, function (r) { return r[RCOL.reply]; }, resolutionWeekStartKey);
+      },
+      range: function (rows, start, end, channel) {
+        var list = RESOLUTIONS;
+        if (channel && channel !== "all") { var tag = CHANNEL_TO_TAG[channel]; list = list.filter(function (r) { return r[RCOL.tags].indexOf(tag) !== -1; }); }
+        return computeAvgMatrix(rangeRowsOf(list, function (r) { return r[RCOL.date]; }, start, end), function (r) { return r[RCOL.weekday]; }, function (r) { return r[RCOL.hour]; }, function (r) { return r[RCOL.reply]; });
+      },
+      fmt: function (v) { return fmtResolutionMinutes(v); }
+    },
+    coverage: {
+      label: "scheduled agents", isCount: true,
+      // "rows" (ROWS/RESOLUTIONS) is unused here - Coverage is computed
+      // entirely from ROSTER + PTO, not call/ticket volume.
+      ytd: function (rows, channel) { return computeCoverageBaselineMatrix(channel); },
+      week: function (rows, weekKey, channel) { return computeCoverageForDates(channel, datesForWeek(weekKey)); },
+      range: function (rows, start, end, channel) { return computeCoverageForDates(channel, datesForRange(start, end)); },
+      fmt: function (v, isWeek) { return isWeek ? String(Math.round(v)) : v.toFixed(1); }
+    }
+  };
+
+  // Fixed color-scale reference (2026-08-04: "implement fixed color
+  // scale") - computed ONCE from every channel's own full YTD matrix (all
+  // directions), not from whatever subset happens to be on screen. Without
+  // this, switching channels or toggling direction silently rescales the
+  // whole palette, so "red" stops meaning a consistent absolute volume -
+  // exactly the flaw this fixes. Values beyond FIXED_MAX (a single unusually
+  // busy week can exceed the YTD-average ceiling) just clip at full red,
+  // which is standard/expected for a fixed heatmap scale. Extended
+  // 2026-08-04 (Phase 1) to compute one such reference per heat-by metric,
+  // not just Volume - Abandon Rate is inherently 0-100 and needs no
+  // data-derived max.
+  var CHANNELS_FOR_SCALE = ["all", "calls", "email", "webform"];
+  function computeFixedMax(metricKey) {
+    if (metricKey === "abandon") return 100;
+    var metric = METRICS[metricKey];
+    var max = 0.001;
+    CHANNELS_FOR_SCALE.forEach(function (ch) {
+      var rows = ch === "all" ? ROWS_ALL : ROWS.filter(function (r) { return r[COL.channel] === ch; });
+      metric.ytd(rows, ch).forEach(function (row) { row.forEach(function (v) { if (v != null && v > max) max = v; }); });
+    });
+    return max;
+  }
+  var FIXED_MAX_BY_METRIC = {};
+  Object.keys(METRICS).forEach(function (k) { FIXED_MAX_BY_METRIC[k] = computeFixedMax(k); });
+  function updateLegend() {
+    var max = FIXED_MAX_BY_METRIC[state.metric];
+    var metric = METRICS[state.metric];
+    document.getElementById("legendMax").textContent = metric.isPercent ? "100%" : (metric.fmt ? metric.fmt(max, false) + "+" : Math.ceil(max) + "+");
+    document.getElementById("legendCaption").textContent = "Fixed scale (" + metric.label + ") — the same shade means the same absolute " + metric.label + " across every channel, direction, and week selection.";
+  }
+
+  function ordinal(n) {
+    n = parseInt(n, 10);
+    var rem100 = n % 100;
+    if (rem100 >= 11 && rem100 <= 13) return n + "th";
+    switch (n % 10) {
+      case 1: return n + "st";
+      case 2: return n + "nd";
+      case 3: return n + "rd";
+      default: return n + "th";
+    }
+  }
+
+  var tooltipEl = document.getElementById("heatTooltip");
+  function showTooltip(cell) {
+    var d = cell.dataset;
+    var rows;
+    if (d.hasData === "0") {
+      rows = ['<div class="htt-row"><span>No data in this slot</span></div>'];
+    } else {
+      rows = [
+        '<div class="htt-row"><span>' + (d.weekMode === "1" ? escapeHtml(d.periodLabel) : "YTD avg") + '</span><b>' + d.value + '</b></div>'
+      ];
+      if (d.weekMode === "1") {
+        rows.push('<div class="htt-row"><span>' + escapeHtml(d.compareLabel) + '</span><b>' + d.compareVal + '</b></div>');
+        rows.push('<div class="htt-row"><span>vs ' + escapeHtml(d.compareLabel.toLowerCase()) + '</span><b>' + (d.deltaCompare >= 0 ? "+" : "") + d.deltaCompare + '%</b></div>');
+      } else {
+        rows.push('<div class="htt-row"><span>vs typical slot</span><b>' + (d.deltaOverall >= 0 ? "+" : "") + d.deltaOverall + '%</b></div>');
+      }
+      rows.push('<div class="htt-row"><span>Percentile</span><b>' + ordinal(d.pct) + '</b></div>');
+      if (d.anomaly === "1") {
+        rows.push('<div class="htt-row" style="color:var(--critical)"><span>⚠ Anomaly</span><b>+' + d.sigma + 'σ vs. ' + d.sampleWeeks + '-wk history</b></div>');
+      }
+      // Agent Coverage cells (Phase 4, 2026-08-05) carry a name list the requester
+      // asked to see on hover, not just the count - other matrices don't
+      // set this attribute so this section is a no-op for them.
+      if (d.agentNames) {
+        rows.push('<div class="htt-row" style="display:block; margin-top:2px; opacity:0.85; white-space:normal;">' + escapeHtml(d.agentNames) + '</div>');
+      }
+    }
+    tooltipEl.innerHTML = '<div class="htt-title">' + d.day + ', ' + d.hour + '</div>' + rows.join("");
+
+    var rect = cell.getBoundingClientRect();
+    tooltipEl.classList.add("visible");
+    var top = rect.top - tooltipEl.offsetHeight - 8;
+    if (top < 4) top = rect.bottom + 8;
+    var left = rect.left + rect.width / 2 - tooltipEl.offsetWidth / 2;
+    left = Math.max(4, Math.min(left, window.innerWidth - tooltipEl.offsetWidth - 4));
+    tooltipEl.style.top = top + "px";
+    tooltipEl.style.left = left + "px";
+  }
+  function hideTooltip() { tooltipEl.classList.remove("visible"); }
+
+  function renderMatrix(rows, weekKey, metricKey, channel, range) {
+    var metric = METRICS[metricKey];
+    var fixedMax = FIXED_MAX_BY_METRIC[metricKey];
+    var ytdMatrix = metric.ytd(rows, channel);
+    // Custom range (Phase 3, 2026-08-05) takes priority over the week
+    // dropdown when both would otherwise apply - the two controls clear each
+    // other on change (see event listeners below) so this is defensive, not
+    // the normal path.
+    var rangeActive = !!(range && range.start && range.end && range.start <= range.end);
+    // An "upcoming" week (Phase 4, added purely so Coverage can preview a
+    // future week) has no real Volume/ticket/call data at all - showing an
+    // all-blank grid for it would look like a real (if empty) result rather
+    // than "not happened yet." Fall back to the YTD average instead (the requester,
+    // 2026-08-05) for every metric except Coverage, which is computed
+    // directly via renderCoverageSection and legitimately wants the real
+    // future-projected number for a selected upcoming week.
+    var isUpcomingWeek = !rangeActive && weekKey !== "" && upcomingWeekKeys[+weekKey];
+    var weekMatrix = isUpcomingWeek ? null
+      : (rangeActive ? metric.range(rows, range.start, range.end, channel)
+      : (weekKey !== "" ? metric.week(rows, +weekKey, channel) : null));
+    var display = weekMatrix || ytdMatrix;
+    var periodLabel = rangeActive ? "This period" : "This week";
+
+    // Comparison baseline ("vs typical") - YTD average by default, or
+    // Previous week / Prior 4-week avg when picked (Phase 2, 2026-08-04).
+    // Falls back to YTD (with a note) if the chosen mode has no prior data
+    // yet, e.g. the earliest week on record has no "previous week". Neither
+    // Compare-to nor anomaly flagging (below) extends to custom ranges - see
+    // the methodology panel for why - so both are skipped whenever
+    // rangeActive, same as if state.compare were forced to "ytd".
+    var compareMatrix = ytdMatrix, compareLabel = "YTD avg", compareFellBack = false;
+    if (weekMatrix && !rangeActive && state.compare !== "ytd") {
+      var alt = compareMatrixFor(rows, metric, channel, +weekKey, state.compare);
+      if (alt) { compareMatrix = alt; compareLabel = COMPARE_LABELS[state.compare]; }
+      else { compareFellBack = true; }
+    }
+    lastEffectiveCompareLabel = (weekMatrix && !rangeActive) ? compareLabel : "YTD avg";
+
+    // Anomaly flagging: is this week's actual value >2 std dev above this
+    // slot's own historical distribution across every week on record? Only
+    // meaningful with a single week selected (there's no single "actual"
+    // value to test against a distribution in YTD-average view, and a
+    // multi-week custom range isn't one comparable "week" value either).
+    var seasonality = (weekMatrix && !rangeActive) ? computeSeasonality(rows, metric, channel, metricKey + "|" + channel + "|" + state.dir) : null;
+
+    var flat = [];
+    display.forEach(function (row) { row.forEach(function (v) { if (v != null) flat.push(v); }); });
+    var sorted = flat.slice().sort(function (a, b) { return a - b; });
+    var overallAvg = flat.length ? flat.reduce(function (a, b) { return a + b; }, 0) / flat.length : 0;
+    function percentileOf(v) {
+      if (v == null || !sorted.length) return 0;
+      var idx = 0;
+      for (var i = 0; i < sorted.length; i++) { if (sorted[i] <= v) idx = i + 1; else break; }
+      return Math.round((idx / sorted.length) * 100);
+    }
+
+    var html = '<div class="matrix-row matrix-header"><div class="matrix-corner"></div>';
+    for (var h = 0; h < 24; h++) html += '<div class="matrix-hourlabel">' + hourLabelShort(h) + '</div>';
+    html += '</div>';
+
+    for (var day = 0; day < 7; day++) {
+      html += '<div class="matrix-row"><div class="matrix-daylabel">' + DAY_NAMES[day] + '</div>';
+      for (var hr = 0; hr < 24; hr++) {
+        var v = display[day][hr];
+        var ytdVal = ytdMatrix[day][hr];
+        var compareVal = compareMatrix[day][hr];
+        var hasData = v != null;
+        var ratio = hasData ? Math.min(v / fixedMax, 1) : 0;
+        var color = heatColor(ratio);
+        var pct = percentileOf(v);
+        var deltaOverall = (hasData && overallAvg > 0) ? Math.round(((v - overallAvg) / overallAvg) * 100) : 0;
+        var deltaCompare = (hasData && compareVal != null && compareVal > 0) ? Math.round(((v - compareVal) / compareVal) * 100) : 0;
+
+        var isAnomaly = false, sigma = 0, sampleWeeks = 0;
+        if (seasonality && hasData) {
+          var sMean = seasonality.mean[day][hr], sStd = seasonality.std[day][hr], sN = seasonality.n[day][hr];
+          sampleWeeks = sN;
+          if (sN >= ANOMALY_MIN_WEEKS && sStd > 0) {
+            sigma = (v - sMean) / sStd;
+            if (sigma > ANOMALY_SIGMA) isAnomaly = true;
+          }
+        }
+
+        var valueText = hasData ? metric.fmt(v, !!weekMatrix) : "no data";
+        var cellText = hasData ? (metricKey === "volume" ? (weekMatrix ? (v > 0 ? String(v) : "") : (v >= 0.05 ? v.toFixed(1) : "")) : metric.fmt(v, !!weekMatrix)) : "";
+        html += '<div class="matrix-cell" style="background:' + color + '"' +
+          ' data-day="' + DAY_NAMES[day] + '" data-hour="' + hourLabelShort(hr) + '" data-day-idx="' + day + '" data-hour-idx="' + hr + '" data-value="' + valueText + '"' +
+          ' data-has-data="' + (hasData ? "1" : "0") + '"' +
+          ' data-ytd="' + (ytdVal != null ? metric.fmt(ytdVal, false) : "no data") + '" data-pct="' + pct + '" data-delta-overall="' + deltaOverall + '"' +
+          ' data-compare-label="' + escapeHtml(compareLabel) + '" data-compare-val="' + (compareVal != null ? metric.fmt(compareVal, false) : "no data") + '"' +
+          ' data-delta-compare="' + deltaCompare + '" data-week-mode="' + (weekMatrix ? "1" : "0") + '" data-period-label="' + escapeHtml(periodLabel) + '"' +
+          ' data-anomaly="' + (isAnomaly ? "1" : "0") + '" data-sigma="' + sigma.toFixed(1) + '" data-sample-weeks="' + sampleWeeks + '">' +
+          cellText + '</div>';
+      }
+      html += '</div>';
+    }
+    var el = document.getElementById("heatMatrix");
+    el.innerHTML = html;
+    el.querySelectorAll(".matrix-cell").forEach(function (cell) {
+      cell.addEventListener("mouseenter", function () { showTooltip(cell); });
+      cell.addEventListener("mouseleave", hideTooltip);
+      cell.addEventListener("click", function () { openDrill(+cell.dataset.dayIdx, +cell.dataset.hourIdx); });
+    });
+
+    // Only touch compareNote when a single week IS selected (not a custom
+    // range) - otherwise updateCompareAvailability()'s "select a week"/"not
+    // available for a range" message (rendered just before this call, same
+    // render() pass) would get silently clobbered back to empty every time.
+    if (weekMatrix && !rangeActive) {
+      var compareNote = document.getElementById("compareNote");
+      compareNote.textContent = compareFellBack ? "Not enough prior weeks yet — showing YTD average instead." : "";
+    }
+
+    return { ytdMatrix: ytdMatrix, display: display };
+  }
+
+  function fmtPct(n) { return Math.round(n) + "%"; }
+  function fmtDuration(sec) {
+    if (!sec || isNaN(sec)) return "—";
+    var m = Math.floor(sec / 60), s = Math.round(sec % 60);
+    return m + "m " + (s < 10 ? "0" : "") + s + "s";
+  }
+  // Resolution times run far longer than call handle times (hours to days,
+  // not seconds) - a separate formatter rather than overloading fmtDuration.
+  function fmtResolutionMinutes(min) {
+    if (min == null || isNaN(min)) return "—";
+    if (min >= 1440) { return (min / 1440).toFixed(1) + "d"; }
+    if (min >= 60) { return Math.floor(min / 60) + "h " + Math.round(min % 60) + "m"; }
+    return Math.round(min) + "m";
+  }
+  function hourLabel(h) { return h === 0 ? "12am" : h < 12 ? h + "am" : h === 12 ? "12pm" : (h - 12) + "pm"; }
+
+  // Argmax cell across the currently displayed 7x24 matrix (YTD averages, or
+  // the selected week's actual counts) - the single busiest day+hour slot,
+  // which is the real headline insight a joint matrix reveals and a
+  // "busiest weekday" + "busiest hour" pair of marginals can't (the day with
+  // the highest total isn't necessarily the day containing the single
+  // busiest hour).
+  function busiestSlot(matrix) {
+    var best = { day: 0, hour: 0, value: -1 };
+    matrix.forEach(function (row, d) {
+      row.forEach(function (v, h) {
+        if (v != null && v > best.value) best = { day: d, hour: h, value: v };
+      });
+    });
+    return best;
+  }
+
+  function renderKPIs(rows, matrixResult) {
+    // Every KPI below scopes to the selected week when one is picked (the requester,
+    // 2026-08-04: "make all the KPIs use the selected date range... all
+    // should work with the week filter") - Busiest Slot already did, via
+    // matrixResult.display; the rest now filter kpiRows the same way rather
+    // than always reflecting the full YTD population regardless of the
+    // dropdown.
+    // Custom range (Phase 3, 2026-08-05) is just another period alongside
+    // "no period" (YTD) and "one week" - KPIs treat it the same way weeks
+    // already were, just with a range-based row filter and day-count.
+    var rangeActive = isRangeActive();
+    var kpiRows = rangeActive ? rangeRowsOf(rows, function (r) { return r[COL.date]; }, state.range.start, state.range.end)
+      : (state.week === "" ? rows : weekRows(rows, +state.week));
+    var total = kpiRows.length;
+    var withDir = kpiRows.filter(function (r) { return r[COL.dir] === "Inbound" || r[COL.dir] === "Outbound"; });
+    var inbound = kpiRows.filter(function (r) { return r[COL.dir] === "Inbound"; }).length;
+    var inboundPct = withDir.length > 0 ? (inbound / withDir.length * 100) : null;
+    var occ = rangeActive ? daysInRange(state.range.start, state.range.end)
+      : (state.week === "" ? hourOccurrences(state.channel === "all" || state.channel === "calls") : daysElapsedInWeek(+state.week));
+    var avgDaily = occ > 0 ? (total / occ) : 0;
+    var slot = busiestSlot(matrixResult.display);
+    var durations = kpiRows.map(function (r) { return r[COL.duration]; }).filter(function (d) { return d != null && !isNaN(d); });
+    var avgHandle = durations.length ? durations.reduce(function (a, b) { return a + b; }, 0) / durations.length : null;
+    var unitLabel = state.channel === "all" ? "items" : state.channel === "calls" ? "calls" : "tickets";
+    var scopeWord = rangeActive ? "This Period" : (state.week === "" ? "YTD" : "This Week");
+    var isPeriod = rangeActive || state.week !== "";
+    var avgRes = avgResolutionMinutesFor(state.week, state.channel, state.range);
+
+    var kpis = [
+      { label: "Total " + (state.channel === "calls" ? "Calls" : state.channel === "all" ? "Volume" : "Tickets") + " " + scopeWord, value: total.toLocaleString(), sub: "" }
+    ];
+    if (inboundPct !== null) {
+      kpis.push({ label: "Inbound", value: fmtPct(inboundPct), sub: inbound.toLocaleString() + " of " + withDir.length.toLocaleString() });
+    } else {
+      kpis.push({ label: "Inbound", value: "—", sub: "direction n/a for this channel" });
+    }
+    kpis.push({ label: "Avg Daily Volume", value: avgDaily.toFixed(1), sub: unitLabel + " / day" });
+    kpis.push({
+      label: "Busiest Slot",
+      value: total > 0 ? DAY_NAMES[slot.day] + " " + hourLabel(slot.hour) : "—",
+      sub: total > 0 ? (isPeriod ? slot.value + " that period" : slot.value.toFixed(1) + " avg/slot") : ""
+    });
+    if (durations.length) {
+      kpis.push({ label: "Avg Handle Time (Calls)", value: fmtDuration(avgHandle), sub: "" });
+    } else {
+      kpis.push({ label: "Avg Handle Time (Calls)", value: "—", sub: "n/a for this channel" });
+    }
+    var resScope = state.channel === "all" ? "all Zendesk tickets" : state.channel === "calls" ? "phone-tagged tickets" : state.channel + " tickets";
+    kpis.push({
+      label: "Avg Time to Resolution",
+      value: fmtResolutionMinutes(avgRes),
+      sub: resScope + (isPeriod ? " created in that period" : " YTD") + ", excl. Product/Custom Reports/Procurement"
+    });
+
+    document.getElementById("kpiGrid").innerHTML = kpis.map(function (k) {
+      return '<div class="kpi"><div class="kpi-label">' + escapeHtml(k.label) + '</div>' +
+        '<div class="kpi-value">' + escapeHtml(k.value) + '</div>' +
+        (k.sub ? '<div class="kpi-sub">' + escapeHtml(k.sub) + '</div>' : '') +
+        '</div>';
+    }).join("");
+  }
+
+  var METRIC_NOTE_LABEL = { volume: "Average per slot", abandon: "Abandon rate per slot", handle: "Avg handle time per slot", firstresponse: "Avg first response time per slot" };
+  function updateNotes() {
+    var note = document.getElementById("matrixNote");
+    var lede = METRIC_NOTE_LABEL[state.metric];
+    if (isRangeActive()) {
+      note.textContent = state.range.start + " to " + state.range.end + " vs YTD average · Pacific Time";
+    } else if (state.week === "") {
+      note.textContent = lede + ", year-to-date · Pacific Time";
+    } else if (upcomingWeekKeys[+state.week]) {
+      note.textContent = "Week of " + weekLabel(+state.week) + " hasn't happened yet — showing YTD average · Pacific Time";
+    } else {
+      note.textContent = "Week of " + weekLabel(+state.week) + " vs " + lastEffectiveCompareLabel + " · Pacific Time";
+    }
+  }
+
+  function updateDirectionAvailability() {
+    var enabled = state.channel === "calls";
+    document.querySelectorAll(".dir-btn").forEach(function (b) { b.disabled = !enabled; });
+    document.getElementById("directionNote").textContent = enabled ? "" : "Direction only applies to Calls.";
+    if (!enabled) {
+      state.dir = "all";
+      document.querySelectorAll(".dir-btn").forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-dir") === "all" ? "true" : "false"); });
+    }
+  }
+
+  // Which channels a given heat-by metric is valid for - "abandon"/"handle"
+  // are Calls-only concepts (ROWS' duration/result fields are null outside
+  // Calls); "firstresponse" is a Zendesk-tickets concept with no meaning for
+  // Calls. Mirrors the existing Direction-toggle disable pattern.
+  var METRIC_VALID_CHANNELS = {
+    volume: null, // null = always valid, every channel
+    abandon: ["calls"],
+    handle: ["calls"],
+    firstresponse: ["all", "email", "webform"]
+  };
+  function updateMetricAvailability() {
+    document.querySelectorAll(".metric-btn").forEach(function (b) {
+      var m = b.getAttribute("data-metric");
+      var valid = METRIC_VALID_CHANNELS[m];
+      b.disabled = !!valid && valid.indexOf(state.channel) === -1;
+    });
+    var current = METRIC_VALID_CHANNELS[state.metric];
+    if (current && current.indexOf(state.channel) === -1) {
+      state.metric = "volume";
+      document.querySelectorAll(".metric-btn").forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-metric") === "volume" ? "true" : "false"); });
+    }
+    var note = document.getElementById("metricNote");
+    if (state.metric === "volume" && METRIC_VALID_CHANNELS.abandon.indexOf(state.channel) === -1 && METRIC_VALID_CHANNELS.firstresponse.indexOf(state.channel) === -1) {
+      note.textContent = ""; // shouldn't happen (every channel matches one or the other), defensive only
+    } else {
+      note.textContent = "";
+    }
+  }
+
+  // "Compare to" only means anything once a week is selected - disabled
+  // (not hidden) otherwise, same pattern as Direction/Heat-by availability.
+  function updateCompareAvailability() {
+    // Disabled for a custom range too (Phase 3, 2026-08-05) - Compare-to and
+    // anomaly flagging are single-week concepts, see renderMatrix's comment.
+    var enabled = state.week !== "" && !isRangeActive();
+    document.querySelectorAll(".compare-btn").forEach(function (b) { b.disabled = !enabled; });
+    if (!enabled) {
+      document.getElementById("compareNote").textContent = isRangeActive()
+        ? "Not available for a custom range — pick a single week above instead."
+        : "Select a week above to compare it against a prior period.";
+    }
+  }
+
+  function render() {
+    updateDirectionAvailability();
+    updateMetricAvailability();
+    updateCompareAvailability();
+    var rows = scopedRows();
+    // KPI tiles (Busiest Slot in particular) intentionally stay Volume-based
+    // regardless of the Heat-by selection - the toggle only changes what the
+    // matrix visualizes, per the approved plan ("KPI tiles stay as they
+    // are"). Computed separately from whatever metric the matrix is showing.
+    var kpiMatrix = { ytdMatrix: METRICS.volume.ytd(rows), display: isRangeActive() ? METRICS.volume.range(rows, state.range.start, state.range.end)
+      : (state.week === "" ? METRICS.volume.ytd(rows) : METRICS.volume.week(rows, +state.week)) };
+    var matrixResult = renderMatrix(rows, state.week, state.metric, state.channel, state.range);
+    renderKPIs(rows, kpiMatrix);
+    updateNotes();
+    updateLegend();
+    renderCoverageSection();
+  }
+
+  // ---- Standalone Agent Coverage matrix (Phase 4, 2026-08-05) - a
+  // permanent second heatmap below the Volume one, not a "Heat by" toggle
+  // (2026-08-05: "There should be a Day x Hour Agent coverage Heatmap
+  // below the Volume Heatmap") - so both can be looked at side by side
+  // (e.g. "this slot is volume-heavy AND coverage-light") without switching
+  // views. Shares the page's channel/direction/week/range filters, but has
+  // its own legend/tooltip/click-to-drill - Compare-to and anomaly flagging
+  // don't apply here (see the metric's own reasoning), so this is a
+  // deliberately simpler render path than renderMatrix, not a reuse of it.
+  // Agent names for the coverage tooltip (2026-08-05: "the hover over
+  // should show agent names"). With a single week selected this reflects
+  // that exact date's real PTO/holiday status per person; otherwise (YTD
+  // baseline or a multi-week range) it's just who's normally scheduled for
+  // that slot, since there's no one specific date to check PTO against.
+  function coverageAgentNamesFor(day, hour) {
+    var channel = state.channel;
+    var candidates = ROSTER.filter(function (r) {
+      if (channel === "calls" && r[ROSTERCOL.phone] !== 1) return false;
+      if (r[ROSTERCOL.shiftHour] == null) return false;
+      if (r[ROSTERCOL.days].indexOf(day) === -1) return false;
+      return isAvailableHour(r, hour);
+    });
+    if (!candidates.length) return "";
+    var singleWeek = state.week !== "" && !isRangeActive();
+    var ed = singleWeek ? (+state.week + day) : null;
+    var names = candidates.map(function (r) {
+      var shortName = r[ROSTERCOL.employee].split("@")[0];
+      if (singleWeek && isOffOnDate(r[ROSTERCOL.employee], r[ROSTERCOL.office], ed)) return shortName + " (off)";
+      return shortName;
+    });
+    var CAP = 15;
+    if (names.length > CAP) return names.slice(0, CAP).join(", ") + ", +" + (names.length - CAP) + " more";
+    return names.join(", ");
+  }
+
+  // ---- "Required (vs Volume)" coverage mode (2026-08-05) ----
+  // the requester: "From looking at the ticket volume YTD how many agents do you
+  // think should be available for each hour?" - answered with a standard
+  // workforce-planning formula: agents needed = (item volume x minutes to
+  // handle each item) / (60 x occupancy target). Two judgment calls with no
+  // data to derive them from, confirmed with the requester rather than guessed:
+  //   - Occupancy target 85% (leaves room for breaks/admin/non-call work,
+  //     a common contact-center benchmark).
+  //   - Calls use the REAL overall average handle time (from ROWS'
+  //     duration_sec) - genuine data. Tickets (Email/Webform) have no
+  //     equivalent "agent effort per ticket" metric anywhere in this
+  //     pipeline - Avg Time to Resolution and First Response Time are both
+  //     elapsed/wall-clock time (a ticket can sit for days awaiting a
+  //     customer reply while taking the agent minutes), not agent working
+  //     time - so ticket handling time is a stated ASSUMPTION (20 min/
+  //     ticket), not measured data, same "state it, don't hide it"
+  //     treatment as the roster's 8-hour-shift assumption.
+  // This mode shows the GAP: Planned coverage minus Required agents for
+  // that slot - positive (green) means adequately/over staffed, negative
+  // (red) means short. Reuses the exact same period logic (YTD average /
+  // selected week / custom range / upcoming-week-falls-back-to-YTD) already
+  // built for the Volume matrix, so "if a future week is selected, compare
+  // to YTD volume" (2026-08-05) falls out of the existing
+  // upcomingWeekKeys mechanism for free rather than needing new logic.
+  var OCCUPANCY_TARGET = 0.85;
+  var ASSUMED_TICKET_MINUTES = 20;
+  var OVERALL_CALL_AHT_MINUTES = (function () {
+    var durations = [];
+    ROWS.forEach(function (r) { if (r[COL.channel] === "calls" && r[COL.duration] != null) durations.push(r[COL.duration]); });
+    if (!durations.length) return 6; // shouldn't happen - defensive fallback only
+    return (durations.reduce(function (a, b) { return a + b; }, 0) / durations.length) / 60;
+  })();
+  function combineRequiredMinutes(callMatrix, ticketMatrix) {
+    var m = [];
+    for (var d = 0; d < 7; d++) {
+      var row = [];
+      for (var h = 0; h < 24; h++) {
+        var minutesNeeded = (callMatrix[d][h] || 0) * OVERALL_CALL_AHT_MINUTES + (ticketMatrix[d][h] || 0) * ASSUMED_TICKET_MINUTES;
+        row.push(minutesNeeded / (60 * OCCUPANCY_TARGET));
+      }
+      m.push(row);
+    }
+    return m;
+  }
+  // Mirrors renderMatrix's period selection (YTD / week / range / upcoming-
+  // week-falls-back-to-YTD) but split into calls-count and tickets-count so
+  // each can use its own minutes-per-item assumption, then combined above.
+  function computeRequiredMatrix(weekKey, range, channel) {
+    // Filters ROWS by the explicit `channel` param directly (NOT the
+    // page-global scopedRows(), which reads state.channel) - needed because
+    // REQUIRED_GAP_SCALE below computes this for every channel up front at
+    // load time, independent of whatever the user currently has selected.
+    var rows = channel === "all" ? ROWS_ALL : ROWS.filter(function (r) { return r[COL.channel] === channel; });
+    var callRows = rows.filter(function (r) { return r[COL.channel] === "calls"; });
+    var ticketRows = rows.filter(function (r) { return r[COL.channel] !== "calls"; });
+    var rangeActive = !!(range && range.start && range.end && range.start <= range.end);
+    var isUpcoming = !rangeActive && weekKey !== "" && upcomingWeekKeys[+weekKey];
+    var callMatrix, ticketMatrix;
+    if (rangeActive) {
+      callMatrix = METRICS.volume.range(callRows, range.start, range.end);
+      ticketMatrix = METRICS.volume.range(ticketRows, range.start, range.end);
+    } else if (weekKey !== "" && !isUpcoming) {
+      callMatrix = METRICS.volume.week(callRows, +weekKey);
+      ticketMatrix = METRICS.volume.week(ticketRows, +weekKey);
+    } else {
+      callMatrix = METRICS.volume.ytd(callRows);
+      ticketMatrix = METRICS.volume.ytd(ticketRows);
+    }
+    return combineRequiredMinutes(callMatrix, ticketMatrix);
+  }
+  // Diverging color for the gap (Planned - Required): 0 = amber/on-target,
+  // negative (short-staffed) trends to red, positive (adequate/over) trends
+  // to green - reuses heatColor's existing good->warning->critical stops as
+  // a natural diverging scale centered on ratio 0.5.
+  var REQUIRED_GAP_SCALE = (function () {
+    var max = 1;
+    ["all", "calls", "email", "webform"].forEach(function (ch) {
+      var req = computeRequiredMatrix("", { start: "", end: "" }, ch);
+      var planned = METRICS.coverage.ytd(null, ch);
+      for (var d = 0; d < 7; d++) for (var h = 0; h < 24; h++) {
+        var gap = Math.abs((planned[d][h] || 0) - (req[d][h] || 0));
+        if (gap > max) max = gap;
+      }
+    });
+    return max;
+  })();
+  function requiredGapRatio(gap) {
+    var clamped = Math.max(-REQUIRED_GAP_SCALE, Math.min(REQUIRED_GAP_SCALE, gap));
+    return 0.5 - (clamped / REQUIRED_GAP_SCALE) * 0.5;
+  }
+
+  // "Actual" mode's fixed-scale max - computed once at load the same
+  // cross-channel way Planned's is, so switching channels never rescales it.
+  var ACTUAL_FIXED_MAX = (function () {
+    var max = 0.001;
+    ["all", "calls", "email", "webform"].forEach(function (ch) {
+      computeActualBaselineMatrix(ch).forEach(function (row) { row.forEach(function (v) { if (v > max) max = v; }); });
+    });
+    return max;
+  })();
+
+  function renderCoverageSection() {
+    if (state.coverageMode === "required") { renderRequiredSection(); return; }
+    var isActual = state.coverageMode === "actual";
+    var metric = METRICS.coverage;
+    var channel = state.channel;
+    var fixedMax = isActual ? ACTUAL_FIXED_MAX : FIXED_MAX_BY_METRIC.coverage;
+    var ytdMatrix = isActual ? computeActualBaselineMatrix(channel) : metric.ytd(null, channel);
+    var rangeActive = isRangeActive();
+    // "Actual" has no per-week granularity (whole-year empirical pattern,
+    // not per-date data) - always shows its one baseline matrix regardless
+    // of the week/range selector, unlike Planned.
+    var periodMatrix = isActual ? null : (rangeActive ? metric.range(null, state.range.start, state.range.end, channel)
+      : (state.week !== "" ? metric.week(null, +state.week, channel) : null));
+    var display = periodMatrix || ytdMatrix;
+    var periodLabel = rangeActive ? "This period" : "This week";
+
+    var flat = [];
+    display.forEach(function (row) { row.forEach(function (v) { if (v != null) flat.push(v); }); });
+    var sorted = flat.slice().sort(function (a, b) { return a - b; });
+    function percentileOf(v) {
+      if (v == null || !sorted.length) return 0;
+      var idx = 0;
+      for (var i = 0; i < sorted.length; i++) { if (sorted[i] <= v) idx = i + 1; else break; }
+      return Math.round((idx / sorted.length) * 100);
+    }
+
+    var html = '<div class="matrix-row matrix-header"><div class="matrix-corner"></div>';
+    for (var h = 0; h < 24; h++) html += '<div class="matrix-hourlabel">' + hourLabelShort(h) + '</div>';
+    html += '</div>';
+    for (var day = 0; day < 7; day++) {
+      html += '<div class="matrix-row"><div class="matrix-daylabel">' + DAY_NAMES[day] + '</div>';
+      for (var hr = 0; hr < 24; hr++) {
+        var v = display[day][hr];
+        var ytdVal = ytdMatrix[day][hr];
+        var hasData = v != null;
+        // Inverted from the Volume matrix's convention (2026-08-05):
+        // here red means DANGER (no coverage) and green means fully staffed,
+        // not "busy" - a 0-agent slot should look alarming, not calm.
+        // Calibrated to 3 explicit bands (2026-08-05: "Red should be 0
+        // coverage. anything 1-12 should be gradients of orange and yellow.
+        // 13+ get into greens") rather than one continuous linear ramp -
+        // see coverageColorRatio.
+        var ratio = hasData ? coverageColorRatio(v, fixedMax) : 0;
+        var color = heatColor(ratio);
+        var pct = percentileOf(v);
+        var deltaYtd = (hasData && ytdVal != null && ytdVal > 0) ? Math.round(((v - ytdVal) / ytdVal) * 100) : 0;
+        var valueText = hasData ? metric.fmt(v, !!periodMatrix) : "no data";
+        var cellText = hasData ? metric.fmt(v, !!periodMatrix) : "";
+        var agentNames = !hasData ? "" : (isActual ? actualAgentNamesFor(day, hr, channel).map(function (n) { return n.employee.split("@")[0] + " (" + n.count + ")"; }).join(", ") : coverageAgentNamesFor(day, hr));
+        html += '<div class="matrix-cell" style="background:' + color + '"' +
+          ' data-day="' + DAY_NAMES[day] + '" data-hour="' + hourLabelShort(hr) + '" data-day-idx="' + day + '" data-hour-idx="' + hr + '" data-value="' + valueText + '"' +
+          ' data-has-data="' + (hasData ? "1" : "0") + '"' +
+          ' data-ytd="' + (ytdVal != null ? metric.fmt(ytdVal, false) : "no data") + '" data-pct="' + pct + '" data-delta-overall="0"' +
+          ' data-compare-label="YTD avg" data-compare-val="' + (ytdVal != null ? metric.fmt(ytdVal, false) : "no data") + '"' +
+          ' data-delta-compare="' + deltaYtd + '" data-week-mode="' + (periodMatrix ? "1" : "0") + '" data-period-label="' + escapeHtml(periodLabel) + '"' +
+          ' data-anomaly="0" data-sigma="0" data-sample-weeks="0" data-agent-names="' + escapeHtml(agentNames) + '">' + cellText + '</div>';
+      }
+      html += '</div>';
+    }
+    document.getElementById("coverageMatrix").innerHTML = html;
+    document.querySelectorAll("#coverageMatrix .matrix-cell").forEach(function (cell) {
+      cell.addEventListener("mouseenter", function () { showTooltip(cell); });
+      cell.addEventListener("mouseleave", hideTooltip);
+      cell.addEventListener("click", function () { openCoverageDrill(+cell.dataset.dayIdx, +cell.dataset.hourIdx); });
+    });
+
+    document.getElementById("coverageLegendMin").textContent = "0";
+    document.getElementById("coverageLegendMax").textContent = metric.fmt(fixedMax, false) + "+";
+    // Required mode overwrites this caption (see renderRequiredSection) -
+    // reset it back here so switching back to Planned/Actual doesn't leave
+    // Required's diverging-scale caption stuck on screen.
+    document.getElementById("coverageLegendCaption").textContent = isActual
+      ? "Fixed scale — distinct agents with real ticket activity per slot, YTD."
+      : "Fixed scale — agents typically scheduled per slot, from the Support Roster + approved PTO.";
+    document.getElementById("coverageMatrixNote").textContent = isActual
+      ? ("Agents with real ticket activity that hour, YTD (≥" + ACTIVITY_MIN_TOUCHES + " touches) · Pacific Time")
+      : (rangeActive
+        ? (state.range.start + " to " + state.range.end + " vs typical schedule · Pacific Time")
+        : (state.week === "" ? "Typical scheduled agents per slot, ignoring PTO/holidays · Pacific Time" : "Week of " + weekLabel(+state.week) + " (PTO & holidays applied) vs typical schedule · Pacific Time"));
+    document.getElementById("coverageModeNote").textContent = isActual
+      ? "Derived from real ticket-touch timestamps, not the schedule - doesn't respond to the week/range selector (whole-year pattern, not per-date data)."
+      : "";
+  }
+
+  // "Required (vs Volume)" mode (2026-08-05) - shows the GAP between
+  // Planned coverage and volume-derived required headcount, not a raw
+  // headcount like Planned/Actual. Kept as its own render path rather than
+  // folded into renderCoverageSection's shared logic above, since a gap
+  // (which can be negative) needs a different color scale, tooltip, and
+  // cell-text format than a plain count does.
+  function renderRequiredSection() {
+    var channel = state.channel;
+    var rangeActive = isRangeActive();
+    var plannedMatrix = rangeActive ? METRICS.coverage.range(null, state.range.start, state.range.end, channel)
+      : (state.week !== "" ? METRICS.coverage.week(null, +state.week, channel) : METRICS.coverage.ytd(null, channel));
+    var requiredMatrix = computeRequiredMatrix(state.week, state.range, channel);
+
+    var html = '<div class="matrix-row matrix-header"><div class="matrix-corner"></div>';
+    for (var h = 0; h < 24; h++) html += '<div class="matrix-hourlabel">' + hourLabelShort(h) + '</div>';
+    html += '</div>';
+    for (var day = 0; day < 7; day++) {
+      html += '<div class="matrix-row"><div class="matrix-daylabel">' + DAY_NAMES[day] + '</div>';
+      for (var hr = 0; hr < 24; hr++) {
+        var scheduled = plannedMatrix[day][hr] || 0;
+        var required = requiredMatrix[day][hr] || 0;
+        var gap = scheduled - required;
+        var color = heatColor(requiredGapRatio(gap));
+        var cellText = (gap >= 0 ? "+" : "") + gap.toFixed(1);
+        html += '<div class="matrix-cell" style="background:' + color + '"' +
+          ' data-day="' + DAY_NAMES[day] + '" data-hour="' + hourLabelShort(hr) + '" data-day-idx="' + day + '" data-hour-idx="' + hr + '"' +
+          ' data-scheduled="' + scheduled.toFixed(1) + '" data-required="' + required.toFixed(1) + '" data-gap="' + gap.toFixed(1) + '">' + cellText + '</div>';
+      }
+      html += '</div>';
+    }
+    document.getElementById("coverageMatrix").innerHTML = html;
+    document.querySelectorAll("#coverageMatrix .matrix-cell").forEach(function (cell) {
+      cell.addEventListener("mouseenter", function () { showRequiredTooltip(cell); });
+      cell.addEventListener("mouseleave", hideTooltip);
+      cell.addEventListener("click", function () { openRequiredDrill(+cell.dataset.dayIdx, +cell.dataset.hourIdx, +cell.dataset.required, +cell.dataset.gap); });
+    });
+
+    document.getElementById("coverageLegendMin").textContent = "-" + REQUIRED_GAP_SCALE.toFixed(1);
+    document.getElementById("coverageLegendMax").textContent = "+" + REQUIRED_GAP_SCALE.toFixed(1);
+    document.getElementById("coverageLegendCaption").textContent = "Diverging scale — red means understaffed vs. volume-derived need, green means adequately/over staffed, centered on a gap of 0.";
+    var rangeLabel = rangeActive ? (state.range.start + " to " + state.range.end)
+      : (state.week !== "" ? ("Week of " + weekLabel(+state.week) + (upcomingWeekKeys[+state.week] ? " (upcoming — using YTD volume)" : "")) : "YTD average");
+    document.getElementById("coverageMatrixNote").textContent = "Planned coverage vs. volume-derived need, " + rangeLabel + " · Pacific Time";
+    document.getElementById("coverageModeNote").textContent = "Agents needed = (volume × minutes to handle) / (60 × " + Math.round(OCCUPANCY_TARGET * 100) + "% occupancy). Calls use the real avg handle time (" + OVERALL_CALL_AHT_MINUTES.toFixed(1) + " min); tickets assume " + ASSUMED_TICKET_MINUTES + " min — no real per-ticket effort data exists to measure this.";
+  }
+  function showRequiredTooltip(cell) {
+    var d = cell.dataset;
+    var gapNum = +d.gap;
+    var html = '<div class="htt-title">' + d.day + ', ' + d.hour + '</div>' +
+      '<div class="htt-row"><span>Scheduled</span><b>' + d.scheduled + '</b></div>' +
+      '<div class="htt-row"><span>Required</span><b>' + d.required + '</b></div>' +
+      '<div class="htt-row" style="color:' + (gapNum < 0 ? 'var(--critical)' : 'var(--good)') + '"><span>Gap</span><b>' + (gapNum >= 0 ? "+" : "") + d.gap + '</b></div>';
+    tooltipEl.innerHTML = html;
+    var rect = cell.getBoundingClientRect();
+    tooltipEl.classList.add("visible");
+    var top = rect.top - tooltipEl.offsetHeight - 8;
+    if (top < 4) top = rect.bottom + 8;
+    var left = rect.left + rect.width / 2 - tooltipEl.offsetWidth / 2;
+    left = Math.max(4, Math.min(left, window.innerWidth - tooltipEl.offsetWidth - 4));
+    tooltipEl.style.top = top + "px";
+    tooltipEl.style.left = left + "px";
+  }
+  function openRequiredDrill(day, hour, required, gap) {
+    drillCoverageRows = coverageDrillRowsFor(day, hour);
+    var scheduledCount = drillCoverageRows.filter(function (r) { return r.status === "Scheduled"; }).length;
+    document.getElementById("coverageDrillTitle").textContent = DAY_NAMES[day] + ", " + hourLabel(hour) + " — " + scheduledCount + " scheduled vs " + required.toFixed(1) + " required (" + (gap >= 0 ? "+" : "") + gap.toFixed(1) + ")";
+    document.getElementById("coverageDrillNote").textContent = "Required is derived from volume, not a headcount of real people - the table below is who's actually scheduled (same as Planned mode).";
+    var showDate = drillCoverageRows.length && drillCoverageRows[0].date;
+    var html = "<thead><tr><th>Employee</th><th>Phone-capable</th><th>Status</th>" + (showDate ? "<th>Date</th>" : "") + "</tr></thead><tbody>";
+    drillCoverageRows.forEach(function (r) {
+      html += "<tr><td>" + escapeHtml(r.employee) + "</td><td>" + (r.phone === 1 ? "Yes" : "No") + "</td><td>" + escapeHtml(r.status) + "</td>" + (showDate ? "<td>" + escapeHtml(r.date || "") + "</td>" : "") + "</tr>";
+    });
+    html += "</tbody>";
+    document.getElementById("coverageDrillTable").innerHTML = html;
+    document.getElementById("coverageDrillPanel").style.display = "";
+    document.getElementById("coverageDrillPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  document.querySelectorAll(".channel-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      state.channel = btn.getAttribute("data-channel");
+      document.querySelectorAll(".channel-btn").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+      render();
+    });
+  });
+
+  document.querySelectorAll(".dir-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      state.dir = btn.getAttribute("data-dir");
+      document.querySelectorAll(".dir-btn").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+      render();
+    });
+  });
+
+  document.querySelectorAll(".metric-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      state.metric = btn.getAttribute("data-metric");
+      document.querySelectorAll(".metric-btn").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+      render();
+    });
+  });
+
+  document.querySelectorAll(".coverage-mode-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      state.coverageMode = btn.getAttribute("data-coverage-mode");
+      document.querySelectorAll(".coverage-mode-btn").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+      document.getElementById("coverageDrillPanel").style.display = "none"; // stale drill from the other mode shouldn't linger
+      renderCoverageSection();
+    });
+  });
+
+  document.getElementById("weekSelect").addEventListener("change", function (e) {
+    state.week = e.target.value;
+    // Picking a week clears any custom range - the two controls are mutually
+    // exclusive (Phase 3, 2026-08-05), not simultaneously applied.
+    if (state.week !== "") {
+      state.range.start = ""; state.range.end = "";
+      document.getElementById("rangeStart").value = "";
+      document.getElementById("rangeEnd").value = "";
+    }
+    render();
+  });
+
+  function onRangeInputChange() {
+    state.range.start = document.getElementById("rangeStart").value;
+    state.range.end = document.getElementById("rangeEnd").value;
+    var note = document.getElementById("rangeNote");
+    if (state.range.start && state.range.end && state.range.start > state.range.end) {
+      note.textContent = "Start date is after end date — pick an earlier start.";
+      return;
+    }
+    note.textContent = "";
+    // A custom range clears the week dropdown, same mutual-exclusivity as above.
+    if (isRangeActive()) {
+      state.week = "";
+      document.getElementById("weekSelect").value = "";
+    }
+    render();
+  }
+  document.getElementById("rangeStart").addEventListener("change", onRangeInputChange);
+  document.getElementById("rangeEnd").addEventListener("change", onRangeInputChange);
+  document.getElementById("rangeClearBtn").addEventListener("click", function () {
+    state.range.start = ""; state.range.end = "";
+    document.getElementById("rangeStart").value = "";
+    document.getElementById("rangeEnd").value = "";
+    document.getElementById("rangeNote").textContent = "";
+    setActivePeriodBtn(null);
+    render();
+  });
+
+  // Quick period presets (Week/Month/Quarter/Year) - all implemented on top of
+  // the existing generic date-range machinery (state.range.start/end) rather
+  // than inventing separate aggregation logic, since a month/quarter is just a
+  // wider range over the same daily rows. "Year" is exactly the dashboard's
+  // existing default YTD-average state, so it just clears the range/week
+  // filters rather than setting an explicit Jan-1 range.
+  function fmtDateInput(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function setActivePeriodBtn(period) {
+    document.querySelectorAll(".period-btn").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.dataset.period === period ? "true" : "false");
+    });
+  }
+  function applyRange(start, end, period) {
+    state.week = "";
+    document.getElementById("weekSelect").value = "";
+    state.range.start = fmtDateInput(start);
+    state.range.end = fmtDateInput(end);
+    document.getElementById("rangeStart").value = state.range.start;
+    document.getElementById("rangeEnd").value = state.range.end;
+    document.getElementById("rangeNote").textContent = "";
+    setActivePeriodBtn(period);
+    render();
+  }
+  document.querySelectorAll(".period-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var today = new Date();
+      var period = btn.dataset.period;
+      if (period === "year") {
+        state.range.start = ""; state.range.end = ""; state.week = "";
+        document.getElementById("rangeStart").value = "";
+        document.getElementById("rangeEnd").value = "";
+        document.getElementById("weekSelect").value = "";
+        document.getElementById("rangeNote").textContent = "";
+        setActivePeriodBtn("year");
+        render();
+        return;
+      }
+      if (period === "week") {
+        var dow = today.getDay();
+        var weekStart = new Date(today); weekStart.setDate(today.getDate() - dow);
+        applyRange(weekStart, today, "week");
+      } else if (period === "month") {
+        applyRange(new Date(today.getFullYear(), today.getMonth(), 1), today, "month");
+      } else if (period === "quarter") {
+        var qStartMonth = Math.floor(today.getMonth() / 3) * 3;
+        applyRange(new Date(today.getFullYear(), qStartMonth, 1), today, "quarter");
+      }
+    });
+  });
+  // Manually editing the custom-range inputs or the week dropdown deselects
+  // whichever quick-period button was active, so the pressed state never lies
+  // about what's actually being shown.
+  document.getElementById("weekSelect").addEventListener("change", function () { setActivePeriodBtn(null); });
+  document.getElementById("rangeStart").addEventListener("change", function () { setActivePeriodBtn(null); });
+  document.getElementById("rangeEnd").addEventListener("change", function () { setActivePeriodBtn(null); });
+
+  document.querySelectorAll(".compare-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (btn.disabled) return;
+      state.compare = btn.getAttribute("data-compare");
+      document.querySelectorAll(".compare-btn").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+      render();
+    });
+  });
+
+  // ---- Phase 3 (2026-08-05): click-to-drill ----
+  // Clicking a matrix cell lists the actual underlying calls/tickets in that
+  // day+hour slot, scoped to whatever's currently in view (channel,
+  // direction, week/range) - not just the aggregate number the cell shows.
+  // With no week/range selected this can span every occurrence of that slot
+  // across the whole year (e.g. "every Wednesday 9am call ever") - genuinely
+  // useful ("who handles this slot"), just capped in the rendered table with
+  // a full-CSV escape hatch so nothing is silently hidden.
+  var DRILL_ROW_CAP = 300;
+  function currentPeriodRows(rows) {
+    if (isRangeActive()) return rangeRowsOf(rows, function (r) { return r[COL.date]; }, state.range.start, state.range.end);
+    if (state.week !== "") return weekRows(rows, +state.week);
+    return rows;
+  }
+  function drillRowsFor(day, hour) {
+    return currentPeriodRows(scopedRows()).filter(function (r) { return r[COL.weekday] === day && r[COL.hour] === hour; });
+  }
+  function csvEscape(v) {
+    v = v == null ? "" : String(v);
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+  var EXPORT_HEADER = ["channel", "direction", "date", "time_pt", "weekday", "hour_pt", "duration_sec", "result", "assignee", "subject"];
+  function rowToExportFields(r) {
+    return [
+      r[COL.channel], r[COL.dir] || "", r[COL.date] || "", r[COL.time] || "", DAY_NAMES[r[COL.weekday]], r[COL.hour],
+      r[COL.duration] != null ? r[COL.duration] : "", r[COL.result] || "", r[COL.assignee] || "", r[COL.subject] || ""
+    ];
+  }
+  function rowsToCsv(rows) {
+    var lines = [EXPORT_HEADER.join(",")];
+    rows.forEach(function (r) { lines.push(rowToExportFields(r).map(csvEscape).join(",")); });
+    return lines.join("\r\n");
+  }
+  function downloadBlob(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  // ---- Coverage click-to-drill (Phase 4, 2026-08-05) - a different question
+  // than calls/tickets ("who's scheduled here"), so a separate render path
+  // rather than forcing it through the ROWS-shaped table above.
+  function coverageDrillRowsFor(day, hour) {
+    var channel = state.channel;
+    var candidates = ROSTER.filter(function (r) {
+      if (channel === "calls" && r[ROSTERCOL.phone] !== 1) return false;
+      if (r[ROSTERCOL.shiftHour] == null) return false;
+      if (r[ROSTERCOL.days].indexOf(day) === -1) return false;
+      return isScheduledHour(r[ROSTERCOL.shiftHour], shiftEndFor(r), hour); // shift window, before lunch/PTO are factored into status below
+    });
+    var dates = isRangeActive() ? datesForRange(state.range.start, state.range.end).filter(function (dt) { return dt.weekday === day; })
+      : (state.week !== "" ? [{ weekday: day, epochDay: +state.week + day }] : []);
+    function statusFor(r, off) {
+      if (off) return "Off (PTO/Holiday)";
+      if (isOnLunch(r[ROSTERCOL.lunchHour], hour)) return "On lunch";
+      return "Scheduled";
+    }
+    if (!dates.length) {
+      return candidates.map(function (r) { return { employee: r[ROSTERCOL.employee], phone: r[ROSTERCOL.phone], status: statusFor(r, false), date: null }; });
+    }
+    var out = [];
+    dates.forEach(function (dt) {
+      var dateStr = fmtEpochDayIso(dt.epochDay);
+      candidates.forEach(function (r) {
+        var off = isOffOnDate(r[ROSTERCOL.employee], r[ROSTERCOL.office], dt.epochDay);
+        out.push({ employee: r[ROSTERCOL.employee], phone: r[ROSTERCOL.phone], status: statusFor(r, off), date: dateStr });
+      });
+    });
+    return out;
+  }
+  // Coverage gets its OWN drill panel (2026-08-05: "The drill down
+  // should pop up below the heatmap, not above it") - the shared drillPanel
+  // used by the Volume matrix sits ABOVE the Coverage section in the DOM,
+  // so reusing it made a Coverage-cell click open a panel above where the
+  // click happened.
+  var drillCoverageRows = [];
+  function openActualDrill(day, hour) {
+    var names = actualAgentNamesFor(day, hour, state.channel);
+    document.getElementById("coverageDrillTitle").textContent = DAY_NAMES[day] + ", " + hourLabel(hour) + " — " + names.length.toLocaleString() + (names.length === 1 ? " agent active" : " agents active") + " (real activity, YTD)";
+    document.getElementById("coverageDrillNote").textContent = "Touch count = tickets created or solved by this agent in this exact day+hour slot, YTD (≥" + ACTIVITY_MIN_TOUCHES + " required to appear here).";
+    var html = "<thead><tr><th>Employee</th><th>Touches (YTD)</th></tr></thead><tbody>";
+    names.forEach(function (n) {
+      html += "<tr><td>" + escapeHtml(n.employee) + "</td><td>" + n.count + "</td></tr>";
+    });
+    html += "</tbody>";
+    document.getElementById("coverageDrillTable").innerHTML = html;
+    document.getElementById("coverageDrillPanel").style.display = "";
+    document.getElementById("coverageDrillPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    drillCoverageRows = names.map(function (n) { return { employee: n.employee, phone: (ROSTER_BY_EMPLOYEE[n.employee] || [])[ROSTERCOL.phone], status: n.count + " touches", date: null }; });
+  }
+  function openCoverageDrill(day, hour) {
+    if (state.coverageMode === "actual") { openActualDrill(day, hour); return; }
+    drillCoverageRows = coverageDrillRowsFor(day, hour);
+    var scheduledCount = drillCoverageRows.filter(function (r) { return r.status === "Scheduled"; }).length;
+    document.getElementById("coverageDrillTitle").textContent = DAY_NAMES[day] + ", " + hourLabel(hour) + " — " + scheduledCount.toLocaleString() + " available" + (drillCoverageRows.length !== scheduledCount ? " of " + drillCoverageRows.length.toLocaleString() + " normally scheduled" : "");
+    document.getElementById("coverageDrillNote").textContent = (isRangeActive() || state.week !== "")
+      ? ""
+      : "Typical schedule for this slot — PTO isn't applied since no specific week/date is selected.";
+    var showDate = drillCoverageRows.length && drillCoverageRows[0].date;
+    var html = "<thead><tr><th>Employee</th><th>Phone-capable</th><th>Status</th>" + (showDate ? "<th>Date</th>" : "") + "</tr></thead><tbody>";
+    drillCoverageRows.forEach(function (r) {
+      html += "<tr><td>" + escapeHtml(r.employee) + "</td><td>" + (r.phone === 1 ? "Yes" : "No") + "</td><td>" + escapeHtml(r.status) + "</td>" + (showDate ? "<td>" + escapeHtml(r.date || "") + "</td>" : "") + "</tr>";
+    });
+    html += "</tbody>";
+    document.getElementById("coverageDrillTable").innerHTML = html;
+    document.getElementById("coverageDrillPanel").style.display = "";
+    document.getElementById("coverageDrillPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function coverageRowsToCsv(rows) {
+    var lines = ["employee,phone_capable,status,date"];
+    rows.forEach(function (r) { lines.push([r.employee, r.phone === 1 ? "yes" : "no", r.status, r.date || ""].map(csvEscape).join(",")); });
+    return lines.join("\r\n");
+  }
+
+  var drillRows = [];
+  function openDrill(day, hour) {
+    drillRows = drillRowsFor(day, hour).slice().sort(function (a, b) {
+      // Most recent first - the more actionable ordering for a "who was
+      // handling this slot" question than chronological-ascending.
+      var da = (a[COL.date] || "") + " " + (a[COL.time] || "");
+      var db = (b[COL.date] || "") + " " + (b[COL.time] || "");
+      return db.localeCompare(da);
+    });
+    document.getElementById("drillTitle").textContent = DAY_NAMES[day] + ", " + hourLabel(hour) + " — " + drillRows.length.toLocaleString() + (drillRows.length === 1 ? " record" : " records");
+    var note = document.getElementById("drillNote");
+    note.textContent = drillRows.length > DRILL_ROW_CAP
+      ? "Showing the most recent " + DRILL_ROW_CAP.toLocaleString() + " of " + drillRows.length.toLocaleString() + " — use Export for the full list."
+      : "";
+    var shown = drillRows.slice(0, DRILL_ROW_CAP);
+    var hasTicketFields = shown.some(function (r) { return r[COL.assignee] != null || r[COL.subject] != null; });
+    var hasCallFields = shown.some(function (r) { return r[COL.duration] != null || r[COL.dir] != null; });
+    var headCells = ["Date", "Time", "Channel"];
+    if (hasCallFields) headCells.push("Direction", "Duration", "Outcome");
+    if (hasTicketFields) headCells.push("Assignee", "Subject");
+    var html = "<thead><tr>" + headCells.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>";
+    shown.forEach(function (r) {
+      html += "<tr><td>" + escapeHtml(r[COL.date] || "—") + "</td><td>" + escapeHtml(r[COL.time] || "—") + "</td><td>" + escapeHtml(r[COL.channel]) + "</td>";
+      if (hasCallFields) {
+        html += "<td>" + escapeHtml(r[COL.dir] || "—") + "</td><td>" + (r[COL.duration] != null ? escapeHtml(fmtDuration(r[COL.duration])) : "—") + "</td><td>" + escapeHtml(r[COL.result] || "—") + "</td>";
+      }
+      if (hasTicketFields) {
+        html += "<td>" + escapeHtml(r[COL.assignee] || "—") + '</td><td class="subject-cell" title="' + escapeHtml(r[COL.subject] || "") + '">' + escapeHtml(r[COL.subject] || "—") + "</td>";
+      }
+      html += "</tr>";
+    });
+    html += "</tbody>";
+    document.getElementById("drillTable").innerHTML = html;
+    document.getElementById("drillPanel").style.display = "";
+    document.getElementById("drillPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  document.getElementById("drillCloseBtn").addEventListener("click", function () {
+    document.getElementById("drillPanel").style.display = "none";
+  });
+  document.getElementById("drillExportBtn").addEventListener("click", function () {
+    var blob = new Blob([rowsToCsv(drillRows)], { type: "text/csv;charset=utf-8;" });
+    downloadBlob(blob, "heatmap-slot-" + state.channel + ".csv");
+  });
+  document.getElementById("coverageDrillCloseBtn").addEventListener("click", function () {
+    document.getElementById("coverageDrillPanel").style.display = "none";
+  });
+  document.getElementById("coverageDrillExportBtn").addEventListener("click", function () {
+    var blob = new Blob([coverageRowsToCsv(drillCoverageRows)], { type: "text/csv;charset=utf-8;" });
+    downloadBlob(blob, "heatmap-coverage-slot-" + state.channel + ".csv");
+  });
+
+  renderUpcomingPto();
+  render();
+};
+</script>
+</div>
+<script>
+(function () {
+  var SB = "https://qevavlolbygnjynyikru.supabase.co";
+  var KEY = "sb_publishable_dvaKYnU6ab7qzSTWMUl00Q_hEVNOVDk"; // publishable key, same one the Live View page carries
+  var status = document.getElementById("hmStatus"), app = document.getElementById("hmApp");
+  var inFrame = window.parent !== window, started = false;
+  function fail(msg) { status.textContent = msg; status.className = "err"; status.hidden = false; }
+  function go(snap) {
+    if (started) return;
+    if (!snap || snap.v !== 1) { fail("The heatmap data is not in the expected format."); return; }
+    started = true; status.hidden = true; app.hidden = false;
+    try { window.startHeatmap(snap); } catch (e) { app.hidden = true; fail("The heatmap could not be drawn: " + e.message); }
+  }
+  document.getElementById("hmClose").addEventListener("click", function (ev) {
+    ev.preventDefault();
+    if (inFrame) window.parent.postMessage({ type: "hm-close" }, location.origin); else history.back();
+  });
+  if (inFrame) {
+    window.addEventListener("message", function (ev) {
+      if (ev.origin !== location.origin || !ev.data) return;
+      if (ev.data.type === "hm-data") go(ev.data.snapshot);
+      if (ev.data.type === "hm-error") fail(ev.data.message || "The heatmap could not be loaded.");
+    });
+    window.parent.postMessage({ type: "hm-ready" }, location.origin);
+  } else {
+    // Opened on its own (local testing): use the Live View's saved sign-in.
+    var tok = ""; try { tok = (JSON.parse(localStorage.getItem("rcxLiveView.session.v1") || "{}")).rcxAccess || ""; } catch (e) {}
+    if (!tok) fail("Sign in to the Live View first, then open the heatmap from its Heatmap button.");
+    else fetch(SB + "/functions/v1/heatmap", { headers: { apikey: KEY, "x-rcx-token": tok } })
+      .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.error || ("HTTP " + r.status)); }); })
+      .then(go).catch(function (e) { fail(e.message); });
+  }
+})();
+</script>
+</body>
+</html>
