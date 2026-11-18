@@ -158,7 +158,7 @@
   }
   /* Change-vs-baseline view: green (below baseline) - neutral - red (above) */
   .heat-legend-bar.diverging {
-    background: linear-gradient(to right, var(--good), rgba(128,128,128,0.25), var(--critical));
+    background: linear-gradient(to right, var(--good), var(--ink-3), var(--critical));
   }
   .heat-legend-caption { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
 
@@ -1205,10 +1205,16 @@ window.startHeatmap = function (S) {
       var n = parseInt(hex, 16);
       return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
     }
+    // Solid colors (no transparency, which looked muddy on the dark theme):
+    // blend from a neutral grey-blue (--ink-3) at zero change to the full
+    // green/red at the largest change, so strong changes are as bright as in
+    // the Values view.
     var base = signedRatio >= 0 ? hexToRgb(cs.getPropertyValue("--critical") || "#C23B3B") : hexToRgb(cs.getPropertyValue("--good") || "#1E8A5F");
+    var neutral = hexToRgb(cs.getPropertyValue("--ink-3") || "#8890AC");
     var m = Math.min(Math.abs(signedRatio), 1);
-    if (m < 0.02) return "rgba(128,128,128,0.22)";
-    return "rgba(" + base[0] + "," + base[1] + "," + base[2] + "," + (0.25 + 0.75 * m).toFixed(2) + ")";
+    var t = m < 0.02 ? 0 : 0.3 + 0.7 * m;
+    function mix(a, b) { return Math.round(a + (b - a) * t); }
+    return "rgb(" + mix(neutral[0], base[0]) + "," + mix(neutral[1], base[1]) + "," + mix(neutral[2], base[2]) + ")";
   }
   function updateLegend() {
     var bar = document.getElementById("legendBar");
