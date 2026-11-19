@@ -1075,6 +1075,9 @@
         if (!isOvernight(n)) p.login = Math.max(p.login, (S.hist.agents[p.id] || {}).dayLogin || 0);
         p.sup = isSupervisorName(n, p.sup);   // by name too: a history entry can miss the flag
         if ((CONFIG.MANAGER_IDS || []).indexOf(String(p.id)) >= 0) return;   // managers are never ranked
+        // Supervisors are never ranked either, even after answering a call (2026-11-19). Peter (SUPERVISOR_HOURS) is an
+        // L1 outside his window, so he is judged as an agent, not by the clock.
+        if ((p.sup || isSupForLogins(n)) && !Object.keys(CONFIG.SUPERVISOR_HOURS || {}).some(function (x) { return normName(x) === normName(n); })) return;
         if ((CONFIG.NOT_RANKED_IDS || []).indexOf(String(p.id)) >= 0) return;
         // Ranked once they answer a queue call or work a ticket (took, replied to or solved one today; 2026-10-30), else
         // after BOARD_MIN_LOGIN_SEC logged in.
