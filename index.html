@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3454D1">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
-<script src="scoring.js?v=7.17"></script>   <!-- scorecard rules (docs/_shared/scoring.js); bump ?v= when it changes -->
+<script src="scoring.js?v=7.15"></script>   <!-- scorecard rules (docs/_shared/scoring.js); bump ?v= when it changes -->
 <style>
   :root {
     --bg: #F5F6F9; --surface: #FFFFFF; --surface-alt: #ECEFF5; --border: #DDE1EA;
@@ -265,13 +265,6 @@
   dialog.week-report { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
     padding: 18px 20px; width: min(1180px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
   dialog.week-report::backdrop { background: rgba(12,18,32,0.55); }
-  a.agent-trend { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
-  a.agent-trend:hover { text-decoration: underline; }
-  .tr-wrap { overflow: visible; }
-  .wr-table.tr-compact th, .wr-table.tr-compact td { padding: 6px 4px; white-space: normal; }
-  .wr-table.tr-compact th { font-size: 10px; vertical-align: bottom; }
-  .wr-table.tr-compact td:first-child, .wr-table.tr-compact th:first-child { white-space: nowrap; }
-  .tr-spark { width: 100%; max-width: 760px; height: auto; display: block; margin: 6px 0 2px; }
   .wr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
   .wr-sub { font-family: var(--serif); font-size: 15px; margin: 16px 0 4px; }
   .wr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -507,7 +500,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.19<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.15<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -515,13 +508,6 @@
           <div><button type="button" class="btn" id="weekReportCopy">Copy report</button> <button type="button" class="btn" id="weekReportClose">Close</button></div>
         </div>
         <div id="weekReportBody"></div>
-      </dialog>
-      <dialog class="week-report" id="agentTrend">
-        <div class="wr-head">
-          <h2 class="section-title" id="agentTrendTitle" style="margin:0">Trend</h2>
-          <div><button type="button" class="btn" id="agentTrendClose">Close</button></div>
-        </div>
-        <div id="agentTrendBody"></div>
       </dialog>
     </main>
   </section>
@@ -558,14 +544,14 @@
     STUCK_STATE: "WORKING",
     STUCK_WARN_SEC: 2 * 60,                          // flag after this long in plain WORKING
     STUCK_CRIT_SEC: 10 * 60,
-    // Ticket-work statuses: this long in one with nothing done in Zendesk or Jira = flagged on its own (Fred, 2026-10-22).
+    // Ticket-work statuses: this long in one with nothing done in Zendesk or Jira = flagged on its own (2026-10-22).
     QUIET_WORK_STATES: ["ZD/ES TICKET FOLLOW-UP", "TESTING"],
     QUIET_WORK_SEC: 30 * 60,
     QUIET_WORK_CRIT_SEC: 60 * 60,
     MIN_SIGNALS: 2,                               // flag an agent only when this many different signals are true
     LUNCH_EARLY_MIN: 30,                             // a logout this long before scheduled lunch still counts as lunch
     LUNCH_LATE_START_MIN: 60,                        // ...and up to this long after (late lunch is fine)
-    LUNCH_OVER_WARN_MIN: 5,                          // lunch longer than LUNCH_MAX_MIN by this = yellow (Fred)
+    LUNCH_OVER_WARN_MIN: 5,                          // lunch longer than LUNCH_MAX_MIN by this = yellow
     LUNCH_OVER_CRIT_MIN: 15,                         // ...by this = red
     LUNCH_PENALTY_WARN: 5,                           // Performance score points lost for a yellow lunch overrun
     LUNCH_PENALTY_CRIT: 10,
@@ -573,8 +559,8 @@
     LATE_PENALTY_CRIT: 10,                           // ...15+ min                         // ...for a red one
     REVIEW_SNOOZE_MIN: 30,                          // "Silence 30 min" on the Call avoidance watch (2026-10-30; was a 60-min review)
     // Who can silence the Call avoidance watch (note required): managers and L2s only (2026-10-30). Same list in "reviews".
-    SILENCE_IDS: ["3299715", "3301145", "3301139", "3301150", "3301140", "3301143", "3301144", "3301141"],   // Fred, Ricardo, Erasmo; Adnan, Daniel Suyo, Joel, Paulina, Salvador
-    // People whose hours don't follow daylight saving: roster times + 1h while Pacific is on PDT (Fred).
+    SILENCE_IDS: ["3299715", "3301145", "3301139", "3301150", "3301140", "3301143", "3301144", "3301141"],   // Ricardo, Erasmo; Adnan, Daniel Suyo, Joel, Paulina, Salvador
+    // People whose hours don't follow daylight saving: roster times + 1h while Pacific is on PDT.
     NO_DST: ["Andrea Lopez", "Victor Guadarrama"],
     SHIFT_HOURS: 9,                                 // roster has no shift end: assume 8h work + 1h lunch
     OFFLINE_MIN: 5,                                  // logged out this long during the shift = on the watch
@@ -586,29 +572,36 @@
     // people on a clock with no daylight saving came in an hour early). Logins today + What to Watch; not scored.
     LOGIN_EARLY_WARN_MIN: 30,
     LOGIN_EARLY_ALERT_HOURS: 2,                      // the What to Watch alert shows until this long after their scheduled start
-    // Email Team scorecard (Fred, 2026-10-16): email-only agents, scored from their Zendesk statuses. SHARIK, Danish and
+    // Email Team scorecard (2026-10-16): email-only agents, scored from their Zendesk statuses. SHARIK, Danish and
     // Alan do phone and email (call scorecard); Laura is Payroll; Victor and Adnan are supervisors.
     EMAIL_AGENTS: ["Mohsin", "Bisma", "Sabreena Yaqoob"],
-    READY_STATUSES: ["ES BOARD/ZD TKT. SWEEP", "ESCALATION SUPPORT"],
-    READY_SECOND_HALF: { "Peter Taylor": true },   // Escalation Support counts as Ready for him only in the second half of his shift (Fred 2026-11-13)
-    EMAIL_READY: ["Email Support", "online"],          // Zendesk statuses that count as ready (Fred)
+    EMAIL_WINDOWS: { "Christian Areja": [780, 1080] },   // email only 1-6 PM Pacific: Zendesk Email Support counts as Ready then (2026-11-11)
+    READY_STATUSES: ["ES BOARD/ZD TKT. SWEEP", "ESCALATION SUPPORT"],// RingCX work statuses that count as Ready like Available (upper case; 2026-11-06)
+    EMAIL_READY: ["Email Support", "online"],          // Zendesk statuses that count as ready
     EMAIL_PICKUP_MIN: 30,                            // a New (unassigned) ticket waiting longer than this while they're ready = slow pickup
     LUNCH_MAX_MIN: 60,                              // lunch longer than this shows red (RingCX's own max lunch is 60)
     LUNCH_LEEWAY_MIN: 30,                            // "Due now" for this long after the scheduled time, then "Overdue"
     LUNCH_LOOKAHEAD_MIN: 120,                        // "Next up" window
-    LUNCH_EXCLUDE: ["Sharik Parvaiz", "Danish Manzoor"], // left out of the Lunch panel for now (Fred)
+    LUNCH_EXCLUDE: ["Sharik Parvaiz", "Danish Manzoor"], // left out of the Lunch panel for now
     SHORT_CALL_SEC: 60,                             // answered calls shorter than this are listed for review
     BOARD_MIN_LOGIN_SEC: 60 * 60,                   // agents with 0 calls are ranked once logged in this long
-    // Only these RingCX agent IDs may use the viewer (Fred approves each one). The names
+    // Only these RingCX agent IDs may use the viewer (each one is approved). The names
     // behind the IDs are kept in the internal README, not here, because this page is public.
     // "Who's viewing" uses Supabase Realtime presence (no database tables). The anon key is a
     // public client key by design. Empty values = presence off; the page shows only your own name.
     SUPABASE_URL: "https://qevavlolbygnjynyikru.supabase.co",
     SUPABASE_ANON_KEY: "sb_publishable_dvaKYnU6ab7qzSTWMUl00Q_hEVNOVDk",
     ALLOWED_AGENT_IDS: ["3299715", "3301143", "3301144", "3301145", "3301139", "3301150", "3301146", "3301140", "3301135", "3301141"],   // + Adnan Bakshi, Natasha Gangal, Daniel Suyo, Victor, Salvador Rojas
-    // Queue names are shown with the word CORE always in capitals, in every part of the page (Fred).
+    // Queue names are shown with the word CORE always in capitals, in every part of the page.
     HIDDEN_QUEUES: ["Test Queue"],                  // never shown anywhere on the page
-    // Vendor status pages shown in What to Watch (Fred, 2026-10-14). All are Atlassian Statuspage
+    // No longer on the Support team (2026-11-19: Armando Sanchez and Coby Wright). They are dropped from the live
+    // rows, the replayed history and the roster from "from" on (Pacific date), so earlier days still show them.
+    // They are also not in ALLOWED_AGENT_IDS, so they can't sign in to this page.
+    FORMER_SUPPORT: [
+      { id: "3311232", name: "Armando Sanchez", from: "2026-11-19" },
+      { id: "3301129", name: "Coby Wright", from: "2026-11-19" }
+    ],
+    // Vendor status pages shown in What to Watch (2026-10-14). All are Atlassian Statuspage
     // sites with an open, CORS-enabled summary.json. "only" limits a page to the components that
     // matter (component or group names); incidents/maintenance count only if they touch those.
     // Global Payments' own developer status page wasn't found; Worldpay and Payrix ("Worldpay for
@@ -632,9 +625,9 @@
     TREAT_AS_SUPERVISOR: ["Victor Guadarrama", "Connor Lenhart"],   // Connor moved off the L1 list (2026-11-09)
     SUPERVISOR_TAG: [],
     // People who are supervisors only part of the day (Pacific). Outside these hours they count as
-    // agents everywhere, whatever their RingCX type (Fred, 2026-10-14: Peter takes calls, supervises 3-5 PM).
+    // agents everywhere, whatever their RingCX type (2026-10-14: Peter takes calls, supervises 3-5 PM).
     SUPERVISOR_HOURS: { "Peter Taylor": { from: "15:00", to: "17:00" } },
-    // Managers: not tracked in Logins today (Fred, 2026-10-15).
+    // Managers: not tracked in Logins today (2026-10-15).
     LOGIN_EXCLUDE: ["Erasmo Robles", "Ricardo Andrade"],
     // L2s' logins are shown only to managers (2026-10-15). L2 list confirmed (the roster tier lookup was out of date).
     MANAGER_IDS: ["3299715", "3301145", "3301139"],   // the three managers
@@ -647,7 +640,7 @@
     TPH_MIN_LOGIN_SEC: 7200,                          // Tickets/hr: under 2 logged-in hours = not judged
     ROLLBACK_IDS: ["3299715"],
     HARVEST_IDS: ["3299715"],    // who gets the Harvest theme on the Theme button (trial, 2026-10-27)   // who sees "Roll back" beside the version (the rollback function checks too)
-    L2_LOGINS_MANAGERS_ONLY: ["Adnan Bakshi", "Daniel Suyo", "Joel Cazares", "Paulina Leal", "Salvador Rojas"]   // Fred 2026-10-15; Peter counts as L1
+    L2_LOGINS_MANAGERS_ONLY: ["Adnan Bakshi", "Daniel Suyo", "Joel Cazares", "Paulina Leal", "Salvador Rojas"]   // 2026-10-15; Peter counts as L1
   };
   var IS_LOCAL_DEV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && location.port === "8765";
   var STORE_KEY = "rcxLiveView.session.v1";
@@ -706,7 +699,7 @@
   document.querySelectorAll("[data-cfgdur]").forEach(function (el) { el.textContent = fmtShort(CONFIG[el.getAttribute("data-cfgdur")]); });
 
   // ---------------- theme ----------------
-  // Remembered per supervisor (by RingCX agent ID) on each browser, so a shared PC keeps everyone's choice (Fred, 2026-10-15).
+  // Remembered per supervisor (by RingCX agent ID) on each browser, so a shared PC keeps everyone's choice (2026-10-15).
   var ui = load(UI_KEY) || {};
   function themeViewerId() { try { return session ? myAgentId() : null; } catch (x) { return null; } }
   function harvestOk() { var id = themeViewerId(); return !!id && CONFIG.HARVEST_IDS.indexOf(String(id)) >= 0; }
@@ -744,7 +737,7 @@
   }
 
   // Local testing only: the dev server on localhost:8765 hands out a token
-  // from Fred's own JWT credential. Only used while CLIENT_ID is empty.
+  // from the owner's own JWT credential. Only used while CLIENT_ID is empty.
   async function devSignIn() {
     var r = await fetch("/dev-token");
     if (!r.ok) throw new Error("Dev token endpoint failed: HTTP " + r.status);
@@ -789,8 +782,8 @@
   }
   function initialsOf(n) { return String(n || "").split(/\s+/).filter(Boolean).map(function (p) { return p[0]; }).slice(0, 2).join("").toUpperCase(); }
   function showViewer() {
-    var el = $("viewerTag"); if (!el) return;
     var hb = $("heatmapBtn"); if (hb) hb.hidden = (CONFIG.HEATMAP_IDS || []).indexOf(String(myAgentId() || "")) < 0;
+    var el = $("viewerTag"); if (!el) return;
     var n = viewerName();
     if (presence.channel) { if (n && n !== presence.trackedName) trackPresence(); renderPresence(); return; }
     el.hidden = !n;
@@ -800,6 +793,17 @@
   // ---------------- time off (Smartsheet PTO calendar via the Supabase "pto" function) ----------------
   // The function holds the Smartsheet token and only answers approved, signed-in viewers.
   var pto = { at: 0, loading: false };
+  // People who left the Support team are dropped by agent ID or by name once their "from" date (Pacific) has begun.
+  function formerSupport(id, name, ts) {
+    var k = String(name || "").trim().replace(/\s+/g, " ").toLowerCase(), ymd = ptYmd(0);
+    return (CONFIG.FORMER_SUPPORT || []).some(function (f) {
+      var day = ts ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date(ts)) : ymd;
+      return day >= f.from && ((id && String(id) === f.id) || (k && k === f.name.toLowerCase()));
+    });
+  }
+  function dropFormerSupport(agents, ts) {
+    return (agents || []).filter(function (a) { return !formerSupport(a.agentId, fullName(a), ts); });
+  }
   async function loadPto() {
     if (pto.loading || !session || !CONFIG.SUPABASE_URL) return;
     pto.loading = true;
@@ -808,7 +812,7 @@
       var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/pto", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
-      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = (j.schedule || []).map(dstAdjust).map(scheduleOverride);
+      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = (j.schedule || []).filter(function (s) { return !formerSupport("", s.name); }).map(dstAdjust).map(scheduleOverride);
       renderPto(j); renderLunch(elapsed()); renderLogins(elapsed());
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
@@ -846,7 +850,7 @@
   function isExit(e) { return e.fb === "AVAILABLE" && e.tb !== "ONCALL" && e.tb !== "AVAILABLE"; }
 
   // ---------------- Activity dropdown: Zendesk + Jira work during one status (the "activity" function) ----------------
-  // Fred, 2026-10-15: "what work has been done in Jira and Zendesk during his time in this status?"
+  // 2026-10-15: "what work has been done in Jira and Zendesk during his time in this status?"
   // Each status row gets a toggle; open rows stay open across redraws (actOpen) and results are cached
   // per agent + status start (actCache). A status still going is re-asked after 2 minutes.
   var actOpen = {}, actCache = {};
@@ -919,7 +923,7 @@
     var cutoff = Date.now() - 3600 * 1000, exitsMode = log.mode === "exits";
     var nChanges = 0, nExits = 0;
     ev.forEach(function (x) { if (x.t >= cutoff) { if (!isCallCycle(x)) nChanges += x.hidden ? 2 : 1; if (isExit(x)) nExits++; } });
-    // Logouts as their own rows (Fred, 2026-10-15: Armando showed 1:17 in ePayment Support when he had logged out
+    // Logouts as their own rows (2026-10-15: Armando showed 1:17 in ePayment Support when he had logged out
     // at 10:01 for lunch). They don't count as status changes.
     var nReal = ev.length;
     (h.gaps || []).forEach(function (g) {
@@ -1162,7 +1166,7 @@
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN || nowMin >= s.shift + CONFIG.SHIFT_HOURS * 60) return;
       var seen = byName[k], offSec, reason;
       if (seen && seen.h.sup) return;
-      // Logged out in their lunch period = at lunch (Fred). The 60 minutes run from when they left;
+      // Logged out in their lunch period = at lunch. The 60 minutes run from when they left;
       // only flag once they're 5+ min over (red at 15+).
       var L = seen ? lunchFor(seen.h, s, false) : null;
       if (L && L.active) {
@@ -1213,7 +1217,7 @@
   // RingCX gives each live session's start as loginDts (Pacific, no offset, e.g. "2026-10-14T06:02:20").
   // The page keeps every session it saw today in hist, so first login, re-logins and total time survive
   // logouts. Scheduled start is the roster "Shift Start" from the pto function.
-  // Logins today is agents only (Fred, 2026-10-14). Supervisors = RingCX type SUPERVISOR plus
+  // Logins today is agents only (2026-10-14). Supervisors = RingCX type SUPERVISOR plus
   // TREAT_AS_SUPERVISOR. RingCX's supervisor list is loaded once so supervisors who haven't logged in
   // today are left out too.
   var supNames = null, supLoading = false;
@@ -1290,7 +1294,7 @@
     var rows = [], seenNames = {};
     Object.keys(hist.agents).forEach(function (id) {
       var h = hist.agents[id]; if (!h.name || !h.sessions) return;
-      // Supervisors are tracked too (Fred, 2026-10-14), listed in their own group below the agents. Managers aren't.
+      // Supervisors are tracked too (2026-10-14), listed in their own group below the agents. Managers aren't.
       if (isLoginExcluded(h.name)) return;
       var isSup = isSupervisorName(h.name, h.sup);
       var live = liveById[id], s = sched[normName(h.name)];
@@ -1312,7 +1316,7 @@
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN) return;
       rows.push({ name: s.name, sup: isSupervisorName(s.name, false), start: s.shift, first: null, late: nowMin - s.shift, logins: 0, total: 0, missing: true });
     });
-    // Supervisors with no RingCX login today: their Zendesk login instead (Fred, 2026-10-16), from the server's
+    // Supervisors with no RingCX login today: their Zendesk login instead (2026-10-16), from the server's
     // every-minute Zendesk statuses (managers only, like supervisors' logins).
     var supCands = {};
     rows.forEach(function (r, i) { if (r.missing && r.sup) supCands[normName(r.name)] = { idx: i, name: r.name, start: r.start }; });
@@ -1522,12 +1526,13 @@
 
   // The status replay itself is SC.observe (scoring.js); this page also keeps its copy of the day in localStorage.
   function observe(agents, fetchedAt, noSave) {
+    agents = dropFormerSupport(agents, fetchedAt);
     SC.observe(agents, fetchedAt, noSave);
     if (!noSave) save(HIST_KEY, hist);
   }
 
   // Taking calls: Available -> Engaged -> Transition -> Available. That's the work we want, so it never counts as
-  // a status change (Fred, 2026-10-15). Engaged and Transition are both recorded as "ONCALL".
+  // a status change (2026-10-15). Engaged and Transition are both recorded as "ONCALL".
   function isCallCycle(e) {
     return !e.hidden && (e.fb === "AVAILABLE" || e.fb === "ONCALL") && (e.tb === "AVAILABLE" || e.tb === "ONCALL");
   }
@@ -1637,7 +1642,7 @@
       // Hidden queues are dropped right here, so they never reach cards, tiles, alerts or totals.
       var queues = (res[1] || []).filter(function (q) { return CONFIG.HIDDEN_QUEUES.indexOf(q.gateName) < 0; })
         .map(function (q) { q.gateName = queueLabel(q.gateName); return q; });
-      data = { agents: res[0] || [], queues: queues, fetchedAt: Date.now() };
+      data = { agents: dropFormerSupport(res[0] || [], Date.now()), queues: queues, fetchedAt: Date.now() };
       observe(data.agents, data.fetchedAt);
       lastError = null; backoff = 1;
       $("errorBanner").hidden = true;
@@ -1809,7 +1814,7 @@
     viewQueues().forEach(function (q) {
       var open = queueOpen(q);
       if (hoursMismatch(q)) items.push({ lvl: "warn", score: 450, html: "<b>" + esc(q.gateName) + "</b>: RingCX shows it open outside " + esc(CONFIG.QUEUE_HOURS[q.gateName].label) + ". Check the queue schedule." });
-      // One rule for every queue (Fred): yellow = open and nobody available;
+      // One rule for every queue: yellow = open and nobody available;
       // red = nobody available AND callers waiting. Callers waiting with someone available = yellow.
       var nobody = open && !q.available, waiting = q.inQueue > 0;
       var waitTxt = waiting ? q.inQueue + " waiting, longest " + count(q.longestInQueue || 0) : "";
@@ -1837,7 +1842,7 @@
       items.push({ lvl: crit ? "crit" : "warn", score: 400, link: "#watchPanel",
         html: "<b>" + watch.length + " agent" + (watch.length > 1 ? "s" : "") + "</b> on the call avoidance watch" + (crit ? " (" + crit + " critical)" : "") });
     }
-    // ES tickets waiting on L1 (Fred): one flag, yellow past ES_WARN_HOURS, red if any past ES_CRIT_HOURS.
+    // ES tickets waiting on L1: one flag, yellow past ES_WARN_HOURS, red if any past ES_CRIT_HOURS.
     var esw = esWaiting();
     if (esw.over) items.push({ lvl: esw.crit ? "crit" : "warn", score: esw.crit ? 700 : 350, link: "#esPanel",
       html: "<b>ES tickets resolved to L1</b>: " + esw.over + " waiting on Support over " + ES_WARN_HOURS + "h" + (esw.crit ? " (" + esw.crit + " over " + ES_CRIT_HOURS + "h)" : "") });
@@ -1947,11 +1952,11 @@
       { label: "Short calls", value: abandons.all ? shortCalls().length : "–", cls: abandons.all && shortCalls().length ? "warn" : "", filter: "shortcalls", note: "answered, under " + CONFIG.SHORT_CALL_SEC + "s · click to listen" },
       { label: "SLA", value: pct(slaP, slaP + slaF), note: slaP + slaF ? slaP + " of " + (slaP + slaF) + " answered ≤30s" : "no SLA calls yet" }
     ];
-    tiles.unshift(tiles.pop());   // SLA (last in the list) goes first, per Fred
-    // Long calls goes at the very end, after Short calls (Fred).
+    tiles.unshift(tiles.pop());   // SLA (last in the list) goes first
+    // Long calls goes at the very end, after Short calls.
     var lcIdx = tiles.map(function (t) { return t.filter; }).indexOf("longcalls");
     if (lcIdx >= 0) tiles.push(tiles.splice(lcIdx, 1)[0]);
-    // Total talk, then First call resolution, sit right before Abandoned (Fred).
+    // Total talk, then First call resolution, sit right before Abandoned.
     ["Total talk", "First call resolution"].forEach(function (lbl) {
       var i = tiles.map(function (t) { return t.label; }).indexOf(lbl);
       if (i < 0) return;
@@ -2070,7 +2075,7 @@
   // ---------------- ES tickets waiting on L1 (Jira, via the "escalations" function) ----------------
   // Escalations in "Awaiting info" or "Resolved to L1": Jira hands them back to the L1 agent who
   // escalated them, so they're grouped by assignee. Time in status runs from Jira's "Last Workflow
-  // Transition"; over ES_WARN_HOURS is flagged (Fred: 2 hours), over ES_CRIT_HOURS red.
+  // Transition"; over ES_WARN_HOURS is flagged (2 hours), over ES_CRIT_HOURS red.
   var ES_WARN_HOURS = 2, ES_CRIT_HOURS = 24;
   var es = { rows: null, at: 0, err: null, loading: false, site: "https://bqetrack.atlassian.net" };
   async function loadEs(force) {
@@ -2089,7 +2094,7 @@
     } catch (x) { es.err = x.message; }
     finally { es.at = Date.now(); es.loading = false; if (data.fetchedAt) render(); }
   }
-  // Copy ES links grouped by agent (Fred, 2026-10-15): rich HTML (clickable in Teams/Outlook) plus a
+  // Copy ES links grouped by agent (2026-10-15): rich HTML (clickable in Teams/Outlook) plus a
   // plain-text version with full URLs for anywhere else.
   var esGroups = [];
   function esHours(h) { return isNaN(h) ? "" : (h < 1 ? Math.round(h * 60) + "m" : (h < 48 ? h.toFixed(1) + "h" : (h / 24).toFixed(1) + "d")); }
@@ -2127,7 +2132,7 @@
     var old = btn.textContent; btn.textContent = ok ? "Copied ✓" : "Copy failed"; btn.disabled = true;
     setTimeout(function () { btn.textContent = old; btn.disabled = false; }, 1800);
   }
-  // What to Watch counts "Resolved to L1" only for now (Fred, 2026-10-19: "We have an issue with the Awaiting Info
+  // What to Watch counts "Resolved to L1" only for now (2026-10-19: "We have an issue with the Awaiting Info
   // status"). Awaiting info tickets still show, in yellow, in the ES section below; they just don't raise the banner.
   var ES_WATCH_STATUSES = ["resolved to l1"];
   function esWaiting() {
@@ -2438,7 +2443,7 @@
   function rnaCell(n) { return n ? "<span class='" + (n >= 2 ? "hot" : "warmn") + "'>" + n + "</span>" : "0"; }
 
   // ---------------- ticket timeliness (Zendesk + ES tickets waiting on an agent; the "zdwatch" function) ----------------
-  // Fred, 2026-10-16. Waiting on the agent = assigned to them and, in Zendesk, custom status Open or On Hold with no
+  // 2026-10-16. Waiting on the agent = assigned to them and, in Zendesk, custom status Open or On Hold with no
   // due date (a passed due date counts from that date); in Jira ES, "Awaiting info" or "Resolved to L1". It has to be
   // handled (out of that state) by the end of their first shift that STARTS after it entered the state. The server
   // checks every 10 minutes; each ticket comes with the first and last check it was still waiting in.
@@ -2507,7 +2512,7 @@
     var phoneRows = boardRows();
     var rows = phoneRows.concat((emailRows(phoneRows.map(function (r) { return r.name; })) || []).filter(function (r) { return inQueue(r.name); }))
       .sort(function (a, b) { return b.score - a.score || (b.answered || 0) - (a.answered || 0); });
-    // Top 5 / Bottom 5 rank agents only (Fred, 2026-10-14); supervisors still appear in "Show all".
+    // Top 5 / Bottom 5 rank agents only (2026-10-14); supervisors still appear in "Show all".
     var ranked = rows.filter(function (r) { return !r.sup && !r.offRank; });
     rows = rows.filter(function (r) { return !r.offRank; }).concat(rows.filter(function (r) { return r.offRank; }));   // not ranked (excluded or under 2h): last, no number
     var top = ranked.slice(0, 5), low = ranked.length > 5 ? ranked.slice(-Math.min(5, ranked.length - 5)).reverse() : [];
@@ -2515,7 +2520,7 @@
       return "<div class='table-wrap'><table><thead><tr><th class='num'>#</th><th>Agent</th><th class='num' title='100-point scorecard: Ready 25, RNA (Email Team: pickup) 10, Start 5, Lunch 5, Tickets 23, Tickets/hr 15, ES 5, CSAT 12. Hover a score for its parts.'>Score</th><th class='num' title='Inbound queue calls answered / outbound calls dialed / follow-ups (call tickets from an earlier day publicly replied to or solved today)'>In/Out/Fol</th><th class='num'>Calls/hr</th><th class='num' title='New email and webform tickets they took today / follow-ups (email and webform tickets they replied to or solved without taking them today). Tickets created from calls are left out.'>Email/Fol</th><th class='num' title='Scored (10 points): calls answered + email/webform tickets taken + follow-ups, per logged-in hour, compared with their group&#39;s average today (phone agents or Email Team). Full at or above the average, none at half of it.'>Tickets/hr</th><th class='num'>Talk</th><th class='num' title='Calls that rang without an answer. Email Team: slow pickup time instead'>RNA</th><th class='num'>Ready</th><th class='num' title='Phone: first RingCX login. Email Team: first time online in Zendesk'>Start</th><th class='num'>Lunch</th><th class='num' title='Tickets past their deadline out of the tickets that came due or that they handled (the number in brackets = waiting on them now; click for the list)'>Tickets</th><th class='num' title='Share of their Zendesk tickets escalated to Jira as ES that L3 sent back for L1 to handle, weighted (Workaround, Cannot Reproduce and By Design count half; Fixed, GAL ticket, Feature Request and Migration don&#39;t count), last 30 days'>ES 30d</th><th class='num' title='Zendesk satisfaction: good ratings out of all good + bad ratings on their tickets, last 60 days (hover for counts and the help-desk rate)'>CSAT 60d</th><th class='num'>Logged in</th></tr></thead><tbody>" +
         (list.map(function (r, i) {
           return "<tr data-brow='" + esc(normName(r.name)) + "'><td class='num'>" + (r.offRank ? "" : (dir > 0 ? startRank + i : total - i)) + "</td>" +
-            "<td><a class='agent-trend' data-trend='" + esc(normName(r.name)) + "' data-trend-name='" + esc(r.name) + "' title='Click for this person&#39;s trend over the past 4 weeks'>" + esc(r.name) + "</a>" + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + unrankTag(r, true) + "</td>" +
+            "<td>" + esc(r.name) + emailTag(r) + (r.sup || hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + unrankTag(r, true) + "</td>" +
             boardCells(r).join("") + "</tr>" +
             (tkOpen["today|" + normName(r.name)] ? "<tr class='inline-drill'><td colspan='17'><div class='inline-box'>" + ticketListHtml(r, Date.now()) + "</div></td></tr>" : "");
         }).join("") || "<tr><td colspan='17' class='muted'>" + (abandons.all ? "Not enough people to rank yet." : "Loading today's calls…") + "</td></tr>") +
@@ -2564,7 +2569,7 @@
       "<div class='tiny muted' style='margin-top:6px'>From RingCX's call detail report, since midnight Pacific. Includes calls that ended while an agent's phone was ringing, whether the caller hung up or RingCX dropped the call (the report marks those CONNECTED with 0s talk and no recording), matching RingCX's live Abandoned counter. Waited = time from the start of the call to the hang-up.</div>";
   }
   // ---------------- Yesterday's stats and scores (any of the last 7 finished days) ----------------
-  // Fred, 2026-10-16: "a section at the bottom that will show me yesterday's stats and scores".
+  // 2026-10-16: "a section at the bottom that will show me yesterday's stats and scores".
   var yd = { back: 1, cache: {}, err: {}, loading: false };
   async function loadDay() {
     var ymd = ptYmd(yd.back);
@@ -2716,106 +2721,6 @@
     finally { liveSave.busy = false; }
   }
   setInterval(saveLiveScores, 60000);
-
-
-  // ---------------- one agent's trend, past 4 weeks (2026-11-13) ----------------
-  // Click a name on the board. Reads the saved daily records (the same ones the Report uses): this week so far plus the
-  // three weeks before it, Sunday to Saturday. Today is not in it until the day is finished and saved.
-  var trendReq = 0;
-  function trendRange() {
-    var today = ptYmd(0), wd = new Date(today + "T12:00:00Z").getUTCDay(), sun = addDaysYmd(today, -wd);
-    return { weeks: [0, 1, 2, 3].map(function (i) { var f = addDaysYmd(sun, -7 * (3 - i)); return { from: f, to: addDaysYmd(f, 6) }; }), from: addDaysYmd(sun, -21), to: ptYmd(1) };
-  }
-  function trendSpark(pts, allDays) {
-    var W = 760, H = 120, L = 28, R = 8, T = 8, B = 18, n = allDays.length, x = function (i) { return L + (n < 2 ? 0 : i * (W - L - R) / (n - 1)); }, y = function (v) { return T + (100 - v) * (H - T - B) / 100; };
-    var g = [0, 50, 100].map(function (v) { return "<line x1='" + L + "' x2='" + (W - R) + "' y1='" + y(v) + "' y2='" + y(v) + "' stroke='currentColor' opacity='.15'/><text x='2' y='" + (y(v) + 4) + "' font-size='10' fill='currentColor' opacity='.6'>" + v + "</text>"; }).join("");
-    // Points take the color of their score (the same grades as the tables). A line between two days is that color when both
-    // are the same, a blend when they differ, and when days off sit between them it takes the color of the next day worked.
-    var CLR = { good: "var(--good)", "": "var(--ink)", warmn: "var(--warning)", hot: "var(--critical)" };
-    var worked = allDays.map(function (d, i) { return pts[d] === undefined ? null : { d: d, i: i, c: scoreGrade(pts[d]) }; }).filter(Boolean);
-    var defs = "", lines = "";
-    for (var k = 1; k < worked.length; k++) {
-      var p0 = worked[k - 1], p1 = worked[k], x0 = x(p0.i).toFixed(1), y0 = y(pts[p0.d]).toFixed(1), x1 = x(p1.i).toFixed(1), y1 = y(pts[p1.d]).toFixed(1);
-      var stroke;
-      if (p0.c === p1.c || p1.i - p0.i > 1) stroke = CLR[p1.c];   // same color, or days off between: the next day worked decides
-      else { defs += "<linearGradient id='trg" + k + "' gradientUnits='userSpaceOnUse' x1='" + x0 + "' y1='" + y0 + "' x2='" + x1 + "' y2='" + y1 + "'><stop offset='0' style='stop-color:" + CLR[p0.c] + "'/><stop offset='1' style='stop-color:" + CLR[p1.c] + "'/></linearGradient>"; stroke = "url(#trg" + k + ")"; }
-      lines += "<line x1='" + x0 + "' y1='" + y0 + "' x2='" + x1 + "' y2='" + y1 + "' stroke-width='2' style='stroke:" + stroke + "'/>";
-    }
-    var dots = allDays.map(function (d, i) { return pts[d] === undefined ? "" : "<circle cx='" + x(i).toFixed(1) + "' cy='" + y(pts[d]).toFixed(1) + "' r='3.5' style='fill:" + CLR[scoreGrade(pts[d])] + "'><title>" + esc(dayShort(d)) + ": " + Math.round(pts[d]) + "</title></circle>"; }).join("");
-    var ticks = allDays.map(function (d, i) { return new Date(d + "T12:00:00Z").getUTCDay() === 0 ? "<text x='" + x(i).toFixed(1) + "' y='" + (H - 4) + "' font-size='10' fill='currentColor' opacity='.6'>" + esc(dayShort(d).replace(/^Sun /, "")) + "</text>" : ""; }).join("");
-    return "<svg class='tr-spark' viewBox='0 0 " + W + " " + H + "' role='img' aria-label='Daily score, past 4 weeks'>" + "<defs>" + defs + "</defs>" + g + lines + dots + ticks + "</svg>";
-  }
-  function renderTrend(name, key, recs, R) {
-    var allDays = daysBetween(R.from, R.to), per = {}, approx = false, partial = false;
-    allDays.forEach(function (y) {
-      var rec = recs[y]; if (!rec) return;
-      var a = (rec.agents || []).filter(function (x) { return normName(x.name) === key; })[0];
-      if (!a) return;
-      per[y] = { a: a, rec: rec };
-    });
-    var scored = allDays.filter(function (y) { return per[y] && !per[y].a.unranked && !per[y].a.early; });
-    var pts = {}; scored.forEach(function (y) { pts[y] = per[y].a.score; if (recs[y].approx) approx = true; });
-    var avgOf = function (a) { return a.length ? a.reduce(function (t, v) { return t + v; }, 0) / a.length : null; };
-    var grade = function (s) { return s === null || s === undefined ? "<span class='muted'>–</span>" : "<b class='" + scoreGrade(s) + "'>" + Math.round(s) + "</b>"; };
-    var email = scored.some(function (y) { return per[y].a.email; });
-    if (!scored.length) return "<div class='muted' style='padding:12px 0'>No saved scored days for " + esc(name) + " since " + esc(dayShort(R.from)) + ". Days are saved once they finish.</div>";
-    var shown = PART_MAX.filter(function (pm) { return email ? pm[0] !== "rna" : pm[0] !== "pickup"; });
-    var wk = R.weeks.map(function (w) {
-      var ds = scored.filter(function (y) { return y >= w.from && y <= w.to; }), o = { w: w, n: ds.length, avg: avgOf(ds.map(function (y) { return pts[y]; })), parts: {}, calls: 0, took: 0, late: 0, lunch: 0 };
-      ds.forEach(function (y) { var a = per[y].a; o.calls += (a.answered || 0) + (a.outbound || 0); o.took += a.took || 0; o.late += a.late || 0; o.lunch += a.longLunch || 0; });
-      PART_MAX.forEach(function (pm) {
-        var v = ds.map(function (y) { var p = per[y].a.parts || {}; return p[pm[0]] === undefined ? undefined : (p[pm[0]] === null ? pm[2] : p[pm[0]]); }).filter(function (z) { return z !== undefined; });
-        o.parts[pm[0]] = avgOf(v);
-      });
-      return o;
-    });
-    var withData = wk.filter(function (w) { return w.n; }), first = withData[0], last = withData[withData.length - 1];
-    var delta = first && last && first !== last ? last.avg - first.avg : null;
-    var all = scored.map(function (y) { return pts[y]; }), best = scored.slice().sort(function (a, b) { return pts[b] - pts[a]; })[0], low = scored.slice().sort(function (a, b) { return pts[a] - pts[b]; })[0];
-    var sum = "4-week average " + grade(avgOf(all)) + " over " + scored.length + " scored day" + (scored.length === 1 ? "" : "s") +
-      (delta === null ? "" : ", " + (Math.abs(delta) < 0.5 ? "<span class='muted'>flat</span>" : "<b class='" + (delta > 0 ? "good" : "hot") + "'>" + (delta > 0 ? "up " : "down ") + Math.abs(Math.round(delta * 10) / 10) + "</b>") + " from the " + esc(dayShort(first.w.from)) + " week to the " + esc(dayShort(last.w.from)) + " week") +
-      ". Best " + esc(dayShort(best)) + " (" + Math.round(pts[best]) + "), lowest " + esc(dayShort(low)) + " (" + Math.round(pts[low]) + ").";
-    var html = "<div style='margin:6px 0'>" + sum + "</div>" + trendSpark(pts, allDays);
-    html += "<div class='wr-sub'>By week (Sunday to Saturday)</div><div class='tr-wrap'><table class='wr-table tr-compact'><thead><tr><th>Week</th><th>Avg score</th><th>Change</th><th>Days</th>" +
-      shown.map(function (pm) { return "<th title='Average points earned out of " + pm[2] + "'>" + esc(pm[1]) + " /" + pm[2] + "</th>"; }).join("") +
-      "<th>" + (email ? "Tickets taken" : "Calls in+out") + "</th><th>Late starts</th><th>Long lunch</th></tr></thead><tbody>" +
-      wk.map(function (o, i) {
-        var prev = null; for (var j = i - 1; j >= 0; j--) if (wk[j].n) { prev = wk[j]; break; }
-        var ch = o.n && prev ? wkChange(1, "n", o.avg, prev.avg) : { text: "", cls: "" };
-        return "<tr><td>" + esc(dayShort(o.w.from) + " to " + dayShort(o.w.to)) + (o.w.to > R.to ? " <span class='muted tiny'>so far</span>" : "") + "</td><td>" + (o.n ? grade(o.avg) : "<span class='muted'>no data</span>") + "</td><td class='" + ch.cls + "'>" + esc(ch.text) + "</td><td>" + o.n + "</td>" +
-          shown.map(function (pm) { var v = o.parts[pm[0]]; return "<td>" + (v === null || v === undefined ? "<span class='muted'>–</span>" : (Math.round(v * 10) / 10)) + "</td>"; }).join("") +
-          "<td>" + (o.n ? (email ? o.took : o.calls) : "") + "</td><td>" + (o.n ? o.late : "") + "</td><td>" + (o.n ? o.lunch : "") + "</td></tr>";
-      }).join("") + "</tbody></table></div>";
-    html += "<div class='wr-sub'>Day by day</div><div class='tr-wrap' style='max-width:560px'><table class='wr-table tr-compact'><thead><tr><th>Day</th><th>Score</th><th>Note</th></tr></thead><tbody>" +
-      allDays.filter(function (y) { return per[y]; }).reverse().map(function (y) {
-        var a = per[y].a, note = a.unranked ? "Not ranked: " + a.unranked : a.early ? "Under 2 logged-in hours, not ranked" : [a.late ? "late start" : "", a.longLunch ? "long lunch" : "", recs[y].partial ? "partial day record" : ""].filter(Boolean).join(", ");
-        if (recs[y].partial) partial = true;
-        return "<tr><td>" + esc(dayShort(y)) + "</td><td>" + (a.unranked || a.early ? "<span class='muted'>" + Math.round(a.score) + "</span>" : grade(a.score)) + "</td><td class='wrap'>" + esc(note) + "</td></tr>";
-      }).join("") + "</tbody></table></div>";
-    html += "<div class='wr-foot'>Scores come from each finished day's saved record, scored with the 100-point card in force when it was saved. Today is not included until it finishes." +
-      (approx ? " Days converted from the earlier scorecard are approximate." : "") + (partial ? " Days marked partial started recording late." : "") + "</div>";
-    return html;
-  }
-  async function openTrend(key, name) {
-    var dlg = $("agentTrend"), body = $("agentTrendBody"), my = ++trendReq, R = trendRange();
-    $("agentTrendTitle").textContent = name + ": past 4 weeks";
-    body.innerHTML = "<div class='muted' style='padding:12px 0'>Loading saved days…</div>";
-    if (!dlg.open) dlg.showModal();
-    try {
-      var j = await dayscoresApi("GET", "?from=" + R.from + "&to=" + R.to), recs = {};
-      (j.days || []).forEach(function (x) { recs[String(x.day).slice(0, 10)] = x.data; });
-      if (my !== trendReq) return;
-      body.innerHTML = renderTrend(name, key, recs, R);
-    } catch (e) { if (my === trendReq) body.innerHTML = "<div class='muted'>Couldn't load the trend: " + esc(e.message) + "</div>"; }
-  }
-  document.addEventListener("click", function (ev) {
-    var t = ev.target.closest && ev.target.closest("a.agent-trend");
-    if (!t) return;
-    ev.preventDefault(); ev.stopPropagation();
-    openTrend(t.getAttribute("data-trend"), t.getAttribute("data-trend-name"));
-  });
-  $("agentTrendClose").addEventListener("click", function () { $("agentTrend").close(); });
-  $("agentTrend").addEventListener("click", function (e) { if (e.target === this) this.close(); });
 
   // ---------------- the Report: this week vs last week ----------------
   // This week = Monday to yesterday; on a Monday (nothing finished yet) it's last week vs the week before.
@@ -2995,7 +2900,7 @@
   });
   function renderDay() {
     var ymd = ptYmd(yd.back), d = yd.cache[ymd];
-    $("ydSum").textContent = "(" + ymdLabel(ymd) + ")";   // the day being viewed, not always yesterday (Fred, 2026-10-19)
+    $("ydSum").textContent = "(" + ymdLabel(ymd) + ")";   // the day being viewed, not always yesterday (2026-10-19)
     $("ydTitle").textContent = ymdLabel(ymd) + (yd.back === 1 ? " (yesterday)" : "");
     $("ydPrev").disabled = yd.loading || yd.back >= 7; $("ydNext").disabled = yd.loading || yd.back <= 1;
     if (yd.loading) { $("ydBody").innerHTML = "<span class='muted'>Rebuilding " + esc(ymdLabel(ymd)) + " from the server's snapshots…</span>"; $("ydSub").textContent = ""; return; }
@@ -3382,7 +3287,7 @@
 
   function renderQueues(e) {
     var showClosed = $("showClosed").checked;
-    // Fixed order (Fred, 2026-10-15); anything else follows alphabetically.
+    // Fixed order (2026-10-15); anything else follows alphabetically.
     var QUEUE_ORDER = ["CORE", "Payroll Specialist", "BillQuick", "ArchiOffice", "Unrecorded Line"];
     var qPos = function (q) { var i = QUEUE_ORDER.map(function (x) { return x.toLowerCase(); }).indexOf(String(q.gateName).toLowerCase()); return i < 0 ? 99 : i; };
     var qs = data.queues.slice().sort(function (a, b) { return (qPos(a) - qPos(b)) || String(a.gateName).localeCompare(b.gateName); });
@@ -3454,7 +3359,7 @@
     catch (x) { reviews.err = x.message; }
     finally { reviews.loading = false; if (data.fetchedAt) render(); }
   }
-  // ---------------- Flagged for call avoidance today (Fred, 2026-10-19) ----------------
+  // ---------------- Flagged for call avoidance today (2026-10-19) ----------------
   // Each board reports who it sees flagged (a changed reason or level right away, otherwise at most every 5 minutes per
   // agent), so the server keeps one row per agent per day. The section lists them with every note left on them.
   var flagSent = {}, flagPosting = false;   // agentKey -> { at, sig }
@@ -3531,7 +3436,7 @@
     } catch (err) { alert("Couldn't save the review: " + err.message); }
     finally { doneSaving("review:" + key); }
   }
-  // One save at a time per box (Fred, 2026-10-16: Enter + a click saved Armando's review twice, 1.4 s apart).
+  // One save at a time per box (2026-10-16: Enter + a click saved Armando's review twice, 1.4 s apart).
   // The pressed Save button shows "Saving…" until it's done; the reviews function also drops an identical repeat.
   var savingNow = {};
   function startSaving(k) {
@@ -3684,7 +3589,7 @@
   // RingCX has no API to log an agent out: its supervisor view does it over the supervisor's own agent
   // connection, which this page never opens (that is what would sign the viewer in as an agent). So this
   // opens RingCX's supervisor Agents view (named tab, reused on later clicks), where the X logs them out.
-  // RingCX's supervisor Agents view for the signed-in supervisor (their own agent ID in the link, Fred 2026-10-15).
+  // RingCX's supervisor Agents view for the signed-in supervisor (their own agent ID in the link, 2026-10-15).
   function rcxSupervisorUrl() { return "https://ringcx.ringcentral.com/voice/agent/?agentId=" + encodeURIComponent(myAgentId() || "") + "#/home/supervisor/agent"; }
   function rcxLogoutLink(name) {
     return "<a href='" + esc(rcxSupervisorUrl()) + "' target='ringcx-supervisor' rel='noopener' class='tiny' title='Opens the RingCX supervisor Agents view in a separate tab. Find " + esc(name) + " and click the X to log them out. If the RingCX agent app is already open in another tab, use that one instead.'>Log out in RingCX ↗</a>";
@@ -3731,7 +3636,7 @@
 
   var STATE_ORDER = { "st-red": 0, "st-green": 1, "st-yellow": 2, "st-grey": 3, "st-off": 4 };
 
-  // Agents who were logged in earlier today but are logged out now (Fred: the Agents section lists
+  // Agents who were logged in earlier today but are logged out now (the Agents section lists
   // everyone who logged in at any point today). Sources: sessions this page or the server tracker saw,
   // plus anyone on today's call report. Supervisors are left out, same as Logins today.
   function loggedOutAgents() {
@@ -3754,7 +3659,7 @@
   }
 
   // Agent name opens their status changes today (same list as the watch's 60m numbers).
-  // Status changes and calls opened from the Agents table show right under that agent (Fred, 2026-10-15).
+  // Status changes and calls opened from the Agents table show right under that agent (2026-10-15).
   // One persistent row is moved into place after every table redraw (the table redraws each second),
   // so a recording playing inside it is not cut off.
   var inline = null;   // { kind: "status" | "calls", id, name, fresh }
@@ -3762,7 +3667,7 @@
   inlineTr.innerHTML = "<td><div class='inline-box'></div></td>";
   var inlineBox = inlineTr.querySelector(".inline-box");
   function rowKey(id, name) { return id ? "id:" + id : "name:" + normName(name); }
-  // Logins today: a name opens that person's status changes right under their row (Fred, 2026-10-15).
+  // Logins today: a name opens that person's status changes right under their row (2026-10-15).
   var loginInline = null;   // { id, name }
   var loginTr = document.createElement("tr"); loginTr.className = "inline-drill";
   loginTr.innerHTML = "<td><div class='inline-box'></div></td>";
@@ -3830,7 +3735,7 @@
     var c = inlineBox.querySelector("[data-drill-close]");
     if (c) { c.removeAttribute("data-drill-close"); c.setAttribute("data-inline-close", ""); }
   }
-  // Clicking outside a drill-down closes it (Fred, 2026-10-16): the KPI drill, the inline Agents / Logins panels, the
+  // Clicking outside a drill-down closes it (2026-10-16): the KPI drill, the inline Agents / Logins panels, the
   // Performance / Yesterday ticket lists and the Yesterday status lists. Clicks inside one, on anything clickable
   // (links, buttons, form fields, KPI tiles, column headers), or that finish selecting text leave them open, so
   // opening another drill-down or copying from one still works. Runs before the page's own click handlers.
@@ -3860,7 +3765,7 @@
     return "<a href='#' class='name-link' data-status-log='" + esc(id) + "' data-status-name='" + esc(name) + "' data-status-mode='changes' title='Show this agent&#39;s status changes today'>" + esc(name) + "</a>" +
       (hasSupTag(name) ? " <span class='chip info'>Supervisor</span>" : "");
   }
-  // Next in line for the filtered queue (Fred, 2026-10-15). RingCX offers a queue's call to the agents
+  // Next in line for the filtered queue (2026-10-15). RingCX offers a queue's call to the agents
   // in that queue's available list (agents logged into that queue and Available): highest rank first, then
   // whoever has been Available longest without a break (2026-10-14 call analysis: 97% of Core offers).
   function queueLineup() {
@@ -4137,7 +4042,6 @@
   $("boardAllBtn").addEventListener("click", function () { ui.boardAll = !ui.boardAll; save(UI_KEY, ui); renderBoard(); });
   $("snapshotBtn").addEventListener("click", function () { downloadSnapshot(); });
 
-  // ---------------- views ----------------
   // ---------------- Heatmap overlay ----------------
   // heatmap.html (built from the old Volume Heatmap by scripts/make-live-heatmap.py) runs in a full-screen frame.
   // This page fetches the nightly snapshot once (kept in memory, ETag re-check on each open) and posts it to the frame.
@@ -4175,6 +4079,7 @@
   });
   $("heatmapBtn").addEventListener("click", openHeatmap);
 
+  // ---------------- views ----------------
   function showSignin(msg) {
     stopPolling();
     $("liveView").hidden = true; $("signinView").hidden = false;

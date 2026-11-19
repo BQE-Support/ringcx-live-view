@@ -194,8 +194,7 @@
     // Temporary schedules the roster doesn't show yet (Smartsheet can't be edited right now). Each lapses on its own
     // after "until" (Pacific date). Times are Pacific "HH:MM"; omit a field to keep the roster value.
     var SCHEDULE_OVERRIDES = {
-      // Covering for Vina until she's back mid-November (Armando to Natasha, 2026-10-15).
-      "Armando Sanchez": { shift: "06:00", lunch: "10:00", until: "2026-11-15" }
+      // Armando's cover for Vina (to 2026-11-15) was removed 2026-11-19: he left the Support team.
     };
     function scheduleOverride(s) {
       var k = normName(s.name), key = Object.keys(SCHEDULE_OVERRIDES).filter(function (x) { return normName(x) === k; })[0];
@@ -260,17 +259,6 @@
       var f = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms));
       var g = function (t) { return +(f.filter(function (x) { return x.type === t; })[0] || {}).value; };
       return g("hour") * 60 + g("minute");
-    }
-    // Work statuses that count as Ready (CONFIG.READY_STATUSES). READY_SECOND_HALF names people for whom a status counts only
-    // in the second half of their shift (roster start + SHIFT_HOURS; Fred 2026-11-13: Peter and Escalation Support).
-    function readyLabel(label, name, ms) {
-      var L = String(label || "").toUpperCase(), k = normName(name), late = CONFIG.READY_SECOND_HALF || {}, key = Object.keys(late).filter(function (x) { return normName(x) === k; })[0];
-      if (key && L.indexOf("ESCALATION SUPPORT") >= 0) {
-        var sc = schedFor(name); if (!sc || sc.shift == null) return false;
-        var half = sc.shift + (CONFIG.SHIFT_HOURS || 9) * 30, m = ptMinOf(ms);   // 30 min per shift hour = half the shift
-        return m >= half;
-      }
-      return (CONFIG.READY_STATUSES || []).indexOf(L) >= 0;
     }
     function schedFor(name) {
       var k = normName(name);
@@ -426,7 +414,7 @@
           var gap = Math.min((fetchedAt - h.lastSeen) / 1000, 3 * S.intervalSec);
           h.seenSec = (h.seenSec || 0) + gap;
           if (h.base === "LUNCH" || h.base === "ON-BREAK") h.offSec = (h.offSec || 0) + gap;   // left out of Ready (2026-10-30)
-          if (h.base === "AVAILABLE" || h.base === "ONCALL" || readyLabel(h.label, fullName(a), fetchedAt)) h.readySec = (h.readySec || 0) + gap;   // + work statuses that count as ready (2026-11-06)
+          if (h.base === "AVAILABLE" || h.base === "ONCALL" || (CONFIG.READY_STATUSES || []).indexOf(String(h.label || "").toUpperCase()) >= 0) h.readySec = (h.readySec || 0) + gap;   // + work statuses that count as ready (2026-11-06)
           if (h.base === "AVAILABLE") h.availSec = (h.availSec || 0) + gap;   // Agents table "Avail today"
         }
         if (!h.firstSeen) h.firstSeen = fetchedAt;
@@ -842,14 +830,21 @@
       });
       return first === null ? null : { first: first, last: last, logged: logged, now: now, firstUnsure: unsure };
     }
+    // People who work email only for part of the day (CONFIG.EMAIL_WINDOWS, Pacific minutes since midnight): Zendesk
+    // Email Support / online counts as ready inside the window only. Outside it they are scored on RingCX like any phone agent.
+    function emailWindow(name) {
+      var k = normName(name), key = Object.keys(CONFIG.EMAIL_WINDOWS || {}).filter(function (x) { return normName(x) === k; })[0];
+      return key ? CONFIG.EMAIL_WINDOWS[key] : null;
+    }
     function emailCredit(name, h) {
-      var av = S.waits.avail, out = { ready: 0, seen: 0 };
+      var av = S.waits.avail, out = { ready: 0, seen: 0 }, win = emailWindow(name);
       if (!av || !av.polls) return out;
       var f = av.fields || [], iStatus = f.indexOf("status"), asOf = S.hist.endAt || Date.now();
       av.polls.forEach(function (p, i) {
         var row = zdRowFor(name, p, f);
         if (!row || CONFIG.EMAIL_READY.indexOf(String(row[iStatus])) < 0) return;
         var ts = Date.parse(p.ts), next = i + 1 < av.polls.length ? Date.parse(av.polls[i + 1].ts) : Math.min(asOf, ts + 60000);
+        if (win) { var m = ptMinOf(ts); if (m < win[0] || m >= win[1]) return; }
         var step = Math.max(0, Math.min(next - ts, 180000)) / 1000, st = rcxStateAt(h, ts);
         if (st === "OUT") { out.ready += step; out.seen += step; }
         else if (st !== "AVAILABLE" && st !== "ONCALL") out.ready += step;
@@ -1089,7 +1084,7 @@
         var perHr = answered / (p.login / 3600);
         // Phone agents' Ready comes from RingCX only (2026-10-27): Zendesk "online" all day was crediting their
         // ticket follow-up time as ready. The Zendesk credit stays for the Email Team (CONFIG.EMAIL_AGENTS).
-        var credit = isEmailAgent(n) ? emailCredit(n, S.hist.agents[p.id]) : { ready: 0, seen: 0 }, seenAll = p.seen + credit.seen;
+        var credit = (isEmailAgent(n) || emailWindow(n)) ? emailCredit(n, S.hist.agents[p.id]) : { ready: 0, seen: 0 }, seenAll = p.seen + credit.seen;
         // Lunch and Break time don't count for or against Ready (2026-10-30): it's measured against the rest of the logged-in time.
         var readyBase = seenAll - (p.off || 0);
         var readyShare = seenAll >= 1800 && readyBase > 0 ? Math.min(1, (p.ready + credit.ready) / readyBase) : 0.5;
