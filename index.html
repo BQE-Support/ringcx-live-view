@@ -913,8 +913,8 @@
     var k = actKey(name, from);
     return "<button class='btn act-btn' data-act-name='" + esc(name) + "' data-act-from='" + Math.round(from) + "' data-act-to='" + Math.round(to) + "' data-act-live='" + (live ? 1 : 0) + "' title='Zendesk and Jira work during this status'>" + (actOpen[k] ? "▾" : "▸") + " Activity</button>";
   }
-  function actRow(name, from, to, live) {
-    return actOpen[actKey(name, from)] ? "<tr class='act-row'><td colspan='6'>" + renderActivity(name, from, to, live) + "</td></tr>" : "";
+  function actRow(name, from, to, live, extra) {
+    return actOpen[actKey(name, from)] ? "<tr class='act-row'><td colspan='6'>" + (extra || "") + renderActivity(name, from, to, live) + "</td></tr>" : "";
   }
 
   function renderStatusLog(box, log) {
@@ -942,15 +942,16 @@
     ev.sort(function (x, y) { return y.t - x.t; });
     // The newest change normally IS the current status; show it live instead of a separate "now" row.
     var newestIsNow = !outNow && h.label && ev.length && Math.abs(h.start - ev[0].t) < 60000;
-    var nowRow = h.label && !newestIsNow && !outNow ? "<tr><td>" + fmtClock(h.start) + "</td><td><b>" + esc(h.label) + "</b> (now)</td><td></td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td><td>" + actCell(log.name, h.start, nowMs, true) + "</td></tr>" +
-      actRow(log.name, h.start, nowMs, true) : "";
+    var zNow = zohoWin(log.name, h.start || 0, Infinity, false);
+    var nowRow = h.label && !newestIsNow && !outNow ? "<tr><td>" + fmtClock(h.start) + "</td><td><b>" + esc(h.label) + "</b> (now)" + zohoChipLv(zNow) + "</td><td></td><td class='num'>" + count(Math.max(0, (Date.now() - h.start) / 1000 - elapsed())) + "</td><td>" + actCell(log.name, h.start, nowMs, true) + "</td></tr>" +
+      actRow(log.name, h.start, nowMs, true, zohoNestedHtml(zNow)) : "";
     var rows = ev.map(function (x, i) {
       var lasted;
       // The window this status covered: until the next change (or now / the current status's start).
       var live = i === 0 && (newestIsNow || !h.label), until = i === 0 ? (live ? nowMs : h.start) : ev[i - 1].t;
       if (x.gap) {
         return "<tr class='muted'><td>" + fmtClock(x.t) + "</td><td><i>Logged out</i></td><td></td><td class='num'" + (x.open ? ">" : " title='Back at " + fmtClock(x.back) + "'>") + fmtDur(Math.max(0, (x.back - x.t) / 1000)) + (x.open ? " (now)" : "") + "</td><td>" + actCell(log.name, x.t, x.back, !!x.open) + "</td></tr>" +
-          actRow(log.name, x.t, x.back, !!x.open);
+          actRow(log.name, x.t, x.back, !!x.open, zohoNestedHtml(zohoWin(log.name, x.t, x.open ? Infinity : x.back, i === ev.length - 1)));
       }
       // A brief change between refreshes: they left this status and came back at x.t, so the row is the stretch
       // after they came back, with its own Activity (2026-10-27: a 9:25 solve fell in an uncovered 9:00-9:30).
@@ -959,15 +960,16 @@
       else if (i === 0 && newestIsNow) lasted = count(Math.max(0, (Date.now() - x.t) / 1000 - elapsed())) + " <span class='muted'>(now)</span>";
       else lasted = fmtDur(Math.max(0, ((i === 0 ? (h.label ? h.start : Date.now()) : ev[i - 1].t) - x.t) / 1000));
       var recent = x.t >= cutoff && !isCallCycle(x), exit = x.t >= cutoff && isExit(x);
-      var tags = (recent ? "<span class='chip info'>Changes" + (x.hidden ? " ×2" : "") + "</span>" : "") + (exit ? " <span class='chip warn'>Left Avail</span>" : "");
+      var zs = zohoWin(log.name, x.t, live ? Infinity : until, i === ev.length - 1);
+      var tags = (recent ? "<span class='chip info'>Changes" + (x.hidden ? " ×2" : "") + "</span>" : "") + (exit ? " <span class='chip warn'>Left Avail</span>" : "") + zohoChipLv(zs);
       var hit = exitsMode ? exit : recent;
       return "<tr class='" + (hit ? "flag-warn" : "") + "'><td>" + fmtClock(x.t) + "</td><td>" + (i === 0 && newestIsNow ? "<b>" + esc(statusName(x.tl, x.tb)) + "</b>" : esc(statusName(x.tl, x.tb))) + "</td><td>" + tags + "</td><td class='num'>" + lasted + "</td><td>" + actCell(log.name, x.t, until, live) + "</td></tr>" +
-        actRow(log.name, x.t, until, live);
+        actRow(log.name, x.t, until, live, zohoNestedHtml(zs));
     });
     // RNA rings as their own lines, in time order with the statuses (2026-10-27: anything that counts against
     // an agent has to show here).
     var rings = rnaRings(h), nRna = rings.filter(function (r) { return r.counted; }).length;
-    rows = rows.map(function (html, i) { return { t: ev[i].t, html: html }; }).concat(rnaRowsHtml(rings, 5)).concat(zohoRowsHtml(log.name))
+    rows = rows.map(function (html, i) { return { t: ev[i].t, html: html }; }).concat(rnaRowsHtml(rings, 5))
       .sort(function (x, y) { return y.t - x.t; }).map(function (x) { return x.html; }).join("");
     var what = (exitsMode ? nExits + " time" + (nExits === 1 ? "" : "s") + " left Available in the last 60 min (highlighted)"
       : nChanges + " change" + (nChanges === 1 ? "" : "s") + " in the last 60 min (highlighted)") +
@@ -2127,17 +2129,26 @@
       return " <a class='chip ok zoho-tag' href='" + esc(CONFIG.ZOHO_URL) + "' target='ringcx-zoho' rel='noopener' title='" + esc(tip) + "'>" + esc(label) + " ↗</a>";
     }).join("");
   }
-  // Rows for the status log: every Zoho session today for this agent, in time order with the statuses.
-  function zohoRowsHtml(name) {
-    return zohoFor(name, false, true).map(function (s) {
+  // Zoho Assist sessions nest in the status they started in (2026-11-20, same as the Agent View): a chip on the status
+  // row and the detail inside Activity, with the Zendesk / Jira work. The oldest status also takes sessions from before it.
+  function zohoWin(name, from, until, isOldest) {
+    return zohoFor(name, false, true).filter(function (s) { return (s.start >= from && s.start < until) || (isOldest && s.start < from); });
+  }
+  function zohoChipLv(zs) {
+    if (!zs.length) return "";
+    return " <span class='chip ok' title='Zoho Assist sessions in this status. Open Activity for the details.'>Zoho Assist" + (zs.length > 1 ? " ×" + zs.length : "") + "</span>";
+  }
+  function zohoNestedHtml(zs) {
+    if (!zs.length) return "";
+    return "<div class='act-sys'><b>Zoho Assist</b> <span class='muted'>(" + zs.length + ")</span>" + zs.slice().sort(function (x, y) { return x.start - y.start; }).map(function (s) {
       var secs = s.active ? Math.max(0, (Date.now() - (s.joined || s.start)) / 1000) : s.dur;
-      var bits = [s.title, s.customer ? "customer " + s.customer : "", s.others && s.others.length ? "joined by " + s.others.join(", ") : "", s.joined ? "" : (s.active ? "waiting for the customer" : "customer never joined")].filter(Boolean).join(" · ");
-      var notes = s.notes ? "<div class='tiny muted'>Notes: " + esc(s.notes.length > 300 ? s.notes.slice(0, 300) + "…" : s.notes) + "</div>" : "";
-      return { t: s.start, html: "<tr class='zoho-row'><td>" + fmtClock(s.start) + "</td><td><span class='chip ok'>Zoho Assist</span> <b>" + (s.kind === "SS" ? "Screen share" : "Remote session") + "</b>" +
-        (bits ? " <span class='muted'>· " + esc(bits) + "</span>" : "") + notes + "</td><td>" + (s.active ? "<span class='chip ok'>Live</span>" : "") + "</td>" +
-        "<td class='num'>" + (secs ? fmtDur(secs) : "–") + (s.active ? " <span class='muted'>(now)</span>" : "") + "</td><td>" +
-        (s.active ? "<a href='" + esc(CONFIG.ZOHO_URL) + "' target='ringcx-zoho' rel='noopener'>Open Assist ↗</a>" : "") + "</td></tr>" };
-    });
+      var bits = [s.title, s.customer ? "customer " + s.customer : "", s.others && s.others.length ? "joined by " + s.others.join(", ") : "",
+        s.joined ? "" : (s.active ? "waiting for the customer" : "customer never joined")].filter(Boolean).join(" · ");
+      return "<div class='act-item'>" + (s.kind === "SS" ? "Screen share" : "Remote session") + " <span class='muted'>" + fmtClock(s.start) + " · " + (secs ? fmtDur(secs) : "–") + (s.active ? " · now" : "") + "</span>" +
+        (s.active ? " <a href='" + esc(CONFIG.ZOHO_URL) + "' target='ringcx-zoho' rel='noopener'>Open Assist ↗</a>" : "") +
+        (bits ? "<div class='tiny muted'>" + esc(bits) + "</div>" : "") +
+        (s.notes ? "<div class='tiny muted'>Notes: " + esc(s.notes.length > 300 ? s.notes.slice(0, 300) + "…" : s.notes) + "</div>" : "") + "</div>";
+    }).join("") + "</div>";
   }
 
   // ---------------- ES tickets waiting on L1 (Jira, via the "escalations" function) ----------------
