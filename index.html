@@ -635,6 +635,10 @@
     NOT_RANKED_IDS: ["3301130"],                      // never ranked in Performance or Previous days
     // Zendesk / Jira email for people whose Zendesk name doesn't match their RingCX name (ticket waits, ES, CSAT, work).
     EMAIL_ALIASES: { "Lenny Pendilla": "lenny@bqe.com" },
+    // Zoho Assist sessions (2026-11-20): the tag opens Assist (no join URL can be built from a session ID).
+    // ZOHO_EMAILS maps a Zoho technician email to the RingCX name when the email doesn't spell the name.
+    ZOHO_URL: "https://assist.zoho.com/org/852220079/app/app/home",
+    ZOHO_EMAILS: { "armando.sanchez@bqe.com": "Armando Aceves" },
     // Scorecard (2026-10-30)
     ES2_FULL: 0.06, ES2_ZERO: 0.15,                   // ES rate: full 5 at or below, 0 at or above
     TPH_MIN_LOGIN_SEC: 7200,                          // Tickets/hr: under 2 logged-in hours = not judged
@@ -963,7 +967,7 @@
     // RNA rings as their own lines, in time order with the statuses (2026-10-27: anything that counts against
     // an agent has to show here).
     var rings = rnaRings(h), nRna = rings.filter(function (r) { return r.counted; }).length;
-    rows = rows.map(function (html, i) { return { t: ev[i].t, html: html }; }).concat(rnaRowsHtml(rings, 5))
+    rows = rows.map(function (html, i) { return { t: ev[i].t, html: html }; }).concat(rnaRowsHtml(rings, 5)).concat(zohoRowsHtml(log.name))
       .sort(function (x, y) { return y.t - x.t; }).map(function (x) { return x.html; }).join("");
     var what = (exitsMode ? nExits + " time" + (nExits === 1 ? "" : "s") + " left Available in the last 60 min (highlighted)"
       : nChanges + " change" + (nChanges === 1 ? "" : "s") + " in the last 60 min (highlighted)") +
@@ -2070,6 +2074,70 @@
       "</tbody></table></div>" +
       "<div class='tiny muted' style='margin-top:6px'>" + (isFcrView ? "<b>First call resolution</b> = phone tickets created and solved today that were never escalated (no escalation tag) and never reopened, as a share of all phone tickets solved today. Same rule as the Origin KPI report, so the numbers line up; today's figure firms up as tickets age (a ticket solved today can still reopen). " : "") + "Zendesk tickets created since midnight Pacific, newest first (refreshed every few minutes). Non-support groups (Procurement, Custom Reports and others) and merged, duplicate and spam tickets are left out, as in the Origin KPI report. Module comes from the product's Module field (non-CORE products are named first), or from the Area field's name when only an Area is set, and Area from its Area field; new tickets often have no module until an agent sets one. Phone tickets are matched to their call through the call ID the RingCX integration notes on the ticket, so the recording and RingSense page show here. Not narrowed by the queue filter.</div>";
     if (sids.length) loadRsLinks(sids);
+  }
+
+  // ---------------- Zoho Assist sessions (2026-11-20) ----------------
+  // Zoho's webhook posts session start / customer join / end; the zoho-hook function stores it and zoho-sessions
+  // serves it (no customer or participant IPs). An ACTIVE session is a tag on the agent's row in Agents; every
+  // session today, active or ended, is a row in that agent's "Status changes today". Zoho has no join link we can
+  // build from a session ID, so the tag opens Assist and the supervisor presses In Session (internal technicians in
+  // the same department see it there).
+  var zoho = { rows: null, at: 0, err: null, loading: false };
+  async function loadZoho(force) {
+    if (zoho.loading || !session || !CONFIG.SUPABASE_URL) return;
+    if (!force && Date.now() - zoho.at < 20000) return;
+    zoho.loading = true;
+    try {
+      if (tokenNearExpiry()) await refreshToken();
+      var from = Date.parse(ptMidnightIso());
+      var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/zoho-sessions?from=" + (isNaN(from) ? Date.now() - 86400000 : from), { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      zoho.rows = j.sessions || []; zoho.err = null;
+    } catch (x) { zoho.err = x.message; }
+    finally { zoho.at = Date.now(); zoho.loading = false; if (data.fetchedAt) render(); }
+  }
+  function zohoWords(s) { return String(s || "").toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(Boolean); }
+  // Does this Zoho technician email belong to this RingCX name?
+  function zohoIsAgent(email, name) {
+    email = String(email || "").toLowerCase();
+    var mapped = (CONFIG.ZOHO_EMAILS || {})[email];
+    if (mapped) return normName(mapped) === normName(name);
+    var al = CONFIG.EMAIL_ALIASES || {};
+    if (Object.keys(al).some(function (k) { return String(al[k]).toLowerCase() === email && normName(k) === normName(name); })) return true;
+    var w = String(email.split("@")[0]).split(/[._-]+/).filter(Boolean), n = zohoWords(name);
+    if (!w.length || !n.length) return false;
+    if (n[0] !== w[0]) return false;
+    if (w.length === 1) return true;
+    var last = w[w.length - 1].slice(0, 4);
+    return n.slice(1).some(function (x) { return x.indexOf(last) === 0 || last.indexOf(x.slice(0, 4)) === 0; });
+  }
+  function zohoFor(name, activeOnly, todayOnly) {
+    var mid = todayOnly ? Date.parse(ptMidnightIso()) : 0;
+    return (zoho.rows || []).filter(function (s) {
+      return (!activeOnly || s.active) && (!mid || s.start >= mid || s.active) && zohoIsAgent(s.email, name);
+    });
+  }
+  function zohoTag(name) {
+    return zohoFor(name, true).map(function (s) {
+      var base = s.joined || s.start, secs = Math.max(0, (Date.now() - base) / 1000);
+      var label = s.joined ? "Zoho Assist " + fmtDur(secs) : "Zoho Assist (waiting)";
+      var tip = "In a Zoho Assist session" + (s.customer ? " with " + s.customer : "") + (s.others && s.others.length ? " (" + s.others.length + " other technician" + (s.others.length === 1 ? "" : "s") + " in it)" : "") +
+        ". Click to open Zoho Assist, then press In Session on this session to join it (you need to be a technician in " + (s.dept || "the same department") + ").";
+      return " <a class='chip ok zoho-tag' href='" + esc(CONFIG.ZOHO_URL) + "' target='ringcx-zoho' rel='noopener' title='" + esc(tip) + "'>" + esc(label) + " ↗</a>";
+    }).join("");
+  }
+  // Rows for the status log: every Zoho session today for this agent, in time order with the statuses.
+  function zohoRowsHtml(name) {
+    return zohoFor(name, false, true).map(function (s) {
+      var secs = s.active ? Math.max(0, (Date.now() - (s.joined || s.start)) / 1000) : s.dur;
+      var bits = [s.title, s.customer ? "customer " + s.customer : "", s.others && s.others.length ? "joined by " + s.others.join(", ") : "", s.joined ? "" : (s.active ? "waiting for the customer" : "customer never joined")].filter(Boolean).join(" · ");
+      var notes = s.notes ? "<div class='tiny muted'>Notes: " + esc(s.notes.length > 300 ? s.notes.slice(0, 300) + "…" : s.notes) + "</div>" : "";
+      return { t: s.start, html: "<tr class='zoho-row'><td>" + fmtClock(s.start) + "</td><td><span class='chip ok'>Zoho Assist</span> <b>" + (s.kind === "SS" ? "Screen share" : "Remote session") + "</b>" +
+        (bits ? " <span class='muted'>· " + esc(bits) + "</span>" : "") + notes + "</td><td>" + (s.active ? "<span class='chip ok'>Live</span>" : "") + "</td>" +
+        "<td class='num'>" + (secs ? fmtDur(secs) : "–") + (s.active ? " <span class='muted'>(now)</span>" : "") + "</td><td>" +
+        (s.active ? "<a href='" + esc(CONFIG.ZOHO_URL) + "' target='ringcx-zoho' rel='noopener'>Open Assist ↗</a>" : "") + "</td></tr>" };
+    });
   }
 
   // ---------------- ES tickets waiting on L1 (Jira, via the "escalations" function) ----------------
@@ -3790,6 +3858,7 @@
   }
   function renderAgents(e, agents) {
     var me = myAgentId(), lineup = queueLineup();
+    loadZoho(false);
     var off = loggedOutAgents();
     var rows = agents.map(function (a) {
       var d = dayStats(a), w = watchFor(a, e);
@@ -3847,7 +3916,7 @@
       }
       var a = r.a, cls = (String(a.agentId) === me ? "me " : "") + (r.w ? "flag-" + r.w.lvl : "");
       return "<tr class='" + cls + "' data-arow='" + esc(rowKey(String(a.agentId), r.name)) + "'>" +
-        "<td>" + nameLink(String(a.agentId), r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + ((isSupervisor(a) || treatedAsSupervisor(a)) && !hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
+        "<td>" + nameLink(String(a.agentId), r.name) + zohoTag(r.name) + (String(a.agentId) === me ? " <span class='tiny muted'>(you)</span>" : "") + ((isSupervisor(a) || treatedAsSupervisor(a)) && !hasSupTag(r.name) ? " <span class='chip info'>Supervisor</span>" : "") + "</td>" +
         "<td>" + stateHtml(a) + lineupChip(a, lineup) + "</td>" +
         "<td class='num'>" + count(a.stateTime || 0) + "</td>" +
         "<td>" + esc(r.queue) + "</td>" +
