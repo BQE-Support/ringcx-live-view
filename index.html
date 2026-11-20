@@ -2370,6 +2370,31 @@
     if (o.to) return "Reassigned to " + o.to;
     return h ? "Not found" : "Looking…";
   }
+  // Copy links per person on PTO (2026-11-20): their tickets still waiting, as links to paste into Teams or an email.
+  // The section redraws every second, so "Copied" is remembered for a moment (ptoCopied) and drawn by the button itself.
+  var ptoCopy = {}, ptoCopied = {};
+  function ptoCopyBtn(g, zd, es) {
+    var key = normName(g.name);
+    var rows = g.rows.filter(function (o) { return o.res === "due" || o.res === "late"; }).map(function (o) {
+      return { url: (o.x.src === "es" ? es : zd) + o.x.id, label: o.x.src === "es" ? String(o.x.id) : "#" + o.x.id, subject: o.x.subject || "", state: o.x.label,
+        status: o.res === "late" ? "late" : "due " + fmtClock(o.dl) };
+    });
+    ptoCopy[key] = { name: g.name, rows: rows };
+    if (!rows.length) return "";
+    var done = ptoCopied[key] && Date.now() < ptoCopied[key];
+    return "<div><button class='btn' style='margin-top:4px;padding:2px 8px;font-size:11px' data-pto-copy='" + esc(key) + "' title='Copy " + esc(g.name) + "&#39;s waiting tickets as links, to paste into Teams or an email'" + (done ? " disabled" : "") + ">" + (done ? "Copied ✓" : "Copy links") + "</button></div>";
+  }
+  function ptoCopyLinks(btn, key) {
+    var c = ptoCopy[key]; if (!c || !c.rows.length) return;
+    var n = c.rows.length, head = c.name + " is out today: " + n + " ticket" + (n === 1 ? "" : "s") + " still waiting";
+    var html = "<p><b>" + esc(c.name) + "</b> is out today: " + n + " ticket" + (n === 1 ? "" : "s") + " still waiting</p><ul>", text = head + "\n";
+    c.rows.forEach(function (x) {
+      html += "<li><a href='" + esc(x.url) + "'>" + esc(x.label) + "</a> " + esc(x.subject) + " (" + esc(x.state) + ", " + esc(x.status) + ")</li>";
+      text += "  " + x.label + " " + x.subject + " (" + x.state + ", " + x.status + ") " + x.url + "\n";
+    });
+    ptoCopied[key] = Date.now() + 1800; setTimeout(renderPtoCover, 1900);
+    copyRich(btn, html + "</ul>", text);
+  }
   var PTO_RESULT = { due: ["muted", "due"], late: ["hot", "late, still waiting"], handled: ["good", "handled in time"], handledlate: ["warmn", "handled late"] };
   function renderPtoCover() {
     var body = $("ptoCoverBody"); if (!body) return;
@@ -2388,11 +2413,12 @@
       (count("due") + count("late")) + " still waiting · " + (count("late") + count("handledlate")) + " late" + (waits.at ? " · as of " + fmtClock(waits.at) : "");
     var zd = "https://bqe.zendesk.com/agent/tickets/", es = "https://bqetrack.atlassian.net/browse/";
     var when = function (ms) { return esc(ymdLabel(ymdOfMs(ms))) + " " + fmtClock(ms); };
+    ptoCopy = {};
     body.className = "";
     body.innerHTML = groups.length ? "<div class='table-wrap'><table><thead><tr><th>On PTO</th><th>Ticket</th><th>State</th><th>Waiting since</th><th>Due (end of their shift)</th><th>Result</th><th>Handled by</th><th>Subject</th></tr></thead><tbody>" +
       groups.map(function (g) {
         var who = "<b>" + esc(g.name) + "</b><div class='tiny muted'>" + esc(g.type) + (g.hours ? " · " + esc(g.hours) + "h" : "") +
-          (g.end > ptYmd(0) ? " · through " + esc(ymdLabel(g.end)) : "") + "</div>";
+          (g.end > ptYmd(0) ? " · through " + esc(ymdLabel(g.end)) : "") + "</div>" + ptoCopyBtn(g, zd, es);
         if (!g.rows.length) return "<tr><td class='wrap'>" + who + "</td><td colspan='7' class='muted'>Nothing waiting on them today.</td></tr>";
         return g.rows.map(function (o, i) {
           var x = o.x, r = PTO_RESULT[o.res], hb = ptoHandledBy(o);
@@ -4009,6 +4035,8 @@
     if (ev.target.closest("a.alert[href='#esPanel']")) $("esPanel").open = true;   // jump to the ES section, unfolded
     if (ev.target.closest("a.alert[href='#ceoPanel']")) $("ceoPanel").open = true;
     if (ev.target.closest("a.alert[href='#ptoTicketsPanel']")) $("ptoTicketsPanel").open = true;
+    var ptc = ev.target.closest("[data-pto-copy]");
+    if (ptc) { ev.preventDefault(); ptoCopyLinks(ptc, ptc.getAttribute("data-pto-copy")); return; }
     var tkc = ev.target.closest("[data-tk-copy]");
     if (tkc) { ev.preventDefault(); tkCopyLinks(tkc, tkc.getAttribute("data-tk-copy")); return; }
     var esb = ev.target.closest("[data-es-copy]");
