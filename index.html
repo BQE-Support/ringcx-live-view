@@ -631,6 +631,10 @@
     LOGIN_EXCLUDE: ["Erasmo Robles", "Ricardo Andrade"],
     // L2s' logins are shown only to managers (2026-10-15). L2 list confirmed (the roster tier lookup was out of date).
     MANAGER_IDS: ["3299715", "3301145", "3301139"],   // the three managers
+    // Conflict of interest (2026-11-23): viewer's RingCX agent ID -> people they don't see alerts or notes for
+    // (Victor / Andrea Lopez, Daniel Suyo / Vina Cabalo). Hidden: Call avoidance watch, What to Watch, Flagged today,
+    // lunch flags, supervisor reviews and Logins notes. The reviews function drops their notes on the server too.
+    CONFLICTS: { "3301135": ["Andrea Lopez"], "3301140": ["Vina Cabalo"] },
     HEATMAP_IDS: ["3299715"],   // who sees the Heatmap button; the "heatmap" function has its own VIEWERS list, keep them in sync
     NOT_RANKED_IDS: ["3301130"],                      // never ranked in Performance or Previous days
     // Zendesk / Jira email for people whose Zendesk name doesn't match their RingCX name (ticket waits, ES, CSAT, work).
@@ -1097,6 +1101,7 @@
 
     var skip = {};
     CONFIG.LUNCH_EXCLUDE.forEach(function (x) { skip[normName(x)] = 1; });
+    (CONFIG.CONFLICTS[String(myAgentId() || "")] || []).forEach(function (x) { skip[normName(x)] = 1; });
     var atLunch = [], due = [], overdue = [], next = [], done = 0, unknown = 0;
     var histByName = {};
     Object.keys(hist.agents).forEach(function (id) { var hh = hist.agents[id]; if (hh.name) histByName[normName(hh.name)] = hh; });
@@ -1212,7 +1217,7 @@
     if (!pto.schedule) return [];
     var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5), sched = {};
     pto.schedule.forEach(function (s) { sched[normName(s.name)] = s; });
-    return data.agents.filter(function (a) { return !isSupervisorName(fullName(a), isSupervisor(a)); }).map(function (a) {
+    return data.agents.filter(function (a) { return !isSupervisorName(fullName(a), isSupervisor(a)) && !isConflict(fullName(a)); }).map(function (a) {
       var s = sched[normName(fullName(a))];
       if (!s || s.shift === null || s.days.indexOf(n.day) < 0) return null;
       var end = s.shift + CONFIG.SHIFT_HOURS * 60;
@@ -1240,6 +1245,12 @@
       supNames = set; renderLogins(elapsed());
     } catch (x) { /* not critical: supervisors seen today are still left out */ }
     finally { supLoading = false; }
+  }
+  function isConflict(name) {
+    var list = (CONFIG.CONFLICTS || {})[String(myAgentId() || "")];
+    if (!list) return false;
+    var k = normName(name);
+    return list.some(function (x) { return normName(x) === k; });
   }
   function isManagerViewer() { return (CONFIG.MANAGER_IDS || []).indexOf(String(myAgentId() || "")) >= 0; }
   function isLoginExcluded(name) {
@@ -1371,7 +1382,7 @@
     function isLate(r) { return r.late !== null && r.late > CONFIG.LOGIN_GRACE_MIN && (r.conf === "confirmed" || r.conf === "zd" || r.missing); }
     // Signed in LOGIN_EARLY_WARN_MIN+ before the scheduled start (confirmed times only).
     function isEarly(r) { return r.late !== null && r.start !== null && -r.late >= CONFIG.LOGIN_EARLY_WARN_MIN && (r.conf === "confirmed" || r.conf === "zd"); }
-    loginsEarly = rows.filter(function (r) { return !r.sup && isEarly(r); });
+    loginsEarly = rows.filter(function (r) { return !r.sup && isEarly(r) && !isConflict(r.name); });
     body.innerHTML = rows.map(function (r, i) {
       var group = r.sup && (i === 0 || !rows[i - 1].sup)
         ? "<tr><td colspan='8' style='padding-top:14px'><div class='board-h' style='margin:0'>Supervisors</div></td></tr>" : "";
@@ -1727,6 +1738,7 @@
     var sups = data.agents.filter(function (a) { return !inAgentSection(a); }).filter(inQueue);
     var all = agents.map(function (a) { return { a: a, w: watchFor(a, e) }; }).filter(function (x) { return x.w; })
       .concat(offlineAgents().filter(function (x) { return inQueue(fullName(x.a)); }))
+      .filter(function (x) { return !isConflict(fullName(x.a)); })
       .sort(function (x, y) { return y.w.score - x.w.score; });
     // Reviewed entries are snoozed for an hour (or until a new signal); everything else counts as flagged.
     var watch = [], snoozed = [];
@@ -3461,7 +3473,7 @@
   async function loadReviews() {
     if (reviews.loading || !session || !CONFIG.SUPABASE_URL) return;
     reviews.loading = true;
-    try { var j = await reviewsApi("GET"); reviews.list = j.reviews || []; reviews.flags = j.flags || []; reviews.at = Date.now(); reviews.err = null; }
+    try { var j = await reviewsApi("GET"); reviews.list = (j.reviews || []).filter(function (r) { return !isConflict(r.agent_key); }); reviews.flags = (j.flags || []).filter(function (r) { return !isConflict(r.agent_key); }); reviews.at = Date.now(); reviews.err = null; }
     catch (x) { reviews.err = x.message; }
     finally { reviews.loading = false; if (data.fetchedAt) render(); }
   }
