@@ -821,6 +821,7 @@
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
       $("ptoSub").textContent = "";
+      clearTimeout(pto.retry); pto.retry = setTimeout(loadPto, 30 * 1000);
     } finally { pto.loading = false; }
   }
   function renderPto(j) {
@@ -4200,7 +4201,8 @@
   var ptoTimer = null;
   function showLive() {
     $("signinView").hidden = true; $("liveView").hidden = false; startPolling(); startPresence();
-    // Time off: the Supabase function reads Smartsheet at most every 30 min, so ask on the same cadence.
+    // Time off: served from a server snapshot (pto function, refreshed by pg_cron on the ZD trigger schedule), so
+    // a load is only a database read. A failed load retries after 30s (see loadPto).
     loadPto(); clearInterval(ptoTimer); ptoTimer = setInterval(loadPto, 30 * 60 * 1000);
     // Reviews: on start, every 2 minutes as a backstop, and instantly when another viewer changes one.
     loadReviews(); setInterval(loadReviews, 2 * 60 * 1000);
