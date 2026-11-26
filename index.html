@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3454D1">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
-<script src="scoring.js?v=7.15"></script>   <!-- scorecard rules (docs/_shared/scoring.js); bump ?v= when it changes -->
+<script src="scoring.js?v=7.16"></script>   <!-- scorecard rules (docs/_shared/scoring.js); bump ?v= when it changes -->
 <style>
   :root {
     --bg: #F5F6F9; --surface: #FFFFFF; --surface-alt: #ECEFF5; --border: #DDE1EA;
@@ -412,7 +412,7 @@
       </details>
 
       <details class="panel collapsible" id="ptoTicketsPanel">
-        <summary class="section-title">Tickets of people on PTO today <span class="sub" id="ptoCoverSub"></span></summary>
+        <summary class="section-title">Tickets of people on PTO or holiday today <span class="sub" id="ptoCoverSub"></span></summary>
         <div id="ptoCoverBody" class="tiny muted">Loading…</div>
       </details>
 
@@ -501,7 +501,7 @@
           <li>The page checks for a newer published version every 5 minutes, and whenever you come back to the window. If there is one, it reloads itself. You stay signed in and keep your settings and history.</li>
         </ul>
       </details>
-      <footer>BQE Software · Internal · RingCX Live View · Version 7.15<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
+      <footer>BQE Software · Internal · RingCX Live View · Version 7.16<span id="rollbackWrap" hidden> · <a href="#" id="rollbackBtn" title="Put an earlier published version of this page back">Roll back</a></span></footer>
       <div id="rollbackBox" class="panel" hidden style="max-width:760px;margin:8px auto"></div>
       <dialog class="week-report" id="weekReport">
         <div class="wr-head">
@@ -822,6 +822,10 @@
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
       pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.holidays = j.holidays || []; pto.office = {}; (j.schedule || []).forEach(function (s) { pto.office[normName(s.name)] = s.office || null; }); pto.schedule =(j.schedule || []).filter(function (s) { return !formerSupport("", s.name); }).map(dstAdjust).map(scheduleOverride);
+      // Everyone whose office has a holiday today also counts as out in the "On PTO" ticket section (kept apart from
+      // pto.rows so PTO deadlines and the Time off list stay as they were).
+      pto.holidayRows = (pto.schedule || []).filter(function (s) { return holidayOff(s.name); })
+        .map(function (s) { return { name: s.name, type: "Holiday", start: j.today, end: j.today, hours: null }; });
       renderPto(j); renderLunch(elapsed()); renderLogins(elapsed());
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
@@ -2437,7 +2441,7 @@
     var when = function (ms) { return esc(ymdLabel(ymdOfMs(ms))) + " " + fmtClock(ms); };
     ptoCopy = {};
     body.className = "";
-    body.innerHTML = groups.length ? "<div class='table-wrap'><table><thead><tr><th>On PTO</th><th>Ticket</th><th>State</th><th>Waiting since</th><th>Due (end of their shift)</th><th>Result</th><th>Handled by</th><th>Subject</th></tr></thead><tbody>" +
+    body.innerHTML = groups.length ? "<div class='table-wrap'><table><thead><tr><th>On PTO / holiday</th><th>Ticket</th><th>State</th><th>Waiting since</th><th>Due (end of their shift)</th><th>Result</th><th>Handled by</th><th>Subject</th></tr></thead><tbody>" +
       groups.map(function (g) {
         var who = "<b>" + esc(g.name) + "</b><div class='tiny muted'>" + esc(g.type) + (g.hours ? " · " + esc(g.hours) + "h" : "") +
           (g.end > ptYmd(0) ? " · through " + esc(ymdLabel(g.end)) : "") + "</div>" + ptoCopyBtn(g, zd, es);
@@ -2453,7 +2457,7 @@
             "<td class='wrap' style='min-width:220px'>" + esc(x.subject || "") + "</td></tr>";
         }).join("");
       }).join("") + "</tbody></table></div>"
-      : "<div class='tiny muted'>Nobody is on PTO today.</div>";
+      : "<div class='tiny muted'>Nobody is on PTO or holiday today.</div>";
   }
 
   // ---------------- KPI drill-down lists ----------------

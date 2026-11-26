@@ -697,7 +697,8 @@
     function ptoCoverage(asOf) {
       if (!S.waits.rows || !S.pto.rows) return null;
       var today = ymdOfMs(asOf), midnight = Date.parse(ptMidnightIsoOf(today)), seen = {};
-      return S.pto.rows.filter(function (p) {
+      // Holiday people (their office's holiday today, from the Smartsheet calendar) come after real PTO rows, so a named PTO row wins.
+      return S.pto.rows.concat(S.pto.holidayRows || []).filter(function (p) {
         var k = normName(p.name);
         if (!k || p.start > today || p.end < today || seen[k]) return false;
         return (seen[k] = true);
