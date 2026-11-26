@@ -821,7 +821,7 @@
       var r = await fetch(CONFIG.SUPABASE_URL + "/functions/v1/pto", { headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "x-rcx-token": session.rcxAccess } });
       var j = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
-      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.schedule = (j.schedule || []).filter(function (s) { return !formerSupport("", s.name); }).map(dstAdjust).map(scheduleOverride);
+      pto.at = Date.now(); pto.today = j.today; pto.rows = j.rows || []; pto.holidays = j.holidays || []; pto.office = {}; (j.schedule || []).forEach(function (s) { pto.office[normName(s.name)] = s.office || null; }); pto.schedule =(j.schedule || []).filter(function (s) { return !formerSupport("", s.name); }).map(dstAdjust).map(scheduleOverride);
       renderPto(j); renderLunch(elapsed()); renderLogins(elapsed());
     } catch (e) {
       $("ptoList").innerHTML = "<span class='muted'>" + esc(/SMARTSHEET_TOKEN/.test(e.message) ? "Not connected yet: the Smartsheet token still needs to be added in Supabase." : "Couldn't load time off (" + e.message + ").") + "</span>";
@@ -1164,6 +1164,14 @@
   // (start .. start + SHIFT_HOURS), not logged in to RingCX, not on PTO today, not inside their lunch
   // window, and have been out OFFLINE_MIN+ minutes (or never logged in, 15+ min after their start).
   // Supervisors are left out. Returns watch entries shaped like the live ones ({ a, w }).
+  // Region holiday today (Smartsheet PTO calendar rows like "US Holiday" with no person named): everyone in that office is off,
+  // like PTO. "company" holidays cover everybody. Needs the pto function with the holidays field; until then nobody is excused.
+  function holidayOff(name) {
+    var h = pto.holidays || [];
+    if (!h.length) return false;
+    return h.indexOf("company") >= 0 || h.indexOf((pto.office || {})[normName(name)]) >= 0;
+  }
+
   function offlineAgents() {
     if (!pto.schedule || !supNames || !dataFresh()) return [];   // need the roster, the supervisor list and today's live list first
     var n = nowIn("America/Los_Angeles"), nowMin = +n.hm.slice(0, 2) * 60 + +n.hm.slice(3, 5);
@@ -1174,7 +1182,7 @@
     var list = [];
     pto.schedule.forEach(function (s) {
       var k = normName(s.name);
-      if (live[k] || out[k] || s.shift === null || s.days.indexOf(n.day) < 0) return;
+      if (live[k] || out[k] || holidayOff(s.name) || s.shift === null || s.days.indexOf(n.day) < 0) return;
       if (isSupervisorName(s.name, false) || CONFIG.LUNCH_EXCLUDE.some(function (x) { return normName(x) === k; })) return;
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN || nowMin >= s.shift + CONFIG.SHIFT_HOURS * 60) return;
       var seen = byName[k], offSec, reason;
@@ -1329,7 +1337,7 @@
     // Scheduled today, not on PTO, past start + grace, never seen logged in.
     (pto.schedule || []).forEach(function (s) {
       var k = normName(s.name);
-      if (seenNames[k] || out[k] || s.shift === null || s.days.indexOf(n.day) < 0) return;
+      if (seenNames[k] || out[k] || holidayOff(s.name) || s.shift === null || s.days.indexOf(n.day) < 0) return;
       if (!supNames || isLoginExcluded(s.name)) return;   // wait for the supervisor list so the row lands in the right group
       if (CONFIG.LUNCH_EXCLUDE.some(function (x) { return normName(x) === k; })) return;
       if (nowMin < s.shift + CONFIG.LOGIN_LATE_CRIT_MIN) return;
