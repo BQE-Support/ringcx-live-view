@@ -316,6 +316,19 @@
       </div>
     </div>
 
+
+    <details class="panel" id="priorPanel" hidden style="margin-top:12px;">
+      <summary class="section-title" style="font-size:16px; cursor:pointer;">Earlier calls: <span id="priorRange"></span> (RingCentral call log)</summary>
+      <div class="section-note" style="margin:8px 0 10px;">Before RingCX history begins. This is the RingCentral platform call log, so it counts every call on the company lines, not only the support queue, and has no queue or agent detail. It is a separate series and is not mixed into the numbers above. Average calls per slot, Pacific Time.</div>
+      <div class="filters" style="margin-bottom:10px;">
+        <button class="pill-toggle prior-dir" data-pdir="all" aria-pressed="true">All</button>
+        <button class="pill-toggle prior-dir" data-pdir="Inbound" aria-pressed="false">Inbound</button>
+        <button class="pill-toggle prior-dir" data-pdir="Outbound" aria-pressed="false">Outbound</button>
+        <span class="channel-note" id="priorNote"></span>
+      </div>
+      <div class="heatmatrix" id="priorMatrix"></div>
+    </details>
+
     <div>
       <div class="section-head">
         <h2 class="section-title">Day &times; Hour Agent Coverage Heatmap</h2>
@@ -2223,6 +2236,49 @@ window.startHeatmap = function (S) {
     var blob = new Blob([coverageRowsToCsv(drillCoverageRows)], { type: "text/csv;charset=utf-8;" });
     downloadBlob(blob, "heatmap-coverage-slot-" + state.channel + ".csv");
   });
+
+  // Separate series: calls before hm_calls begins, from the RingCentral platform call log (snapshot key rc_prior,
+  // rows [date, weekday 0=Sun, hour, direction, calls, answered]). Self-contained; does not touch ROWS or state.
+  (function renderPriorSeries() {
+    var P = S.rc_prior;
+    if (!P || !P.length) return;
+    var panel = document.getElementById("priorPanel");
+    var dates = {}, first = P[0][0], last = P[0][0];
+    P.forEach(function (r) { dates[r[0]] = 1; if (r[0] < first) first = r[0]; if (r[0] > last) last = r[0]; });
+    var dayCount = [0, 0, 0, 0, 0, 0, 0];
+    Object.keys(dates).forEach(function (d) { dayCount[new Date(d + "T12:00:00Z").getUTCDay()]++; });
+    document.getElementById("priorRange").textContent = first + " to " + last;
+    panel.hidden = false;
+    var pdir = "all";
+    function draw() {
+      var sum = [], total = 0;
+      for (var d = 0; d < 7; d++) { sum.push(new Array(24).fill(0)); }
+      P.forEach(function (r) { if (pdir === "all" || r[3] === pdir) { sum[r[1]][r[2]] += r[4]; total += r[4]; } });
+      var max = FIXED_MAX_BY_METRIC.volume || 1;
+      var html = '<div class="matrix-row matrix-header"><div class="matrix-corner"></div>';
+      for (var h = 0; h < 24; h++) html += '<div class="matrix-hourlabel">' + hourLabelShort(h) + '</div>';
+      html += '</div>';
+      for (var day = 0; day < 7; day++) {
+        html += '<div class="matrix-row"><div class="matrix-daylabel">' + DAY_NAMES[day] + '</div>';
+        for (var hr = 0; hr < 24; hr++) {
+          var v = dayCount[day] ? sum[day][hr] / dayCount[day] : 0;
+          html += '<div class="matrix-cell" title="' + DAY_NAMES[day] + ' ' + hourLabelShort(hr) + ': ' + v.toFixed(1) + ' calls on average" style="background:' +
+            heatColor(Math.min(v / max, 1)) + '">' + (v >= 0.05 ? v.toFixed(1) : "") + '</div>';
+        }
+        html += '</div>';
+      }
+      document.getElementById("priorMatrix").innerHTML = html;
+      document.getElementById("priorNote").textContent = total.toLocaleString() + " calls over " + Object.keys(dates).length + " days with calls";
+    }
+    panel.querySelectorAll(".prior-dir").forEach(function (b) {
+      b.addEventListener("click", function () {
+        pdir = b.getAttribute("data-pdir");
+        panel.querySelectorAll(".prior-dir").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+        draw();
+      });
+    });
+    draw();
+  })();
 
   renderUpcomingPto();
   render();
